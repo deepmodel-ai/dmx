@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv / virtualenv
+.venv/
+venv/
+.python-version
+
+# uv.lock is intentionally committed — do not add it here
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Linting / formatting
+.ruff_cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.whl
+*.tar.gz
+MANIFEST
+
+# Environment / secrets
+.env
+.env.*
