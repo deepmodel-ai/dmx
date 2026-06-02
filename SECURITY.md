@@ -10,7 +10,7 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/deepmodel/dmx/security/advisories/new).
+Report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/deepmodel-ai/dmx/security/advisories/new).
 
 Include:
 - Description of the vulnerability and its potential impact

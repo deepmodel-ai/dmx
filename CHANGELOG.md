@@ -25,5 +25,5 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`--skills-dir` / `--rules-dir`** CLI overrides and `DMX_SKILLS_DIR` / `DMX_RULES_DIR` env var overrides
 - **`create_app()`** internal extension API for the Deepmodel commercial layer
 
-[Unreleased]: https://github.com/deepmodel/dmx/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/deepmodel/dmx/releases/tag/v0.1.0
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/deepmodel-ai/dmx/releases/tag/v0.1.0

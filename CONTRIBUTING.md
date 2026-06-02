@@ -11,7 +11,7 @@ We use [CLA Assistant](https://cla-assistant.io) — it will prompt you to sign 
 ## Development setup
 
 ```bash
-git clone https://github.com/deepmodel/dmx.git
+git clone https://github.com/deepmodel-ai/dmx.git
 cd dmx
 uv sync --extra dev
 uv run pre-commit install  # optional but recommended
@@ -74,4 +74,4 @@ Rule body here (written as an instruction to the AI).
 
 ## Reporting bugs and feature requests
 
-Open a [GitHub issue](https://github.com/deepmodel/dmx/issues). For security issues, see [SECURITY.md](SECURITY.md).
+Open a [GitHub issue](https://github.com/deepmodel-ai/dmx/issues). For security issues, see [SECURITY.md](SECURITY.md).

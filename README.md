@@ -1,7 +1,7 @@
 # dmx
 
 [![PyPI](https://img.shields.io/pypi/v/deepmodel-dmx)](https://pypi.org/project/deepmodel-dmx/)
-[![Test](https://github.com/deepmodel/dmx/actions/workflows/test.yml/badge.svg)](https://github.com/deepmodel/dmx/actions/workflows/test.yml)
+[![Test](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml/badge.svg)](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 The official implementation of the [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — delivered as an MCP server for any AI IDE.
