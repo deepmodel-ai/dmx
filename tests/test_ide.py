@@ -63,9 +63,7 @@ class TestResolveIdeTargets:
         assert ides == ("claude",)
         assert source == "header"
 
-    def test_env_var_overrides_everything(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_var_overrides_everything(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DMX_IDE", "cursor")
         ides, source = resolve_ide_targets(["claude"], "copilot", "windsurf")
         assert ides == ("cursor",)
@@ -77,9 +75,7 @@ class TestResolveIdeTargets:
         assert "cursor" in ides
         assert source == "env"
 
-    def test_env_var_comma_separated(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_var_comma_separated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DMX_IDE", "cursor, claude")
         ides, source = resolve_ide_targets(None, None, None)
         assert set(ides) == {"cursor", "claude"}
@@ -150,23 +146,17 @@ def multi_rules() -> tuple[RuleDefinition, ...]:
 
 
 class TestEmitIdeRuleFiles:
-    def test_cursor_emits_mdc_file(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_cursor_emits_mdc_file(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         paths = {f.path for f in files}
         assert ".cursor/rules/system-prompt.mdc" in paths
 
-    def test_cursor_emits_agents_md(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_cursor_emits_agents_md(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         paths = {f.path for f in files}
         assert ".cursor/AGENTS.md" in paths
 
-    def test_all_files_have_ide_cursor(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_all_files_have_ide_cursor(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         assert all(f.ide == "cursor" for f in files)
 
@@ -178,31 +168,23 @@ class TestEmitIdeRuleFiles:
         assert "alwaysApply: true" in mdc.content
         assert "Always-apply engineering persona." in mdc.content
 
-    def test_mdc_content_contains_body(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_mdc_content_contains_body(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         mdc = next(f for f in files if f.path.endswith(".mdc"))
         assert "staff-level pair programmer" in mdc.content
 
-    def test_agents_md_wrapped_in_markers(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_agents_md_wrapped_in_markers(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         agents = next(f for f in files if f.path == ".cursor/AGENTS.md")
         assert DMX_MARKER_START in agents.content
         assert DMX_MARKER_END in agents.content
 
-    def test_agents_md_lists_rule_name(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_agents_md_lists_rule_name(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor",))
         agents = next(f for f in files if f.path == ".cursor/AGENTS.md")
         assert "system-prompt" in agents.content
 
-    def test_unknown_ide_emits_no_files(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_unknown_ide_emits_no_files(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("unknownide",))
         assert files == ()
 
@@ -224,9 +206,7 @@ class TestEmitIdeRuleFiles:
         # Summary file still written even with no rules
         assert DMX_MARKER_START in agents.content
 
-    def test_multiple_ides_emits_for_each(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_multiple_ides_emits_for_each(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("cursor", "unknownide"))
         cursor_files = [f for f in files if f.ide == "cursor"]
         assert len(cursor_files) >= 2
@@ -256,29 +236,21 @@ class TestEmitIdeRuleFiles:
 
 
 class TestEmitClaudeRules:
-    def test_emits_per_rule_files(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_emits_per_rule_files(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("claude",))
         paths = {f.path for f in files}
         assert ".claude/rules/system-prompt.md" in paths
 
-    def test_emits_claude_md_summary(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_emits_claude_md_summary(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("claude",))
         paths = {f.path for f in files}
         assert "CLAUDE.md" in paths
 
-    def test_all_files_have_ide_claude(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_all_files_have_ide_claude(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("claude",))
         assert all(f.ide == "claude" for f in files)
 
-    def test_per_rule_file_is_plain_body(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_per_rule_file_is_plain_body(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         """Claude per-rule files must NOT include YAML frontmatter."""
         files = emit_ide_rule_files(sample_rules, ("claude",))
         rule_file = next(f for f in files if f.path.endswith(".md") and "rules" in f.path)
@@ -293,17 +265,13 @@ class TestEmitClaudeRules:
         rule_file = next(f for f in files if ".claude/rules" in f.path)
         assert rule_file.content.endswith("\n")
 
-    def test_claude_md_wrapped_in_markers(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_claude_md_wrapped_in_markers(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("claude",))
         summary = next(f for f in files if f.path == "CLAUDE.md")
         assert DMX_MARKER_START in summary.content
         assert DMX_MARKER_END in summary.content
 
-    def test_claude_md_lists_rule_names(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_claude_md_lists_rule_names(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(multi_rules, ("claude",))
         summary = next(f for f in files if f.path == "CLAUDE.md")
         assert "system-prompt" in summary.content
@@ -339,23 +307,17 @@ class TestEmitClaudeRules:
 
 
 class TestEmitCopilotRules:
-    def test_emits_copilot_instructions(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_emits_copilot_instructions(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("copilot",))
         paths = {f.path for f in files}
         assert ".github/copilot-instructions.md" in paths
 
-    def test_no_per_rule_files(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_no_per_rule_files(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         """Copilot has no per-rule files — only one merged file."""
         files = emit_ide_rule_files(multi_rules, ("copilot",))
         assert len(files) == 1
 
-    def test_all_files_have_ide_copilot(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_all_files_have_ide_copilot(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("copilot",))
         assert all(f.ide == "copilot" for f in files)
 
@@ -367,9 +329,7 @@ class TestEmitCopilotRules:
         assert DMX_MARKER_START in instructions.content
         assert DMX_MARKER_END in instructions.content
 
-    def test_instructions_list_rule_names(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_instructions_list_rule_names(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(multi_rules, ("copilot",))
         assert "system-prompt" in files[0].content
         assert "git-workflow" in files[0].content
@@ -394,29 +354,21 @@ class TestEmitCopilotRules:
 
 
 class TestEmitAntigravityRules:
-    def test_emits_per_rule_files(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_emits_per_rule_files(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("antigravity",))
         paths = {f.path for f in files}
         assert ".agents/rules/system-prompt.md" in paths
 
-    def test_no_summary_file(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_no_summary_file(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         """Antigravity has no merged summary file."""
         files = emit_ide_rule_files(multi_rules, ("antigravity",))
         assert len(files) == len(multi_rules)
 
-    def test_all_files_have_ide_antigravity(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_all_files_have_ide_antigravity(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("antigravity",))
         assert all(f.ide == "antigravity" for f in files)
 
-    def test_per_rule_file_is_plain_body(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_per_rule_file_is_plain_body(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         """Antigravity per-rule files are plain Markdown — no frontmatter."""
         files = emit_ide_rule_files(sample_rules, ("antigravity",))
         assert len(files) == 1
@@ -424,9 +376,7 @@ class TestEmitAntigravityRules:
         assert "alwaysApply" not in files[0].content
         assert "# Persona" in files[0].content
 
-    def test_no_marker_content(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_no_marker_content(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         """Antigravity does not produce summary/marker files."""
         files = emit_ide_rule_files(sample_rules, ("antigravity",))
         for f in files:
@@ -457,37 +407,27 @@ class TestEmitAntigravityRules:
 
 
 class TestEmitAgentsRules:
-    def test_emits_agents_md(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_emits_agents_md(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("agents",))
         paths = {f.path for f in files}
         assert "AGENTS.md" in paths
 
-    def test_no_per_rule_files(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_no_per_rule_files(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         """Agents emitter produces only the root AGENTS.md."""
         files = emit_ide_rule_files(multi_rules, ("agents",))
         assert len(files) == 1
 
-    def test_all_files_have_ide_agents(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_all_files_have_ide_agents(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("agents",))
         assert all(f.ide == "agents" for f in files)
 
-    def test_agents_md_wrapped_in_markers(
-        self, sample_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_agents_md_wrapped_in_markers(self, sample_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(sample_rules, ("agents",))
         agents_md = files[0]
         assert DMX_MARKER_START in agents_md.content
         assert DMX_MARKER_END in agents_md.content
 
-    def test_agents_md_lists_rule_names(
-        self, multi_rules: tuple[RuleDefinition, ...]
-    ) -> None:
+    def test_agents_md_lists_rule_names(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
         files = emit_ide_rule_files(multi_rules, ("agents",))
         assert "system-prompt" in files[0].content
         assert "git-workflow" in files[0].content
@@ -561,29 +501,19 @@ class TestMarkerSummaryStructure:
 class TestRuleIdesFiltering:
     def test_empty_ides_rule_included_for_all(self) -> None:
         """Rules with ides=() are emitted for every IDE target."""
-        rules = (
-            RuleDefinition(name="all-rule", title="All", description="x", ides=()),
-        )
+        rules = (RuleDefinition(name="all-rule", title="All", description="x", ides=()),)
         files = emit_ide_rule_files(rules, ("cursor",))
         paths = {f.path for f in files}
         assert ".cursor/rules/all-rule.mdc" in paths
 
     def test_cursor_only_rule_excluded_for_unknown_ide(self) -> None:
-        rules = (
-            RuleDefinition(
-                name="cursor-rule", title="C", description="x", ides=("cursor",)
-            ),
-        )
+        rules = (RuleDefinition(name="cursor-rule", title="C", description="x", ides=("cursor",)),)
         # 'unknownide' has no emitter; even if it did, this rule targets cursor only.
         files = emit_ide_rule_files(rules, ("unknownide",))
         assert files == ()
 
     def test_rule_with_matching_ide_is_included(self) -> None:
-        rules = (
-            RuleDefinition(
-                name="cursor-rule", title="C", description="x", ides=("cursor",)
-            ),
-        )
+        rules = (RuleDefinition(name="cursor-rule", title="C", description="x", ides=("cursor",)),)
         files = emit_ide_rule_files(rules, ("cursor",))
         paths = {f.path for f in files}
         assert ".cursor/rules/cursor-rule.mdc" in paths
@@ -598,10 +528,6 @@ class TestRuleIdesFiltering:
         assert all("cursor-only" not in f.path for f in files)
 
     def test_claude_only_rule_excluded_for_cursor(self) -> None:
-        rules = (
-            RuleDefinition(
-                name="claude-only", title="C", description="x", ides=("claude",)
-            ),
-        )
+        rules = (RuleDefinition(name="claude-only", title="C", description="x", ides=("claude",)),)
         files = emit_ide_rule_files(rules, ("cursor",))
         assert all("claude-only" not in f.path for f in files)

@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
-
 
 # ---------------------------------------------------------------------------
 # Helpers: _extract_client_name
@@ -202,7 +197,6 @@ class TestDetectInvokingIde:
     @pytest.mark.asyncio
     async def test_detects_cursor_from_client_info(self) -> None:
         import mcp.types  # noqa: PLC0415
-
         from fastmcp import Client  # noqa: PLC0415
 
         from dmx.server import create_app  # noqa: PLC0415
@@ -217,7 +211,6 @@ class TestDetectInvokingIde:
     @pytest.mark.asyncio
     async def test_detects_claude_from_client_info(self) -> None:
         import mcp.types  # noqa: PLC0415
-
         from fastmcp import Client  # noqa: PLC0415
 
         from dmx.server import create_app  # noqa: PLC0415
@@ -230,11 +223,8 @@ class TestDetectInvokingIde:
         assert "claude" in result.data["ides"]
 
     @pytest.mark.asyncio
-    async def test_env_var_overrides_client_info(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_env_var_overrides_client_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import mcp.types  # noqa: PLC0415
-
         from fastmcp import Client  # noqa: PLC0415
 
         from dmx.server import create_app  # noqa: PLC0415
@@ -250,7 +240,6 @@ class TestDetectInvokingIde:
     @pytest.mark.asyncio
     async def test_hint_present_on_success(self) -> None:
         import mcp.types  # noqa: PLC0415
-
         from fastmcp import Client  # noqa: PLC0415
 
         from dmx.server import create_app  # noqa: PLC0415
@@ -356,7 +345,7 @@ class TestSetupIdeRules:
             )
         paths = {f["path"] for f in result.data["files"]}
         assert all(p.startswith(".agents/rules/") for p in paths)
-        assert not any("AGENTS.md" == p for p in paths)
+        assert not any(p == "AGENTS.md" for p in paths)
 
     @pytest.mark.asyncio
     async def test_agents_returns_only_agents_md(self) -> None:
@@ -482,7 +471,6 @@ class TestSetupIdeRules:
     @pytest.mark.asyncio
     async def test_ide_detected_from_client_info(self) -> None:
         import mcp.types  # noqa: PLC0415
-
         from fastmcp import Client  # noqa: PLC0415
 
         from dmx.server import create_app  # noqa: PLC0415

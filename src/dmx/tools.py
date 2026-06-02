@@ -146,10 +146,7 @@ def register_tools(app: FastMCP, rules: tuple[RuleDefinition, ...]) -> None:
                 ),
             }
 
-        files = [
-            {"path": f.path, "content": f.content, "ide": f.ide}
-            for f in rule_files
-        ]
+        files = [{"path": f.path, "content": f.content, "ide": f.ide} for f in rule_files]
 
         notes = (
             f"Write each file to <workspace_root>/<path>. "
@@ -241,8 +238,7 @@ async def _resolve_workspace_root(ctx: Context, explicit: str | None) -> Path:
 
     cwd = Path(os.getcwd())
     logger.warning(
-        "workspace_root not provided and MCP roots unavailable; "
-        "falling back to cwd: %s",
+        "workspace_root not provided and MCP roots unavailable; falling back to cwd: %s",
         cwd,
     )
     return cwd

@@ -86,9 +86,7 @@ class TestLoadSkills:
     def test_malformed_frontmatter_is_skipped(self, tmp_path: Path) -> None:
         d = tmp_path / "skills"
         d.mkdir()
-        (d / "bad-skill.md").write_text(
-            "---\n: bad yaml: [unclosed\n---\nbody\n", encoding="utf-8"
-        )
+        (d / "bad-skill.md").write_text("---\n: bad yaml: [unclosed\n---\nbody\n", encoding="utf-8")
         # Bad files are skipped with a warning; the directory load should not raise.
         skills = load_skills(d)
         assert skills == ()
@@ -165,9 +163,7 @@ class TestSkillDefinitionDataClass:
 
     def test_arguments_stored_as_tuple(self) -> None:
         arg = SkillArgument(name="a")
-        skill = SkillDefinition(
-            name="x", title="X", description="d", arguments=(arg,)
-        )
+        skill = SkillDefinition(name="x", title="X", description="d", arguments=(arg,))
         assert isinstance(skill.arguments, tuple)
         assert skill.arguments[0].name == "a"
 
@@ -189,9 +185,7 @@ class TestRuleDefinitionDataClass:
         """A YAML scalar `ides: cursor` must parse as ("cursor",), not individual chars."""
         d = tmp_path / "rules"
         d.mkdir()
-        (d / "my-rule.md").write_text(
-            "---\ntitle: R\nides: cursor\n---\nbody\n", encoding="utf-8"
-        )
+        (d / "my-rule.md").write_text("---\ntitle: R\nides: cursor\n---\nbody\n", encoding="utf-8")
         rules = load_rules(d)
         assert rules[0].ides == ("cursor",)
 

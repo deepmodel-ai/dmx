@@ -213,8 +213,7 @@ def _parse_skill(path: Path) -> SkillDefinition | None:
                 required=bool(arg.get("required", False)),
             )
             for arg in raw_args
-            if isinstance(arg, dict) and "name" in arg
-            and _valid_arg_name(name, arg["name"])
+            if isinstance(arg, dict) and "name" in arg and _valid_arg_name(name, arg["name"])
         )
 
         return SkillDefinition(
@@ -225,9 +224,7 @@ def _parse_skill(path: Path) -> SkillDefinition | None:
             body=post.content,
         )
     except Exception as exc:  # noqa: BLE001
-        raise SkillLoadError(
-            f"failed to load skill at {path}: {exc}", path=str(path)
-        ) from exc
+        raise SkillLoadError(f"failed to load skill at {path}: {exc}", path=str(path)) from exc
 
 
 def _parse_rule(path: Path) -> RuleDefinition | None:
@@ -260,6 +257,4 @@ def _parse_rule(path: Path) -> RuleDefinition | None:
             body=post.content,
         )
     except Exception as exc:  # noqa: BLE001
-        raise RuleLoadError(
-            f"failed to load rule at {path}: {exc}", path=str(path)
-        ) from exc
+        raise RuleLoadError(f"failed to load rule at {path}: {exc}", path=str(path)) from exc

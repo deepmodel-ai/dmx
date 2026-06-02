@@ -89,9 +89,7 @@ def _filter_rules_for_ide(
     return tuple(r for r in rules if not r.ides or ide in r.ides)
 
 
-def _emit_for_ide(
-    rules: tuple[RuleDefinition, ...], ide: str
-) -> tuple[IdeRuleFile, ...]:
+def _emit_for_ide(rules: tuple[RuleDefinition, ...], ide: str) -> tuple[IdeRuleFile, ...]:
     """Dispatch to the correct emitter for *ide*."""
     if ide == "cursor":
         return _emit_cursor(rules)
@@ -261,8 +259,6 @@ def _marker_summary(rules: tuple[RuleDefinition, ...]) -> str:
     replace the block on subsequent calls without clobbering user content that
     sits outside the markers.
     """
-    rule_lines = "\n".join(
-        f"- **{rule.name}**: {rule.description}" for rule in rules
-    )
+    rule_lines = "\n".join(f"- **{rule.name}**: {rule.description}" for rule in rules)
     body = f"# dmx — Active Rules\n\n{rule_lines}\n"
     return f"{DMX_MARKER_START}\n{body}{DMX_MARKER_END}\n"

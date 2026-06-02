@@ -156,26 +156,20 @@ class TestBuildHttpMiddleware:
 
         assert _build_http_middleware() == []
 
-    def test_require_api_key_false_returns_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_api_key_false_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("REQUIRE_API_KEY", "false")
         monkeypatch.setenv("MCP_API_KEY", "secret")
 
         assert _build_http_middleware() == []
 
-    def test_require_api_key_true_returns_middleware(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_api_key_true_returns_middleware(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("REQUIRE_API_KEY", "true")
         monkeypatch.setenv("MCP_API_KEY", "mysecret")
 
         result = _build_http_middleware()
         assert len(result) == 1
 
-    def test_require_api_key_case_insensitive(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_api_key_case_insensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("REQUIRE_API_KEY", "TRUE")
         monkeypatch.setenv("MCP_API_KEY", "key")
 
@@ -271,9 +265,7 @@ class TestBearerTokenMiddleware:
 
 
 class TestListSkillsCli:
-    def test_lists_bundled_skills(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lists_bundled_skills(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("DMX_SKILLS_DIR", raising=False)
         runner = CliRunner()
         result = runner.invoke(main, ["list-skills"])

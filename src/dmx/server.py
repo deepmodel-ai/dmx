@@ -96,12 +96,8 @@ def create_app(
     skills = load_skills(resolved_skills_dir)
     rules = load_rules(resolved_rules_dir)
 
-    logger.info(
-        "loaded %d skill(s) from %s", len(skills), resolved_skills_dir
-    )
-    logger.info(
-        "loaded %d rule(s) from %s", len(rules), resolved_rules_dir
-    )
+    logger.info("loaded %d skill(s) from %s", len(skills), resolved_skills_dir)
+    logger.info("loaded %d rule(s) from %s", len(rules), resolved_rules_dir)
 
     for skill in skills:
         _register_skill(app, skill)
@@ -132,8 +128,7 @@ async def watch_catalog(
         from watchfiles import awatch
     except ImportError as exc:
         raise ImportError(
-            "Hot-reload requires the 'watch' extra: "
-            "pip install 'deepmodel-dmx[watch]'"
+            "Hot-reload requires the 'watch' extra: pip install 'deepmodel-dmx[watch]'"
         ) from exc
 
     logger.info("watching %s and %s for changes", skills_dir, rules_dir)
@@ -144,8 +139,7 @@ async def watch_catalog(
 
         if not new_skills:
             logger.warning(
-                "reload would result in zero skills — skipping to preserve "
-                "last valid catalog"
+                "reload would result in zero skills — skipping to preserve last valid catalog"
             )
             continue
 
@@ -198,6 +192,7 @@ def _register_skill(app: FastMCP, skill: SkillDefinition) -> None:
         handler = _build_skill_handler(skill)
         app.prompt(name=skill.name, description=description)(handler)
     else:
+
         async def _handler_no_args() -> str:
             return skill.body
 
