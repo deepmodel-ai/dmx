@@ -1,0 +1,70 @@
+# serializer version: 1
+# name: TestEmitAgentsRules.test_snapshot_agents_md
+  '''
+  <!-- deepmodel:dmx:start workflow-v1 -->
+  # dmx — Active Rules
+  
+  - **system-prompt**: Always-apply engineering persona.
+  <!-- deepmodel:dmx:end -->
+  
+  '''
+# ---
+# name: TestEmitAntigravityRules.test_snapshot_antigravity_rule_file
+  '''
+  # Persona
+  
+  I am a staff-level pair programmer.
+  
+  '''
+# ---
+# name: TestEmitClaudeRules.test_snapshot_claude_md
+  '''
+  <!-- deepmodel:dmx:start workflow-v1 -->
+  # dmx — Active Rules
+  
+  - **system-prompt**: Always-apply engineering persona.
+  <!-- deepmodel:dmx:end -->
+  
+  '''
+# ---
+# name: TestEmitClaudeRules.test_snapshot_claude_rule_file
+  '''
+  # Persona
+  
+  I am a staff-level pair programmer.
+  
+  '''
+# ---
+# name: TestEmitCopilotRules.test_snapshot_copilot_instructions
+  '''
+  <!-- deepmodel:dmx:start workflow-v1 -->
+  # dmx — Active Rules
+  
+  - **system-prompt**: Always-apply engineering persona.
+  <!-- deepmodel:dmx:end -->
+  
+  '''
+# ---
+# name: TestEmitIdeRuleFiles.test_snapshot_cursor_agents_md
+  '''
+  <!-- deepmodel:dmx:start workflow-v1 -->
+  # dmx — Active Rules
+  
+  - **system-prompt**: Always-apply engineering persona.
+  <!-- deepmodel:dmx:end -->
+  
+  '''
+# ---
+# name: TestEmitIdeRuleFiles.test_snapshot_mdc_content
+  '''
+  ---
+  description: Always-apply engineering persona.
+  alwaysApply: true
+  ---
+  
+  # Persona
+  
+  I am a staff-level pair programmer.
+  
+  '''
+# ---
