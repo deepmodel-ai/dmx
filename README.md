@@ -4,35 +4,42 @@
 [![Test](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml/badge.svg)](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-The official implementation of the [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — delivered as an MCP server for any AI IDE.
+It has never been easier to build software.
+It has never been harder to build useful software.
 
-`dmx` turns the AI SDLC framework into slash commands and always-apply engineering rules. Connect it to Cursor, Claude Code, GitHub Copilot, Antigravity, or any MCP-compatible IDE and get a structured, phase-gated AI engineering workflow out of the box.
+AI generated code is hard to debug, hard to maintain, and dangerous to trust in production. AI-driven tech debt accumulates at machine speed.
 
----
+dmx gives you an AI-native developer workflow built on two ideas: spec-driven development, where work begins with a detailed spec before any code is written; and a shared memory bank, where project context is stored in the repo so every developer and every AI session starts from the same understanding. It runs inside IDEs like Cursor, Claude Code, GitHub Copilot, and Antigravity, and provides slash commands and always-apply rules that keep you in control of what gets built, how it gets built, and why.
 
-## The workflow
+> [!NOTE]
+> dmx implements the [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — an open framework for disciplined AI-native engineering.
 
-The [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) structures development around five phases with explicit developer control points. AI executes within each phase and stops. The developer drives every transition forward.
+## How it works
+
+dmx is implemented as an MCP server. Connect it to your IDE ([get started ↓](#get-started-in-3-steps)) and you get access to a series of skills and rules that orchestrate the developer workflow. Use them to create tickets, name branches, write commits, draft PRs, and publish releases. The AI implements each phase and stops — you review, commit, and decide what comes next.
+
+Before running any command, run `/dmx/init` once per project. It writes the always-apply rules into your IDE and initializes the `.dmx/` memory bank — persistent project context that every future AI session reads before doing anything.
+
+| Phase | Command | What it does |
+|---|---|---|
+| **Specify** | Option A: `/dmx/create-ticket` | Describe the work. dmx creates a ticket, names and checks out the branch, scaffolds a spec pre-filled with project context. AI asks clarifying questions — you answer before any code is written. |
+| **Specify** | Option B: `/dmx/derive-ticket` | Already wrote some code? dmx reads your uncommitted changes, infers what was built, creates the ticket, moves you to a properly named branch, and scaffolds the spec based on your code. |
+| **Plan** | `/dmx/plan` | Reads the answered spec and generates a phased task list. You review it before implementation starts. |
+| **Build** | Option A: `/dmx/implement-next-phase` | Implements every task in the next phase, then stops. You review the output, run `/dmx/commit` to write the commit message, and move forward. |
+| **Build** | Option B: `/dmx/implement-next-task` | Implements a single task and stops. Use this for fine-grained control when tasks are large or risky. |
+| **Validate** | `/dmx/validate` | Runs a quality gate against spec, security, and coverage. |
+| **Validate** | `/dmx/create-pr` | Drafts the PR body from the diff and opens the pull request. |
+| **Ship** | `/dmx/create-release` | Tags the release and publishes it. You confirm before it goes out. |
+| **Ship** | `/dmx/close-ticket` | After the PR is merged: transitions the ticket to Done, deletes the branch, and archives the spec. |
 
 ![AI SDLC Phase Arc](https://raw.githubusercontent.com/deepmodel-ai/ai-sdlc/main/assets/phase-arc.drawio.svg)
 
-| Phase | What happens | dmx command |
-|---|---|---|
-| **Specify** | AI drafts a structured spec, surfaces ambiguity, asks Q&A. Developer answers. | `/dmx/create-ticket` |
-| **Plan** | AI generates a phased task list from the answered spec. Developer reviews. | `/dmx/plan` |
-| **Build** | AI implements one phase, stops, reports. Developer reviews and commits. Repeats. | `/dmx/implement-next-phase` |
-| **Validate** | Automated quality gate checks spec, security, coverage. AI drafts the PR body. | `/dmx/validate` · `/dmx/create-pr` |
-| **Ship** | Developer merges. AI tags the release and publishes. Developer confirms. | `/dmx/create-release` |
 
-> The model does not merge. It does not advance the workflow. It does not decide when the work is done.
+## Get started in 3 steps
 
----
+### Step 1 — Add the MCP server
 
-## Quick start
-
-Add to your IDE's MCP config and restart:
-
-**Cursor** — `~/.cursor/mcp.json`
+Add to your Cursor MCP config (`~/.cursor/mcp.json`) and restart:
 
 ```json
 {
@@ -45,6 +52,9 @@ Add to your IDE's MCP config and restart:
 }
 ```
 
+<details>
+<summary>Claude Code, Copilot, Antigravity →</summary>
+
 **Claude Code** — `~/.claude/claude_desktop_config.json`
 
 ```json
@@ -53,6 +63,21 @@ Add to your IDE's MCP config and restart:
     "dmx": {
       "command": "uvx",
       "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
+    }
+  }
+}
+```
+
+**GitHub Copilot** — `.vscode/settings.json`
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "dmx": {
+        "command": "uvx",
+        "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
+      }
     }
   }
 }
@@ -71,43 +96,31 @@ Add to your IDE's MCP config and restart:
 }
 ```
 
-**GitHub Copilot** — `.vscode/settings.json` (workspace) or user settings
+</details>
 
-```json
-{
-  "mcp": {
-    "servers": {
-      "dmx": {
-        "command": "uvx",
-        "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
-      }
-    }
-  }
-}
+### Step 2 — Run `/dmx/init` in your IDE
+
+Open any chat and run `/dmx/init`. It will:
+
+- Write always-apply engineering rules into your project (`.cursor/rules/`, `CLAUDE.md`, etc.)
+- Scaffold the `.dmx/` memory bank — persistent context that every future AI session reads first
+- Configure your workflow mode (feature branches or trunk) and ticketing system
+
+Safe to re-run. Updates config without overwriting memory bank files that already have content.
+
+### Step 3 — Start your first ticket
+
+```
+/dmx/create-ticket
 ```
 
-Then run `/dmx-init` in your IDE to write always-apply rules and scaffold the `.dmx/` memory bank.
+Describe what you want to build. dmx scaffolds the spec, asks clarifying questions, and waits for your answers before writing a line of code.
 
----
-
-## `/dmx-init` walkthrough
-
-`/dmx-init` is the one-time project setup skill. It:
-
-1. Detects your workflow mode (feature branches vs. trunk) and ticketing system
-2. Auto-detects your GitHub remote and tech stack
-3. Writes `.dmx/config.md` with project context
-4. Scaffolds the `.dmx/` memory bank (architecture, decisions, style guide, etc.)
-5. Calls `detect_invoking_ide` and `setup_ide_rules` to write IDE-specific rule files
-6. Writes the always-apply persona rule so every future chat starts with the right context
-
-Safe to re-run — updates config without overwriting memory bank files that already have content.
-
----
 
 ## Skill catalog
 
-All `/dmx-*` commands are MCP prompts served live — no file writes, no installation beyond the MCP config.
+<details>
+<summary>All 23 slash commands →</summary>
 
 ### Workflow
 
@@ -147,39 +160,31 @@ All `/dmx-*` commands are MCP prompts served live — no file writes, no install
 | `/dmx/docs` | Write clear, human-first documentation |
 | `/dmx/secure` | Security analysis — thinks like an attacker |
 
----
+</details>
 
-## CLI
+
+## Self-hosting
+
+<details>
+<summary>CLI reference and environment variables →</summary>
 
 ```
-dmx serve               # stdio transport (default, for IDE MCP config)
-dmx serve --http        # SSE transport on :8080 (team server / Docker)
+dmx serve               # stdio transport (default)
+dmx serve --http        # SSE transport on :8080
 dmx serve --http --port 9000
 dmx serve --watch       # hot-reload on file change (requires watchfiles extra)
 dmx list-skills         # print all loaded skills
-dmx version
 ```
-
-**Environment variables**
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `PORT` | HTTP port | `8080` |
 | `DMX_SKILLS_DIR` | Override bundled skills directory | bundled |
 | `DMX_RULES_DIR` | Override bundled rules directory | bundled |
-| `DMX_IDE` | Force IDE detection (`cursor`, `claude`, `copilot`, `antigravity`, `agents`) | auto-detect |
+| `DMX_IDE` | Force IDE detection | auto-detect |
 | `MCP_API_KEY` | Bearer token for HTTP auth | — |
-| `REQUIRE_API_KEY` | Enable HTTP bearer auth (`true`/`false`) | `false` |
+| `REQUIRE_API_KEY` | Enable HTTP bearer auth | `false` |
 
----
+Requires Python 3.11+ and `uv`.
 
-## Requirements
-
-- Python 3.11+
-- `uv` (recommended) or any package manager that supports `uvx`
-
----
-
-## License
-
-[AGPL-3.0](LICENSE) — free for open-source use. Commercial licensing available from [Deepmodel](https://deepmodel.ai).
+</details>
