@@ -11,9 +11,54 @@ arguments:
     required: false
 ---
 
-You are drafting a pull request description. Follow every step in order. Output only the final markdown — no preamble or explanation.
+You are drafting a pull request description. Output only the final markdown — no preamble or explanation.
 
-## Step 1 — Load project configuration
+Follow the steps below to gather information, then fill in the output template determined in Step 1.
+
+## Step 1 — Detect the output template
+
+Check for a PR template in the workspace root (try each path, use the first that exists):
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- `.github/pull_request_template.md`
+- `PULL_REQUEST_TEMPLATE.md`
+
+**If a template file is found:** read it. Use it as the output structure — fill in each section with content generated from the commits, diff, and ticket in the steps below. Do not change the section headings or structure.
+
+**If no template file is found:** use the following embedded template as the output structure:
+
+```markdown
+{If ticketing is not none: "Closes #{ticket_ref}" — omit this line entirely if ticketing is none}
+
+## Summary
+
+{1–2 sentences: what changed and why this approach was chosen}
+
+## Review focus
+
+{1–2 sentences: where to concentrate review attention; what to skim or skip}
+
+## Changes
+
+{bullet list grouped by concern — specific, from the reviewer's perspective}
+
+## Validation
+
+{[x] checked list of what was actually tested or verified}
+
+## Notes
+
+{non-obvious decisions, known issues, follow-up tickets, workarounds — or "None"}
+
+## Checklist
+
+- [x] Self-reviewed
+- {[x] or [ ]} Tests added or updated
+- [ ] No new warnings or errors
+```
+
+---
+
+## Step 2 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
@@ -23,11 +68,11 @@ The project configuration is injected into your context as a rule. Extract:
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
-## Step 2 — Resolve defaults
+## Step 3 — Resolve defaults
 
 - If `{{base}}` was not provided, use `{config.branch_base}`.
 
-## Step 3 — Detect the ticket reference
+## Step 4 — Detect the ticket reference
 
 If `{{ticket_id}}` was provided, use it.
 
@@ -36,7 +81,7 @@ If not, run `git branch --show-current` and extract:
 - GitHub Issues: match `gh-([0-9]+)`, extract number → store as `ticket_ref` = `gh-{number}`
 - none: no ticket ref
 
-## Step 4 — Fetch ticket details
+## Step 5 — Fetch ticket details
 
 **If `ticketing` is `jira`:**
 
@@ -68,7 +113,7 @@ Store `ticket_url` = `{html_url}`.
 Derive `summary` from the branch name: take the description segment, replace hyphens with spaces, title-case.
 `description` = empty. `ticket_url` = none.
 
-## Step 5 — Gather git context
+## Step 6 — Gather git context
 
 Resolve the base ref (try in order, use the first that exists):
 ```
@@ -79,7 +124,7 @@ git rev-parse --verify {{base}}
 If neither ref exists:
 1. Tell the user: "`origin/{{base}}` was not found."
 2. Ask them to paste the commit messages for this PR.
-3. Stop until they reply. Use only their pasted messages for commit context in Steps 7–9.
+3. Stop until they reply. Use only their pasted messages for commit context in Steps 7–10.
 
 If the base ref exists, compute the merge-base and collect commits:
 ```
@@ -90,87 +135,51 @@ git diff <merge-base>..HEAD --stat
 
 Use only commits after the merge-base. Do not include commits on the base branch itself.
 
-## Step 6 — Infer the type of change
+## Step 7 — Write the Summary
 
-Check each condition independently (multiple can apply):
+1–2 sentences covering:
+1. What changed (from commits and ticket summary)
+2. Why this approach was chosen (from ticket description, commit bodies, or non-obvious decisions in the diff)
 
-- **New feature** — issue type is `Story` or `Task`, OR any commit starts with `feat`
-- **Bug fix** — issue type is `Bug`, OR any commit starts with `fix`
-- **Refactoring** — any commit starts with `refactor`
-- **Security patch** — ticket has a `security` label, OR any commit contains `security`
-- **UI/UX improvement** — any commit starts with `style`, or contains `ui` or `ux`
+Do not copy-paste commit messages. Synthesise into one or two tight sentences.
 
-## Step 7 — Write the Description section
+## Step 8 — Write the Review focus
 
-2–4 sentences covering:
-1. What was changed (from commits and ticket summary)
-2. Why it was changed (from ticket description and commit bodies)
-3. Any context a reviewer needs to understand the approach
+1–2 sentences telling the reviewer:
+- Where to concentrate their attention (the most important or risky file/change)
+- What they can skim or skip (scaffolding, generated files, mechanical changes)
 
-Do not copy-paste commit messages. Synthesise them into coherent prose.
+If the PR is small and straightforward, write "Review the full diff — it is small."
 
-## Step 8 — Write the "What is fixed / implemented?" section
+## Step 9 — Write the Changes section
 
-Bullet list of meaningful changes. One bullet per logical change, not one per commit. Group related commits. Write from the reviewer's perspective.
+Bullet list of meaningful changes from the reviewer's perspective. One bullet per logical concern, not one per commit. Group related commits. Be specific — file names, config keys, function names where useful. Do not list trivial formatting or whitespace changes.
 
-## Step 9 — Write the Additional Information section
+## Step 10 — Write the Validation section
 
-Scan the diff stat and commit messages for:
-- New environment variables (`os.getenv`, `process.env`, `.env`, `settings.`)
-- New dependencies (`requirements.txt`, `package.json`, `pyproject.toml`, `build.gradle`)
-- Database migrations (`alembic`, `migrations/`, `flyway`)
-- Deployment steps required
+List what was actually tested or verified. Use `[x]` for each item. Draw from:
+- Commits that mention testing, running, or verifying
+- Test files in the diff
+- CI status if mentioned
 
-If any are detected, describe them specifically. If none, write `None`.
+If no evidence of testing exists in the diff or commits, write a single unchecked item: `[ ] Manual testing required`.
 
-## Step 10 — Evaluate checklist items
+## Step 11 — Write the Notes section
+
+Surface anything a reviewer needs to know that isn't obvious from the diff:
+- Non-obvious technical decisions and the reasoning behind them
+- Known issues or limitations introduced by this PR
+- Follow-up tickets recommended
+- Workarounds for environment or tooling constraints
+
+If there is nothing to surface, write `None`.
+
+## Step 12 — Evaluate the checklist
 
 Check each item independently against the diff and commit list:
 
-- **Self-reviewed** — mark `[X]`: the PR description itself is evidence of review.
-- **Tests added or updated** — mark `[X]` if the diff includes files matching `*test*`, `*spec*`, `tests/`, `__tests__/`, or test framework imports. Otherwise `[ ]`.
-- **No new warnings or errors** — mark `[ ]`: cannot be verified from diff alone; leave for developer.
-- **Environment variables updated** — mark `[X]` if diff includes `.env`, `settings.`, `os.getenv`, `process.env`. Otherwise `[ ]`.
-- **New packages documented** — mark `[X]` if diff includes `package.json`, `requirements.txt`, `pyproject.toml`, `build.gradle`. Otherwise `[ ]`.
-- **Tested on multiple devices/browsers** — mark `[ ]`: cannot be verified from diff alone; leave for developer.
+- **Self-reviewed** — always `[x]`: the PR description itself is evidence of review.
+- **Tests added or updated** — `[x]` if the diff includes files matching `*test*`, `*spec*`, `tests/`, `__tests__/`, or test framework imports. Otherwise `[ ]`.
+- **No new warnings or errors** — always `[ ]`: cannot be verified from diff alone; leave for the developer.
 
-Always use capital `X` for checked: `[X]`. Never invent evidence.
-
-## Step 11 — Assemble the PR body
-
-Output exactly this structure inside a single fenced code block. No text before or after the block.
-
-```markdown
-## {summary — rewrite if too long or technical}
-
-{ticket_url — omit this line entirely if ticketing is none}
-
-## Type of Change
-- {[X] or [ ]} New feature
-- {[X] or [ ]} Bug fix
-- {[X] or [ ]} Refactoring
-- {[X] or [ ]} Security patch
-- {[X] or [ ]} UI/UX improvement
-
-## Description
-{2–4 sentences from Step 7}
-
-## What is fixed / implemented?
-{bullet list from Step 8}
-
-## Additional Information
-{content from Step 9}
-
-## Screenshots (if applicable)
-_N/A_
-
-## Checklist
-- {[X] or [ ]} I have performed a self-review of my code.
-- {[X] or [ ]} I have added or updated relevant tests to cover the changes.
-- {[X] or [ ]} My changes generate no new warnings or errors in development and production builds.
-- {[X] or [ ]} Environment variables have been updated (if applicable).
-- {[X] or [ ]} New packages have been installed and documented (if applicable).
-- {[X] or [ ]} I have verified the changes on multiple devices and browsers (if applicable).
-```
-
-Output the markdown block above and nothing else.
+Output only the filled-in template. No text before or after it.
