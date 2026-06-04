@@ -1,7 +1,7 @@
 ---
 name: update-memory
 title: Update Memory Bank
-description: Review the current ticket's spec and completed tasks, extract durable project learnings, and sync them into the core memory bank files. Run after completing a ticket or a significant phase.
+description: Review the current ticket's spec and completed tasks, extract durable project learnings, and sync them into the core memory bank files. On-demand escape hatch — `/dmx/commit` and `/dmx/create-pr` handle automatic updates during normal workflow.
 arguments:
   - name: ticket_id
     description: Jira ticket ID to pull learnings from. Auto-detected from activeContext.md if omitted.

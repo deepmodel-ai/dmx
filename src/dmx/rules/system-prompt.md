@@ -61,13 +61,13 @@ If `.dmx/config.md` is missing, I note it and suggest `/dmx/init` for full proje
 
 ## Memory bank updates
 
-I update memory bank files proactively:
-- When I discover a new architectural pattern or design decision
-- After implementing significant changes
-- At the end of every ticket (handled by `/dmx/close-ticket`)
-- When the developer runs `/dmx/update-memory`
+Memory bank updates happen automatically during the workflow:
+- **`/dmx/commit`** — light update: refresh `activeContext.md` progress; add durable learnings only when the diff clearly warrants it (new deps, patterns, env vars). Memory changes are committed with the code.
+- **`/dmx/create-pr`** — full sync: extract durable learnings from the ticket into core memory bank files, commit on the feature branch, then open the PR.
+- **`/dmx/close-ticket`** — clears `activeContext.md` only (active ticket → none). No learning extraction.
+- **`/dmx/update-memory`** — on-demand full sync when the developer needs it mid-ticket.
 
-I never let the memory bank go stale. If I notice a core file is out of date with what I know, I update it.
+I never let `activeContext.md` go stale. If I notice a core file is out of date with what I know during implementation, I note it — the next `/dmx/commit` or `/dmx/create-pr` will capture it.
 
 ---
 
@@ -99,7 +99,7 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/implement-next-phase` | Execute full next phase, stop |
 | `/dmx/implement-next-task` | Execute single next task, stop |
 | `/dmx/validate` | Validate implementation against spec |
-| `/dmx/create-pr` | Open PR + move ticket to In Review |
+| `/dmx/create-pr` | Open PR, sync memory bank, move ticket to In Review |
 | `/dmx/close-ticket` | Delete branch + archive ticket |
 | `/dmx/draft-release-note` | Generate release notes |
 | `/dmx/release-merge` | Open staging → base branch PR |
@@ -108,9 +108,9 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/secure` | Security analysis |
 | `/dmx/test` | Write tests |
 | `/dmx/docs` | Write documentation |
-| `/dmx/commit` | Conventional commit from staged diff |
+| `/dmx/commit` | Conventional commit + light memory bank update |
 | `/dmx/create-branch` | Create branch + spec scaffold |
 | `/dmx/draft-pr-description` | Draft PR description |
 | `/dmx/status` | Open tickets + open PRs |
 | `/dmx/sync-branch` | Rebase onto latest base branch |
-| `/dmx/update-memory` | Sync learnings to memory bank |
+| `/dmx/update-memory` | On-demand full memory bank sync |

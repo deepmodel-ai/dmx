@@ -1,7 +1,7 @@
 ---
 name: close-ticket
 title: Close Ticket
-description: After a PR is merged, closes out the ticket completely — transitions the ticket to Done, adds the PR link as a comment, deletes the branch locally and remotely, archives the ticket folder, syncs durable learnings to the memory bank, and clears the active context. Handles hotfix back-merge detection automatically.
+description: After a PR is merged, closes out the ticket completely — transitions the ticket to Done, adds the PR link as a comment, deletes the branch locally and remotely, archives the ticket folder, and clears the active context. Handles hotfix back-merge detection automatically.
 arguments:
   - name: ticket_id
     description: Ticket identifier. Auto-detected from the current branch name if omitted.
@@ -140,35 +140,7 @@ maintainer_can_modify: true
 
 If a `development` branch exists, raise a second PR for `master → development` with the same pattern.
 
-## Step 11 — Sync learnings to memory bank
-
-Read all core memory bank files in full:
-- `.dmx/projectbrief.md`
-- `.dmx/productContext.md`
-- `.dmx/systemPatterns.md`
-- `.dmx/techContext.md`
-- `.dmx/activeContext.md`
-
-Read the archived ticket files:
-- `.dmx/tickets/archived/{ticket_ref}/spec.md`
-- `.dmx/tickets/archived/{ticket_ref}/tasks.md`
-
-Extract and write only durable, cross-ticket knowledge:
-
-**`systemPatterns.md`** — new architectural patterns, design decisions with rationale, changed component relationships.
-
-**`techContext.md`** — new dependencies and why they were added, new environment variables, new constraints discovered.
-
-**`productContext.md`** — new capabilities, changed user-facing behaviour, new flows.
-
-Do not extract:
-- Implementation details that will change (specific function names, line numbers)
-- Information already present in the files
-- Notes only relevant to this ticket
-
-Update each file with targeted additions only. Do not rewrite. Do not delete existing content.
-
-## Step 12 — Update activeContext.md
+## Step 11 — Clear activeContext.md
 
 ```markdown
 ## Active Ticket
@@ -181,7 +153,7 @@ _(none — run /dmx/create-ticket to start new work)_
 {none, or note the next planned ticket if known}
 ```
 
-## Step 13 — Return the result
+## Step 12 — Return the result
 
 ```
 Ticket {ticket_ref} closed.
@@ -190,7 +162,6 @@ Ticket {ticket_ref} closed.
   Ticket:  {ticket_ref} → Done
   PR link: added to ticket
   Folder:  archived to .dmx/tickets/archived/{ticket_ref}/
-  Memory:  synced
 
 {if hotfix} Back-merge PRs raised:
   - {config.branch_base} ← master: {PR URL}
@@ -204,5 +175,4 @@ Next:
 
 - Never close a protected branch.
 - If the PR is not confirmed merged, warn before deleting the branch. Do not assume the work is done.
-- Never delete or overwrite existing memory bank content — only add or amend.
-- Never store ticket-specific implementation details in core memory bank files.
+- Do not modify `systemPatterns.md`, `techContext.md`, or `productContext.md` here — memory learnings are synced in `/dmx/create-pr`.

@@ -28,7 +28,7 @@ Before running any command, run `/dmx/init` once per project. It writes the alwa
 | **Build** | Option A: `/dmx/implement-next-phase` | Implements every task in the next phase, then stops. You review the output, run `/dmx/commit` to write the commit message, and move forward. |
 | **Build** | Option B: `/dmx/implement-next-task` | Implements a single task and stops. Use this for fine-grained control when tasks are large or risky. |
 | **Validate** | `/dmx/validate` | Runs a quality gate against spec, security, and coverage. |
-| **Validate** | `/dmx/create-pr` | Drafts the PR body from the diff and opens the pull request. |
+| **Validate** | `/dmx/create-pr` | Syncs the memory bank, drafts the PR body, and opens the pull request. |
 | **Ship** | `/dmx/create-release` | Tags the release and publishes it. You confirm before it goes out. |
 | **Ship** | `/dmx/close-ticket` | After the PR is merged: transitions the ticket to Done, deletes the branch, and archives the spec. |
 
