@@ -289,18 +289,21 @@ Write from package files detected in Step 2:
 ```markdown
 # Active Context
 
-## Active Ticket
-_(none — run /dmx/create-ticket or /dmx/derive-ticket to start work)_
+## Open Learnings
+_(none yet — append observations here during implementation; promoted to core files on commit or create-pr)_
 
-## Recent Decisions
-_(none yet)_
+## Open Decisions
+_(none yet — record unresolved trade-offs or design questions here)_
+
+## Session Notes
+_(scratch context from the current stretch of work; trimmed when promoted or stale)_
 ```
 
 ---
 
 Create directory structure:
 ```
-mkdir -p .dmx/tickets/active .dmx/tickets/archived .dmx/releases
+mkdir -p .dmx/releases
 ```
 
 ## Step 9 — Output the result
@@ -314,11 +317,13 @@ Setup complete.
   Base branch: {branch_base}
 
   Memory bank:
-    .dmx/projectbrief.md
-    .dmx/productContext.md
-    .dmx/systemPatterns.md
-    .dmx/techContext.md
-    .dmx/activeContext.md
+    .dmx/projectbrief.md       ← durable project knowledge
+    .dmx/productContext.md     ← durable project knowledge
+    .dmx/systemPatterns.md     ← durable project knowledge
+    .dmx/techContext.md        ← durable project knowledge
+    .dmx/activeContext.md      ← learning inbox (open learnings, decisions, notes)
+
+  spec.md and tasks.md are created on the first ticket branch.
 ```
 
 Then, depending on workflow:
