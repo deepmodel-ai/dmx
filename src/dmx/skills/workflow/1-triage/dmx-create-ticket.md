@@ -159,12 +159,17 @@ git checkout {branch_name}
 
 ## Step 8 — Scaffold spec.md
 
-Create `.dmx/tickets/active/{ticket_ref}/` if it does not exist.
-
-Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
+Write `.dmx/spec.md`:
 
 ```markdown
-# {ticket_ref}: {summary}
+---
+ticket: {ticket_ref or ""}
+branch: {branch_name}
+summary: {summary}
+ticketing: {ticketing}
+---
+
+# {summary}
 
 **Ticket:** {ticket link or "(no ticketing system)"}
 **Type:** {branch_type}
@@ -213,20 +218,9 @@ Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
 - GitHub Issues: `[#{number}]({ticket_url})`
 - none: _(no ticketing system)_
 
-## Step 9 — Update activeContext.md
+When `ticketing` is `none`, omit `ticket` from frontmatter.
 
-Find or create `## Active Ticket` in `.dmx/activeContext.md`:
-
-```markdown
-## Active Ticket
-- **Ticket:** {ticket_ref}
-- **Summary:** {summary}
-- **Branch:** {branch_name}
-- **Spec:** `.dmx/tickets/active/{ticket_ref}/spec.md`
-- **Tasks:** `.dmx/tickets/active/{ticket_ref}/tasks.md` _(not yet generated)_
-```
-
-## Step 10 — Transition to In Progress
+## Step 9 — Transition to In Progress
 
 **If `ticketing` is `jira`:**
 Call `getTransitionsForJiraIssue` on `user-atlassian`. Find `In Progress`. Call `transitionJiraIssue`.
@@ -242,13 +236,13 @@ labels:       ["in-progress"]
 
 **If `ticketing` is `none`:** Skip.
 
-## Step 11 — Return the result
+## Step 10 — Return the result
 
 ```
 {if ticketing ≠ none} Ticket: {ticket_ref} — {summary}
 {if ticketing ≠ none} URL:    {ticket_url}
 Branch: {branch_name}
-Spec:   .dmx/tickets/active/{ticket_ref}/spec.md
+Spec:   .dmx/spec.md
 ```
 
 Then:
@@ -265,4 +259,3 @@ Spec is pre-filled with project context. Review it, then:
 - If ticket creation fails (API error), stop before creating the branch. Surface the full error.
 - If `branch_base` in config appears far behind `master`, warn: "Base branch may be behind master — consider syncing before branching."
 - Never use for hotfixes. If `{{task}}` contains "hotfix" or "production incident", stop: "Use /dmx/hotfix for production incidents."
-- If activeContext.md already has an active ticket, warn: "There is already an active ticket ({existing_ref}). Complete or clean up that work before starting new work, or run /dmx/cleanup first."

@@ -114,14 +114,19 @@ git checkout {branch_name}
 
 ## Step 8 — Scaffold the ticket spec
 
-Create `.dmx/tickets/active/{ticket_ref}/` if it does not exist.
+If `.dmx/spec.md` already exists, skip and note: "Spec already exists — skipping scaffold."
 
-If `.dmx/tickets/active/{ticket_ref}/spec.md` already exists, skip to Step 9 and note: "Spec already exists — skipping scaffold."
-
-Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
+Write `.dmx/spec.md`:
 
 ```markdown
-# {ticket_ref}: {summary}
+---
+ticket: {ticket_ref or ""}
+branch: {branch_name}
+summary: {summary}
+ticketing: {ticketing}
+---
+
+# {summary}
 
 **Ticket:** {ticket link — see format below}
 **Type:** {issue type or "feature"/"bug" from branch type}
@@ -165,20 +170,9 @@ Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
 - GitHub Issues: `[#{number}]({html_url})`
 - none: _(no ticketing system)_
 
-## Step 9 — Update activeContext.md
+When `ticketing` is `none`, omit `ticket` from frontmatter.
 
-Find or create `## Active Ticket` in `.dmx/activeContext.md`:
-
-```markdown
-## Active Ticket
-- **Ticket:** {ticket_ref}
-- **Summary:** {summary}
-- **Branch:** {branch_name}
-- **Spec:** `.dmx/tickets/active/{ticket_ref}/spec.md`
-- **Tasks:** `.dmx/tickets/active/{ticket_ref}/tasks.md` _(not yet generated)_
-```
-
-## Step 10 — Transition to In Progress
+## Step 9 — Transition to In Progress
 
 **If `ticketing` is `jira`:**
 1. Call `getTransitionsForJiraIssue` on `user-atlassian` with `{config.cloud_id}` and `{{ticket_id}}`
@@ -195,12 +189,12 @@ labels:       ["in-progress"]
 
 **If `ticketing` is `none`:** Skip.
 
-## Step 11 — Return the result
+## Step 10 — Return the result
 
 ```
 Branch created: {branch_name}
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Progress
-Spec scaffolded: .dmx/tickets/active/{ticket_ref}/spec.md
+Spec scaffolded: .dmx/spec.md
 
 Next steps:
   1. Answer the questions in spec.md.
@@ -212,5 +206,5 @@ Next steps:
 
 - Never use for hotfixes. If the user mentions "hotfix" or "production incident", direct them to `/dmx/hotfix`.
 - If `branch_base` in config is far behind `master`, warn: "Your base branch appears behind master — consider syncing before branching."
-- If `.dmx/` does not exist, create the full directory structure before writing.
+- If `.dmx/` does not exist, stop: "Memory bank not found. Run /dmx/init to set up this project."
 - For `none` mode, if neither `{{ticket_id}}` nor `{{description}}` was provided, stop: "Provide a `description` when ticketing is disabled."

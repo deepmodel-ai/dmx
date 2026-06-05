@@ -165,12 +165,17 @@ If `git stash pop` fails with a conflict, stop: "Stash re-apply failed with conf
 
 ## Step 10 — Scaffold spec.md
 
-Create `.dmx/tickets/active/{ticket_ref}/` if it does not exist.
-
-Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
+Write `.dmx/spec.md`:
 
 ```markdown
-# {ticket_ref}: {summary}
+---
+ticket: {ticket_ref or ""}
+branch: {branch_name}
+summary: {summary}
+ticketing: {ticketing}
+---
+
+# {summary}
 
 **Ticket:** {ticket link}
 **Type:** {type}
@@ -218,20 +223,9 @@ Write `.dmx/tickets/active/{ticket_ref}/spec.md`:
 - GitHub Issues: `[#{number}]({html_url})`
 - none: _(no ticketing system)_
 
-## Step 11 — Update activeContext.md
+When `ticketing` is `none`, omit `ticket` from frontmatter.
 
-Find or create `## Active Ticket` in `.dmx/activeContext.md`:
-
-```markdown
-## Active Ticket
-- **Ticket:** {ticket_ref}
-- **Summary:** {summary}
-- **Branch:** {branch_name}
-- **Spec:** `.dmx/tickets/active/{ticket_ref}/spec.md`
-- **Tasks:** `.dmx/tickets/active/{ticket_ref}/tasks.md` _(not yet generated)_
-```
-
-## Step 12 — Transition ticket to In Progress
+## Step 11 — Transition ticket to In Progress
 
 **If `ticketing` is `jira`:**
 Call `getTransitionsForJiraIssue`, find `In Progress`, call `transitionJiraIssue`.
@@ -241,7 +235,7 @@ Call `update_issue` to add label `in-progress`.
 
 **If `ticketing` is `none`:** Skip.
 
-## Step 13 — Return the result
+## Step 12 — Return the result
 
 ```
 Ticket derived from uncommitted changes.
@@ -249,7 +243,7 @@ Ticket derived from uncommitted changes.
 {if ticketing ≠ none} Ticket: {ticket_ref} — {summary}
 Branch:  {branch_name}  (created from {branch_base})
 Stash:   applied successfully
-Spec:    .dmx/tickets/active/{ticket_ref}/spec.md
+Spec:    .dmx/spec.md
 
 Next steps:
   1. Review spec.md — verify the inferred scope and context are accurate.

@@ -88,11 +88,56 @@ git fetch origin
 git checkout {branch_name}
 ```
 
-## Step 7 — Scaffold the spec
+## Step 7 — Scaffold spec.md
 
-Create `.dmx/tickets/active/{ticket_ref}/spec.md` with the same template as `create-branch` (context from ticket, Q&A questions). Skip if the file already exists.
+Write `.dmx/spec.md` (skip if it already exists):
 
-Update `.dmx/activeContext.md` `## Active Ticket` section to point at the new ticket folder.
+```markdown
+---
+ticket: {ticket_ref or ""}
+branch: {branch_name}
+summary: {summary}
+ticketing: {ticketing}
+---
+
+# {summary}
+
+**Ticket:** {ticket link or "(no ticketing system)"}
+**Type:** hotfix
+**Branch:** {branch_name}
+
+---
+
+## Context
+{1–3 sentences from ticket description — what the production incident is}
+
+## Scope
+{What this fix addresses}
+
+## Out of Scope
+{Related issues not addressed in this hotfix}
+
+## Technical Approach
+{Leave blank — to be filled after Q&A.}
+
+---
+
+## Questions
+<!-- Answer each question below before implementing. -->
+
+1. {Question}
+   Answer:
+
+2. {Question}
+   Answer:
+```
+
+**Ticket link format:**
+- Jira: `[{ticket_ref}](https://{config.atlassian_domain}.atlassian.net/browse/{ticket_ref})`
+- GitHub Issues: `[#{number}]({html_url})`
+- none: _(no ticketing system)_
+
+When `ticketing` is `none`, omit `ticket` from frontmatter.
 
 ## Step 8 — Transition to In Progress
 
@@ -110,7 +155,7 @@ Add `in-progress` label via `update_issue`.
 Hotfix branch created: {branch_name}
 Based on: master
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Progress
-Spec: .dmx/tickets/active/{ticket_ref}/spec.md
+Spec: .dmx/spec.md
 
 Hotfix workflow:
   1. Implement the fix (use /dmx/implement-next-phase or /dmx/implement-next-task).
