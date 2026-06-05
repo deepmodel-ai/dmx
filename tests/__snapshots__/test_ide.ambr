@@ -1,7 +1,7 @@
 # serializer version: 1
 # name: TestEmitAgentsRules.test_snapshot_agents_md
   '''
-  <!-- deepmodel:dmx:start workflow-v1 -->
+  <!-- deepmodel:dmx:start 0.1.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -19,7 +19,7 @@
 # ---
 # name: TestEmitClaudeRules.test_snapshot_claude_md
   '''
-  <!-- deepmodel:dmx:start workflow-v1 -->
+  <!-- deepmodel:dmx:start 0.1.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -37,7 +37,7 @@
 # ---
 # name: TestEmitCopilotRules.test_snapshot_copilot_instructions
   '''
-  <!-- deepmodel:dmx:start workflow-v1 -->
+  <!-- deepmodel:dmx:start 0.1.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -47,7 +47,7 @@
 # ---
 # name: TestEmitIdeRuleFiles.test_snapshot_cursor_agents_md
   '''
-  <!-- deepmodel:dmx:start workflow-v1 -->
+  <!-- deepmodel:dmx:start 0.1.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
