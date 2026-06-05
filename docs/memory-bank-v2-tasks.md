@@ -75,26 +75,26 @@ Create branch, write fresh `.dmx/spec.md` with YAML frontmatter.
 
 Read flat spec/tasks only; no ticket resolution.
 
-- [ ] Update `src/dmx/skills/workflow/2-plan/dmx-plan.md`
-  - [ ] Remove `ticket_id` argument from frontmatter
-  - [ ] Remove “Resolve the active ticket” step
-  - [ ] Read `.dmx/spec.md`; write `.dmx/tasks.md` at flat path
-  - [ ] Remove Step 7 `activeContext` update
-  - [ ] Update tasks.md template (Spec + Branch refs, no ticket folder paths)
-  - [ ] Hard stop if `spec.md` missing
-- [ ] Update `src/dmx/skills/workflow/3-build/dmx-implement-next-phase.md`
-  - [ ] Remove `ticket_id` argument
-  - [ ] Remove ticket resolution step
-  - [ ] Read `.dmx/spec.md` + `.dmx/tasks.md` directly
-  - [ ] Add note: may append to `activeContext` Open Learnings when flagging patterns
-  - [ ] Hard stop if `tasks.md` missing
-- [ ] Update `src/dmx/skills/workflow/3-build/dmx-implement-next-task.md`
-  - [ ] Same changes as implement-next-phase
-- [ ] Update `src/dmx/skills/workflow/4-validate/dmx-validate.md`
-  - [ ] Remove `ticket_id` argument
-  - [ ] Remove ticket resolution step
-  - [ ] Read `.dmx/spec.md` + `.dmx/tasks.md` directly
-  - [ ] Update validation report header to use spec summary, not ticket ID
+- [x] Update `src/dmx/skills/workflow/2-plan/dmx-plan.md`
+  - [x] Remove `ticket_id` argument from frontmatter
+  - [x] Remove “Resolve the active ticket” step
+  - [x] Read `.dmx/spec.md`; write `.dmx/tasks.md` at flat path
+  - [x] Remove Step 7 `activeContext` update
+  - [x] Update tasks.md template (Spec + Branch refs, no ticket folder paths)
+  - [x] Hard stop if `spec.md` missing
+- [x] Update `src/dmx/skills/workflow/3-build/dmx-implement-next-phase.md`
+  - [x] Remove `ticket_id` argument
+  - [x] Remove ticket resolution step
+  - [x] Read `.dmx/spec.md` + `.dmx/tasks.md` directly
+  - [x] Add note: may append to `activeContext` Open Learnings when flagging patterns
+  - [x] Hard stop if `tasks.md` missing
+- [x] Update `src/dmx/skills/workflow/3-build/dmx-implement-next-task.md`
+  - [x] Same changes as implement-next-phase
+- [x] Update `src/dmx/skills/workflow/4-validate/dmx-validate.md`
+  - [x] Remove `ticket_id` argument
+  - [x] Remove ticket resolution step
+  - [x] Read `.dmx/spec.md` + `.dmx/tasks.md` directly
+  - [x] Update validation report header to use spec summary, not ticket ID
 
 ---
 

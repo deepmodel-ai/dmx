@@ -2,13 +2,9 @@
 name: validate
 title: Validate — Pre-PR Quality Gate
 description: Three-part quality gate before opening a PR. Checks ticket completeness (spec, acceptance criteria, tasks), code quality (codebase patterns, style, naming), and security (vulnerabilities introduced by the diff). Produces a structured report with a clear READY FOR PR or NEEDS WORK verdict.
-arguments:
-  - name: ticket_id
-    description: Ticket identifier. Auto-detected from activeContext.md if omitted.
-    required: false
 ---
 
-You are running the pre-PR validation gate for an active ticket. Follow every step in order. Do not skip checks. Do not open a PR.
+You are running the pre-PR validation gate for the current branch. Follow every step in order. Do not skip checks. Do not open a PR.
 
 ## Step 1 — Load project configuration
 
@@ -17,23 +13,26 @@ The project configuration is injected into your context as a rule. Extract:
 
 If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init first."
 
-## Step 2 — Resolve the active ticket
+## Step 2 — Read spec.md
 
-If `{{ticket_id}}` was provided, use it.
+Read `.dmx/spec.md`.
 
-If not, read `.dmx/activeContext.md` and extract the ticket ID from `## Active Ticket`.
+If the file does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first."
 
-If no active ticket is found, stop: "No active ticket found. Provide `ticket_id` or run `/dmx/create-ticket` first."
+Extract from the YAML frontmatter:
+- `ticket` — ticket reference (may be empty)
+- `branch` — branch name
+- `summary` — one-line summary
+- `ticketing` — ticketing provider
 
-## Step 3 — Read ticket files and memory bank
+## Step 3 — Read tasks.md and memory bank
 
 Read all of the following:
-- `.dmx/tickets/active/{ticket_id}/spec.md`
-- `.dmx/tickets/active/{ticket_id}/tasks.md`
+- `.dmx/tasks.md`
 - `.dmx/systemPatterns.md` — for code quality reference
 - `.dmx/techContext.md` — for stack and constraint reference
 
-If spec.md or tasks.md is missing, stop: "Spec or tasks not found for {ticket_id}. Run `/dmx/plan` first."
+If `tasks.md` is missing, stop: "tasks.md not found. Run `/dmx/plan` first."
 
 ## Step 4 — Read the diff
 
@@ -47,16 +46,18 @@ If the diff is empty, stop: "No changes found against {config.branch_base}. Noth
 
 ## Step 5 — Check 1: Ticket Completeness
 
-Evaluate whether the implementation satisfies the ticket.
+Evaluate whether the implementation satisfies the spec.
 
 **Tasks coverage:**
 Scan `tasks.md` for unchecked tasks (`- [ ]`). Every task must be checked for the ticket to be complete.
 
 **Acceptance criteria:**
-Extract the `## Acceptance Criteria` section from `spec.md`. For each criterion, evaluate whether the diff satisfies it. Mark each as:
+Look for an `## Acceptance Criteria` section in `spec.md`. If present, evaluate each criterion against the diff and mark as:
 - `[x]` Satisfied — evidence visible in the diff
 - `[ ]` Not satisfied — no evidence in the diff
 - `[~]` Partially satisfied — implementation present but incomplete
+
+If no `## Acceptance Criteria` section exists, fall back to evaluating the `## Scope` bullet list as implicit acceptance criteria.
 
 **Scope:**
 Check whether the diff stays within the `## Scope` defined in spec.md. Flag anything in the diff that falls outside declared scope.
@@ -105,7 +106,10 @@ Rate each finding: `Critical` | `High` | `Medium` | `Low`.
 ## Step 8 — Assemble the report
 
 ```markdown
-## Validation Report: {ticket_id}
+## Validation Report: {summary from spec.md}
+
+**Branch:** {branch from spec frontmatter}
+{if ticket is set} **Ticket:** {ticket}
 
 ### 1. Ticket Completeness
 

@@ -2,31 +2,21 @@
 name: implement-next-task
 title: Implement Next Task
 description: Execute the single next unchecked task in tasks.md and stop. Use this for fine-grained control when tasks are large or risky and you want to review each one individually before proceeding.
-arguments:
-  - name: ticket_id
-    description: Jira ticket ID, e.g. DM-1667. Auto-detected from activeContext.md if omitted.
-    required: false
 ---
 
-You are implementing one task from the active ticket's plan. Execute exactly one task and stop. Do not move on without being asked again.
+You are implementing one task from the current branch's plan. Execute exactly one task and stop. Do not move on without being asked again.
 
-## Step 1 — Resolve the active ticket
-
-If `{{ticket_id}}` was provided, use it.
-
-If not, read `.dmx/activeContext.md` and extract the ticket ID from the `## Active Ticket` section.
-
-If no active ticket is found, stop and tell the user: "No active ticket found. Provide `ticket_id` or run `/dmx/create-ticket` first."
-
-## Step 2 — Read spec.md and tasks.md
+## Step 1 — Read spec.md and tasks.md
 
 Read both:
-- `.dmx/tickets/active/{ticket_id}/spec.md` — for context and technical approach
-- `.dmx/tickets/active/{ticket_id}/tasks.md` — for the task list
+- `.dmx/spec.md` — for context and technical approach
+- `.dmx/tasks.md` — for the task list
 
-If tasks.md does not exist, stop and tell the user: "tasks.md not found for {ticket_id}. Run `/dmx/plan` to generate the task plan first."
+If `spec.md` does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first."
 
-## Step 3 — Find the next unchecked task
+If `tasks.md` does not exist, stop: "tasks.md not found. Run `/dmx/plan` to generate the task plan first."
+
+## Step 2 — Find the next unchecked task
 
 Scan tasks.md top-to-bottom, phase by phase, and find the first unchecked task (`- [ ]`).
 
@@ -34,7 +24,7 @@ Note which phase it belongs to.
 
 If all tasks are checked, stop and output:
 ```
-All tasks complete for {ticket_id}.
+All tasks complete.
 
 Next:
   - Commit any remaining changes with /dmx/commit.
@@ -42,22 +32,24 @@ Next:
   - Once validated, run /dmx/create-pr to open the pull request.
 ```
 
-## Step 4 — Announce the task
+## Step 3 — Announce the task
 
 Output:
 ```
 ## Task ({Phase Name}): {task text}
 ```
 
-## Step 5 — Implement the task
+## Step 4 — Implement the task
 
 Make the code change, create the file, write the migration, or perform whatever the task specifies. Apply the coding style from the system prompt (functional-first, immutable data, pure functions, type annotations).
 
-## Step 6 — Check it off
+If you notice a pattern or decision worth capturing, append a brief note to the `## Open Learnings` section in `.dmx/activeContext.md`.
+
+## Step 5 — Check it off
 
 Update tasks.md — change `- [ ]` to `- [x]` for this task only.
 
-## Step 7 — Report and pause
+## Step 6 — Report and pause
 
 Output:
 ```
