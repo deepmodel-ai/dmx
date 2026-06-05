@@ -24,7 +24,10 @@ Check for a PR template in the workspace root (try each path, use the first that
 **If no template file is found:** use the following embedded template as the output structure:
 
 ```markdown
-{If ticketing is not none: "Closes #{ticket_ref}" — omit this line entirely if ticketing is none}
+{Close keyword line — include only when ticketing is not none:
+  - github-issues: "Closes #{number}" where {number} is extracted from the gh-{number} ticket ref
+  - jira:          "{ticket_ref}" (e.g. "DM-123" — plain ticket key, no # prefix)
+  Omit this line entirely if ticketing is none.}
 
 ## Summary
 

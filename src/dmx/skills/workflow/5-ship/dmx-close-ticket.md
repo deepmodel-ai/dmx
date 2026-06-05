@@ -154,4 +154,4 @@ Next:
 
 - Never close a protected branch.
 - If the PR is not confirmed merged, warn before deleting the branch. Do not assume the work is done.
-- Do not modify `systemPatterns.md`, `techContext.md`, or `productContext.md` here — memory learnings are synced in `/dmx/create-pr`.
+- Make no changes to any `.dmx/` files — this skill is external-cleanup only. Memory learnings were already synced by `/dmx/create-pr`.
