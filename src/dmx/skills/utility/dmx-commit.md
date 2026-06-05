@@ -53,27 +53,32 @@ git status --short
 
 Before staging, refresh the memory bank with progress from this commit.
 
-Extract the ticket ref from the branch name (Jira: `[A-Z]+-[0-9]+`; GitHub Issues: `gh-[0-9]+`) or from `.dmx/activeContext.md`.
-
-Read:
-- `.dmx/activeContext.md`
-- `.dmx/tickets/active/{ticket_ref}/tasks.md` (if that folder exists)
-
 Run `git diff` and `git status --short` to understand unstaged changes.
 
-**Always update `activeContext.md`:**
-- Keep `## Active Ticket` as-is unless the branch name reveals a different ticket
-- Update `## Current Focus` with the current phase and next unchecked task from `tasks.md`, or a one-line summary of what this commit covers
-- Do not clear the active ticket here
+Read:
+- `.dmx/activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
+- `.dmx/spec.md` — if it exists, read for branch context (frontmatter `summary`)
 
-**Update other core files only when the diff clearly warrants it:**
-- `techContext.md` — new dependencies, env vars, or tooling (e.g. changes to `pyproject.toml`, `package.json`, `requirements.txt`, `.env.example`)
-- `systemPatterns.md` — new architectural patterns or design decisions visible in the diff
+**Promote qualifying inbox items to core files:**
+
+Scan `## Open Learnings` and `## Open Decisions` in `activeContext.md`. For each item, ask: _"Is this still true beyond this branch's lifetime?"_ If yes, promote it to the appropriate core file:
+- `systemPatterns.md` — architectural decisions, patterns, component relationships
+- `techContext.md` — new dependencies, env vars, constraints, tooling
+- `productContext.md` — user-facing behaviour changes
+
+After promoting an item, remove it from `activeContext.md`. Do not promote items that are branch-specific implementation details.
+
+**Append to `## Session Notes`** in `activeContext.md`:
+- One line summarising what this commit covers (e.g. "Added rate limit middleware — Phase 2 complete").
+
+**Update core files only when the diff clearly warrants it** (in addition to any promoted inbox items):
+- `techContext.md` — new dependencies visible in manifest files (`pyproject.toml`, `package.json`, `requirements.txt`, `.env.example`)
+- `systemPatterns.md` — new architectural patterns or design decisions introduced in this diff
 - `productContext.md` — user-facing behaviour changes visible in the diff
 
 Rules:
 - Append to the relevant section; do not rewrite whole files
-- Never delete existing content
+- Never delete existing content from core files
 - Skip a file entirely if nothing new belongs there
 - Do not extract ticket-specific implementation details into core files
 
@@ -103,9 +108,13 @@ Stop and wait for their answer. Proceed only if they confirm a single commit.
 
 ## Step 6 — Detect the ticket ID
 
-Extract the ticket ID from the branch name:
-- Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result (e.g. `dm-1662` → `DM-1662`)
-- None found: omit the `Closes` footer line
+Extract the ticket ref from the branch name:
+- Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result (e.g. `dm-1662` → `DM-1662`). Footer line: `Closes {TICKET_ID}`.
+- GitHub Issues: match `gh-([0-9]+)`, extract `{number}`. Footer line: `Closes #{number}`.
+
+If the branch name yields nothing, fall back to the `ticket` field in `.dmx/spec.md` frontmatter (already read in Step 3). For GitHub Issues refs (`gh-{number}`), still extract the numeric part for the footer.
+
+If still no ticket ref found: omit the `Closes` footer line.
 
 ## Step 7 — Resolve the commit type
 

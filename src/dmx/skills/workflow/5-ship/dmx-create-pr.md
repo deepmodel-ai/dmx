@@ -12,9 +12,6 @@ arguments:
   - name: draft
     description: "Set to true to open the PR as a draft. Defaults to false."
     required: false
-  - name: ticket_id
-    description: Ticket identifier. Auto-detected from the current branch name if omitted.
-    required: false
 ---
 
 You are opening a GitHub pull request. Follow every step in order.
@@ -36,42 +33,45 @@ If configuration is not available in context, fall back to reading `.dmx/config.
 
 ## Step 3 — Detect the ticket reference
 
-If `{{ticket_id}}` was provided, use it.
+Read `.dmx/spec.md` if it exists and extract the `ticket` field from YAML frontmatter. Also extract `summary`, `branch`, and `ticketing`.
 
-If not, run `git branch --show-current` and extract the ticket ref:
-- Jira: match `DM-[0-9]+` (case-insensitive), uppercase result
-- GitHub Issues: match `gh-([0-9]+)`, extract the number
+If `spec.md` is absent or `ticket` is empty, fall back to parsing the current branch name:
+- Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result
+- GitHub Issues: match `gh-([0-9]+)`, use `gh-{number}` as the ref
 - none: no ticket ref
 
 ## Step 4 — Full memory bank sync
 
-Sync durable learnings from the current ticket before opening the PR. Follow the same extraction logic as `/dmx/update-memory`:
+Sync durable learnings before opening the PR.
 
-Read all core memory bank files:
+Read all of the following:
 - `.dmx/projectbrief.md`
 - `.dmx/productContext.md`
 - `.dmx/systemPatterns.md`
 - `.dmx/techContext.md`
-- `.dmx/activeContext.md`
+- `.dmx/activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
+- `.dmx/spec.md` — already read in Step 3
+- `.dmx/tasks.md` — if it exists
 
-If a ticket ref was found in Step 3, read:
-- `.dmx/tickets/active/{ticket_ref}/spec.md`
-- `.dmx/tickets/active/{ticket_ref}/tasks.md`
+**Promote all qualifying inbox items from `activeContext.md`:**
 
-Extract and write only durable, cross-ticket knowledge:
+Scan `## Open Learnings` and `## Open Decisions`. For each item, ask: _"Is this durable beyond this branch?"_ If yes, append it to the appropriate core file:
+- `systemPatterns.md` — architectural decisions, patterns, component relationships
+- `techContext.md` — dependencies, env vars, constraints, tooling
+- `productContext.md` — user-facing behaviour changes
 
-**`systemPatterns.md`** — architectural patterns, design decisions with rationale, changed component relationships.
+Remove each promoted item from `activeContext.md` after writing it to the target file.
 
-**`techContext.md`** — new dependencies and why, new environment variables, new constraints.
+**Extract additional durable learnings** from `spec.md` and `tasks.md`:
+- Completed phases or significant decisions documented in tasks/spec that belong in `systemPatterns.md` or `techContext.md`
+- Any user-facing changes described in spec scope that should update `productContext.md`
 
-**`productContext.md`** — user-facing behaviour changes, new capabilities or flows.
-
-**`activeContext.md`** — refresh current state: active ticket, recently completed work, current focus, open decisions.
+**Refresh `activeContext.md`** — update `## Session Notes` with a line summarising the PR (e.g. "PR opened for: {summary}"). Do not write an `## Active Ticket` section.
 
 Do not extract:
 - Implementation details that will change (specific function names, line numbers)
 - Information already present in the files
-- Notes only relevant to this ticket
+- Notes that are only relevant to this branch's spec
 
 Update each file with targeted additions only. Do not rewrite. Do not delete existing content.
 
@@ -116,8 +116,9 @@ git push -u origin HEAD
 If `{{description}}` was provided, use it.
 
 If not, invoke `dmx-draft-pr-description` with:
-- `ticket_id`: {ticket ref from Step 3}
 - `base`: `{{base}}`
+
+The draft-pr-description skill will read `.dmx/spec.md` and `.dmx/tasks.md` directly for PR body content.
 
 ## Step 9 — Fetch ticket details for the PR title
 
@@ -130,16 +131,18 @@ issueIdOrKey: {ticket ref}
 Extract `summary` and `issuetype.name`.
 
 **If `ticketing` is `github-issues`:**
+Extract the numeric issue number from the ticket ref: `gh-{number}` → `{number}`.
+
 Call `get_issue` on `user-github`:
 ```
 owner:        {config.owner}
 repo:         {config.repo}
-issue_number: {ticket number extracted from ref}
+issue_number: {number}
 ```
 Extract `title` as summary, infer type from labels or branch prefix.
 
 **If `ticketing` is `none`:**
-Derive a summary from the branch name: un-slugify the description segment (replace hyphens with spaces, title-case).
+Use `summary` from the `spec.md` frontmatter (already read in Step 3). If spec is absent, derive from the branch name: un-slugify the description segment (replace hyphens with spaces, title-case).
 
 ## Step 10 — Construct the PR title
 
@@ -182,7 +185,7 @@ Call `update_issue` on `user-github` to add label `in-review` and remove `in-pro
 ```
 owner:        {config.owner}
 repo:         {config.repo}
-issue_number: {ticket number}
+issue_number: {number extracted from gh-{number} ref}
 labels:       ["in-review"]
 ```
 

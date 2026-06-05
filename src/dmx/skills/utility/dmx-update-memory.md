@@ -1,11 +1,7 @@
 ---
 name: update-memory
 title: Update Memory Bank
-description: Review the current ticket's spec and completed tasks, extract durable project learnings, and sync them into the core memory bank files. On-demand escape hatch — `/dmx/commit` and `/dmx/create-pr` handle automatic updates during normal workflow.
-arguments:
-  - name: ticket_id
-    description: Jira ticket ID to pull learnings from. Auto-detected from activeContext.md if omitted.
-    required: false
+description: Review spec.md, tasks.md, and the activeContext learning inbox; extract durable project learnings; reconcile contradictions; and sync everything into the core memory bank files. On-demand escape hatch — /dmx/commit and /dmx/create-pr handle automatic updates during normal workflow.
 ---
 
 You are updating the project memory bank with durable learnings from recent work. Follow every step in order. Be precise — only write things that will still be true and useful in future sessions.
@@ -21,19 +17,17 @@ Read each of the following files in full before making any changes:
 
 If any file does not exist, create it with a minimal placeholder header before continuing.
 
-## Step 2 — Read the current ticket's working files
+## Step 2 — Read branch working files
 
-If `{{ticket_id}}` was provided, use it. Otherwise extract from `activeContext.md`.
+Read the following if they exist:
+- `.dmx/spec.md` — branch spec with YAML frontmatter
+- `.dmx/tasks.md` — phased task list
 
-If a ticket ID is found, read:
-- `.dmx/tickets/active/{ticket_id}/spec.md`
-- `.dmx/tickets/active/{ticket_id}/tasks.md`
-
-If neither exists or no ticket is active, proceed with Step 3 using only what is visible in the current session's context.
+If neither exists, proceed with Step 3 using only what is visible in the current session's context and the core files read in Step 1.
 
 ## Step 3 — Extract durable learnings
 
-From the ticket files and recent session context, identify:
+From the working files, active context, and recent session context, identify what is durable across branches:
 
 **For `systemPatterns.md`:**
 - New architectural patterns introduced or discovered
@@ -51,44 +45,45 @@ From the ticket files and recent session context, identify:
 - Changes to how the product works from a user's perspective
 - New features, flows, or capabilities added
 
-**For `activeContext.md`:**
-- What was just completed
-- What the next focus area is
-- Any open decisions or unresolved trade-offs
-- Learnings that don't fit the other files
+**Promote all inbox items from `activeContext.md`:**
+Scan `## Open Learnings` and `## Open Decisions`. For every item, ask: _"Is this still true and useful beyond this branch?"_ If yes, write it to the appropriate core file above (or update an existing entry if it contradicts or extends one). Remove the item from `activeContext.md` after writing it. If an item is branch-specific implementation detail, remove it without promoting.
 
 Do not extract:
 - Implementation details that will change (specific function names, line numbers)
 - Information already present in the files
-- Notes that are only relevant to the current ticket (those belong in the ticket folder)
+- Notes that are only relevant to the current branch's spec or tasks
 
-## Step 4 — Update each file that needs changes
+**Reconcile contradictions:** If a new learning contradicts an existing statement in a core file, update the existing statement in-place rather than appending a conflicting line.
 
-For each file with new learnings, make targeted additions or amendments. Rules:
+## Step 4 — Update each core file that needs changes
+
+For each file with new learnings, make targeted additions or amendments:
 - Append to the relevant section; do not rewrite whole files.
 - Use clear, present-tense statements ("The service layer uses X pattern for Y reason").
 - If a previous statement is now incorrect, update it in-place.
 - Keep entries concise — one idea per bullet.
 
-Leave files unchanged if there is nothing new to add. Do not fabricate updates for the sake of appearing thorough.
+Leave files unchanged if there is nothing new to add. Do not fabricate updates.
 
-## Step 5 — Update activeContext.md fully
+## Step 5 — Refresh activeContext.md
 
-`activeContext.md` always needs a current-state refresh. Update it to reflect:
+After promoting inbox items, rewrite `activeContext.md` to the learning-inbox structure. Preserve any items not yet promoted (i.e. items that are branch-specific and belong in the next session):
 
 ```markdown
-## Active Ticket
-{update or clear depending on whether the ticket is done}
-
-## Recently Completed
-- {ticket_id}: {one-line summary of what was done}
-
-## Current Focus
-{what is next — next ticket, next phase, or "none"}
+## Open Learnings
+{Any learnings from this session not yet ready to promote, or newly observed patterns still being validated.
+ Leave empty if all items were promoted.}
 
 ## Open Decisions
-{any unresolved trade-offs or design questions worth tracking}
+{Unresolved trade-offs or design questions that need a decision.
+ Leave empty if all items were resolved or promoted.}
+
+## Session Notes
+{Brief log of recent activity — one line per commit or significant context shift.
+ Keep the most recent 5–10 entries; trim older ones.}
 ```
+
+Do not add an `## Active Ticket` section. Branch identity lives in `spec.md`, not here.
 
 ## Step 6 — Return the result
 
@@ -97,10 +92,14 @@ Output:
 Memory bank updated.
 
 Files changed:
-{list each file that was modified and a one-line summary of what was added}
+{list each file that was modified and a one-line summary of what was added or amended}
 
 Files unchanged:
 {list files with no updates}
+
+activeContext inbox:
+  Promoted: {N} items
+  Remaining: {M} items
 
 Next:
   - Run /dmx/create-ticket to start the next piece of work.
@@ -109,6 +108,7 @@ Next:
 
 ## Guards
 
-- Never delete existing content from memory bank files — only add or amend.
-- Never store ticket-specific implementation details in core files. Those belong in the ticket folder.
-- If the ticket's `tasks.md` shows unchecked tasks remaining, note in the output: "Note: {ticket_id} has unchecked tasks — memory was updated with progress so far, not a completed state."
+- Never delete existing content from core files — only add or amend.
+- Never store ticket-specific implementation details (function names, line numbers, single-branch decisions) in core files. Those belong in `spec.md` or `tasks.md`.
+- If `tasks.md` shows unchecked tasks remaining, note in output: "Note: tasks.md has unchecked tasks — memory updated with progress so far, not a completed state."
+- After Step 5, `activeContext.md` must not contain an `## Active Ticket` section.

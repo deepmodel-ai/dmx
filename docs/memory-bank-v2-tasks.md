@@ -102,26 +102,26 @@ Read flat spec/tasks only; no ticket resolution.
 
 Three-tier sync: light (commit), full (create-pr), deep (update-memory).
 
-- [ ] Update `src/dmx/skills/utility/dmx-commit.md`
-  - [ ] Remove ticket resolution from `activeContext`
-  - [ ] Light sync: read `activeContext.md` + diff; promote qualifying inbox items to core files
-  - [ ] Trim promoted items from `activeContext`
-  - [ ] Remove `tickets/active/` path reads
-  - [ ] Ticket footer from `spec.md` frontmatter or branch name parse
-  - [ ] Remove “Keep Active Ticket as-is” logic
-- [ ] Update `src/dmx/skills/workflow/5-ship/dmx-create-pr.md`
-  - [ ] Full sync: read `.dmx/spec.md`, `.dmx/tasks.md`, `activeContext.md`, all core files
-  - [ ] Extract durable learnings from spec/tasks/inbox (not `tickets/active/` paths)
-  - [ ] Remove `activeContext` ticket pointer refresh
-  - [ ] Ticket ref from spec frontmatter or branch parse for PR title / transitions
-  - [ ] Memory commit message unchanged in intent
-- [ ] Update `src/dmx/skills/utility/dmx-update-memory.md`
-  - [ ] Remove `ticket_id` argument from frontmatter
-  - [ ] Remove ticket resolution step
-  - [ ] Read `.dmx/spec.md`, `.dmx/tasks.md`, `activeContext.md`, all core files
-  - [ ] Deep sync: reconcile contradictions; promote all qualifying inbox items
-  - [ ] Refresh `activeContext` structure (Open Learnings / Open Decisions / Session Notes) — no Active Ticket section
-  - [ ] Update guards — ticket-specific details stay in spec/tasks, not core files
+- [x] Update `src/dmx/skills/utility/dmx-commit.md`
+  - [x] Remove ticket resolution from `activeContext`
+  - [x] Light sync: read `activeContext.md` + diff; promote qualifying inbox items to core files
+  - [x] Trim promoted items from `activeContext`
+  - [x] Remove `tickets/active/` path reads
+  - [x] Ticket footer from `spec.md` frontmatter or branch name parse
+  - [x] Remove “Keep Active Ticket as-is” logic
+- [x] Update `src/dmx/skills/workflow/5-ship/dmx-create-pr.md`
+  - [x] Full sync: read `.dmx/spec.md`, `.dmx/tasks.md`, `activeContext.md`, all core files
+  - [x] Extract durable learnings from spec/tasks/inbox (not `tickets/active/` paths)
+  - [x] Remove `activeContext` ticket pointer refresh
+  - [x] Ticket ref from spec frontmatter or branch parse for PR title / transitions
+  - [x] Memory commit message unchanged in intent
+- [x] Update `src/dmx/skills/utility/dmx-update-memory.md`
+  - [x] Remove `ticket_id` argument from frontmatter
+  - [x] Remove ticket resolution step
+  - [x] Read `.dmx/spec.md`, `.dmx/tasks.md`, `activeContext.md`, all core files
+  - [x] Deep sync: reconcile contradictions; promote all qualifying inbox items
+  - [x] Refresh `activeContext` structure (Open Learnings / Open Decisions / Session Notes) — no Active Ticket section
+  - [x] Update guards — ticket-specific details stay in spec/tasks, not core files
 
 ---
 
