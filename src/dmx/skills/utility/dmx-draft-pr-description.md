@@ -3,9 +3,6 @@ name: draft-pr-description
 title: Draft PR Description
 description: Generate the pull request body from the current branch's commits, diff, and ticket. Outputs ready-to-use markdown following the standard PR template. Called automatically by create-pr, but available standalone to preview before opening a PR.
 arguments:
-  - name: ticket_id
-    description: Ticket identifier. Auto-detected from the current branch name if omitted.
-    required: false
   - name: base
     description: Base branch to diff against. Defaults to branch_base from config.
     required: false
@@ -72,13 +69,18 @@ If configuration is not available in context, fall back to reading `.dmx/config.
 
 - If `{{base}}` was not provided, use `{config.branch_base}`.
 
-## Step 4 — Detect the ticket reference
+## Step 4 — Detect the ticket reference and read spec/tasks
 
-If `{{ticket_id}}` was provided, use it.
+Read `.dmx/spec.md` if it exists. Extract from the YAML frontmatter:
+- `ticket` → store as `ticket_ref` (may be empty when ticketing is `none`)
+- `summary` → one-line summary (use as fallback if API is unavailable)
+- `branch`, `ticketing`
 
-If not, run `git branch --show-current` and extract:
-- Jira: match `DM-[0-9]+` (case-insensitive), uppercase result → store as `ticket_ref`
-- GitHub Issues: match `gh-([0-9]+)`, extract number → store as `ticket_ref` = `gh-{number}`
+Also read `.dmx/tasks.md` if it exists — use completed phases/tasks to enrich the Changes and Validation sections.
+
+If `spec.md` is absent or `ticket` is empty, fall back to parsing `git branch --show-current`:
+- Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result → `ticket_ref`
+- GitHub Issues: match `gh-([0-9]+)`, extract number → `ticket_ref` = `gh-{number}`
 - none: no ticket ref
 
 ## Step 5 — Fetch ticket details
@@ -110,8 +112,9 @@ Store `ticket_url` = `{html_url}`.
 
 **If `ticketing` is `none`:**
 
-Derive `summary` from the branch name: take the description segment, replace hyphens with spaces, title-case.
-`description` = empty. `ticket_url` = none.
+Use `summary` from `spec.md` frontmatter (already read in Step 4) if available.
+Otherwise derive from the branch name: take the description segment, replace hyphens with spaces, title-case.
+`description` = spec `## Context` section if available, otherwise empty. `ticket_url` = none.
 
 ## Step 6 — Gather git context
 
@@ -138,10 +141,10 @@ Use only commits after the merge-base. Do not include commits on the base branch
 ## Step 7 — Write the Summary
 
 1–2 sentences covering:
-1. What changed (from commits and ticket summary)
-2. Why this approach was chosen (from ticket description, commit bodies, or non-obvious decisions in the diff)
+1. What changed (from commits, ticket summary, and `spec.md` summary/context if available)
+2. Why this approach was chosen (from ticket description, spec Technical Approach, commit bodies, or non-obvious decisions in the diff)
 
-Do not copy-paste commit messages. Synthesise into one or two tight sentences.
+Do not copy-paste commit messages or spec sections verbatim. Synthesise into one or two tight sentences.
 
 ## Step 8 — Write the Review focus
 
@@ -153,7 +156,7 @@ If the PR is small and straightforward, write "Review the full diff — it is sm
 
 ## Step 9 — Write the Changes section
 
-Bullet list of meaningful changes from the reviewer's perspective. One bullet per logical concern, not one per commit. Group related commits. Be specific — file names, config keys, function names where useful. Do not list trivial formatting or whitespace changes.
+Bullet list of meaningful changes from the reviewer's perspective. One bullet per logical concern, not one per commit. Group related commits. Be specific — file names, config keys, function names where useful. If `tasks.md` is available, use completed phase names to organise bullets. Do not list trivial formatting or whitespace changes.
 
 ## Step 10 — Write the Validation section
 
@@ -161,6 +164,7 @@ List what was actually tested or verified. Use `[x]` for each item. Draw from:
 - Commits that mention testing, running, or verifying
 - Test files in the diff
 - CI status if mentioned
+- Acceptance criteria from `spec.md` that are now satisfied (if spec is available)
 
 If no evidence of testing exists in the diff or commits, write a single unchecked item: `[ ] Manual testing required`.
 

@@ -129,15 +129,15 @@ Three-tier sync: light (commit), full (create-pr), deep (update-memory).
 
 Git-clean close; integration skills use spec frontmatter.
 
-- [ ] Update `src/dmx/skills/workflow/5-ship/dmx-close-ticket.md`
-  - [ ] Remove Step 9 — archive folder move (`mv tickets/active/ → archived/`)
-  - [ ] Remove Step 11 — `activeContext` clear
-  - [ ] Update skill description — external cleanup only, no `.dmx/` mutations
-  - [ ] Renumber steps; update result output (remove Folder archived / memory synced lines)
-- [ ] Update `src/dmx/skills/utility/dmx-draft-pr-description.md`
-  - [ ] Read ticket ref from `.dmx/spec.md` frontmatter or branch parse
-  - [ ] Read spec/tasks content from flat paths for PR body generation
-  - [ ] Remove `tickets/active/` references if any
+- [x] Update `src/dmx/skills/workflow/5-ship/dmx-close-ticket.md`
+  - [x] Remove Step 9 — archive folder move (`mv tickets/active/ → archived/`)
+  - [x] Remove Step 11 — `activeContext` clear
+  - [x] Update skill description — external cleanup only, no `.dmx/` mutations
+  - [x] Renumber steps; update result output (remove Folder archived / memory synced lines)
+- [x] Update `src/dmx/skills/utility/dmx-draft-pr-description.md`
+  - [x] Read ticket ref from `.dmx/spec.md` frontmatter or branch parse
+  - [x] Read spec/tasks content from flat paths for PR body generation
+  - [x] Remove `tickets/active/` references if any
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: close-ticket
 title: Close Ticket
-description: After a PR is merged, closes out the ticket completely — transitions the ticket to Done, adds the PR link as a comment, deletes the branch locally and remotely, archives the ticket folder, and clears the active context. Handles hotfix back-merge detection automatically.
+description: After a PR is merged, closes out the ticket externally — transitions the ticket to Done, adds the PR link as a comment, deletes the branch locally and remotely, and raises hotfix back-merge PRs if needed. Makes no changes to .dmx/ files.
 arguments:
   - name: ticket_id
     description: Ticket identifier. Auto-detected from the current branch name if omitted.
@@ -113,14 +113,7 @@ git push origin --delete {close_branch}
 
 If the remote branch no longer exists, ignore the error.
 
-## Step 9 — Archive the ticket folder
-
-If `.dmx/tickets/active/{ticket_ref}/` exists:
-```
-mv .dmx/tickets/active/{ticket_ref} .dmx/tickets/archived/{ticket_ref}
-```
-
-## Step 10 — Hotfix back-merge check
+## Step 9 — Hotfix back-merge check
 
 If `base.ref` from Step 4 is `master`:
 
@@ -140,20 +133,7 @@ maintainer_can_modify: true
 
 If a `development` branch exists, raise a second PR for `master → development` with the same pattern.
 
-## Step 11 — Clear activeContext.md
-
-```markdown
-## Active Ticket
-_(none — run /dmx/create-ticket to start new work)_
-
-## Recently Completed
-- {ticket_ref}: {one-line summary of what was built}
-
-## Current Focus
-{none, or note the next planned ticket if known}
-```
-
-## Step 12 — Return the result
+## Step 10 — Return the result
 
 ```
 Ticket {ticket_ref} closed.
@@ -161,7 +141,6 @@ Ticket {ticket_ref} closed.
   Branch:  {close_branch} deleted locally and on origin
   Ticket:  {ticket_ref} → Done
   PR link: added to ticket
-  Folder:  archived to .dmx/tickets/archived/{ticket_ref}/
 
 {if hotfix} Back-merge PRs raised:
   - {config.branch_base} ← master: {PR URL}
