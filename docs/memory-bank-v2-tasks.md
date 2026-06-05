@@ -145,12 +145,12 @@ Git-clean close; integration skills use spec frontmatter.
 
 Ensure bundled skills, rules, and snapshots are consistent with v2. Follow [Phase 1 testing policy](#testing-policy-workflow-version) — no hardcoded workflow version asserts.
 
-- [ ] Grep entire `src/dmx/skills/` for stale references — `tickets/active`, `tickets/archived`, `## Active Ticket`, `activeContext` ticket resolution
-- [ ] Grep `src/dmx/rules/` for v1 path references
-- [ ] Update `tests/test_catalog.py` if skill argument counts changed (removed `ticket_id` from plan/implement/validate/update-memory)
-- [ ] Update `tests/test_server.py` if argument substitution tests reference removed args
-- [ ] Run full test suite — fix any failures from marker or skill content changes
-- [ ] Verify skill count unchanged (23 skills)
+- [x] Grep entire `src/dmx/skills/` for stale references — `tickets/active`, `tickets/archived`, `## Active Ticket`, `activeContext` ticket resolution
+- [x] Grep `src/dmx/rules/` for v1 path references
+- [x] Update `tests/test_catalog.py` if skill argument counts changed (removed `ticket_id` from plan/implement/validate/update-memory)
+- [x] Update `tests/test_server.py` if argument substitution tests reference removed args
+- [x] Run full test suite — fix any failures from marker or skill content changes
+- [x] Verify skill count unchanged (23 skills)
 
 ---
 
