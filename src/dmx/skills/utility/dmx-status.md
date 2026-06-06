@@ -14,11 +14,15 @@ You are generating a development status report. Follow every step in order.
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
+- `branch_base` → integration branch (default diff base for feature work)
+- `production_branch` → production branch (hotfixes, releases, tags)
 - `owner`, `repo` → GitHub coordinates (fall back to parsing `git remote get-url origin`)
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `github_username` → GitHub username (only needed when ticketing is `github-issues`)
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+
+If `branch_base` is missing from config, stop: "`branch_base` not set in config. Run /dmx/init to configure it."
 
 ## Step 2 — Resolve defaults
 
@@ -107,8 +111,10 @@ Current branch: {branch}
 ---
 
 ## Local Branch Summary
-{if current branch is not a protected branch:}
-Commits ahead of {branch_base}: {count from git log origin/{branch_base}..HEAD --oneline | wc -l}
+{if current branch is not a protected branch (`master`, `main`, `staging`, `development`, `{config.branch_base}`, or `{config.production_branch}`):}
+Commits ahead of {config.branch_base}: {count from `git log origin/{config.branch_base}..HEAD --oneline | wc -l`}
+Integration branch: {config.branch_base}
+Production branch:  {config.production_branch or "(not set — re-run /dmx/init)"}
 ```
 
 Output only the block above. No commentary.

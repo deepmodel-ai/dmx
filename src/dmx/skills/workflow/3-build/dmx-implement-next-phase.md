@@ -6,7 +6,25 @@ description: Execute every task in the next unchecked phase of tasks.md, checkin
 
 You are implementing the next phase of the current branch's work. Follow every step in order. You execute the whole phase — not just a single task — and then stop. Never continue to the next phase automatically.
 
-## Step 1 — Read spec.md and tasks.md
+## Step 1 — Load configuration and protected branch check
+
+The project configuration is injected into your context as a rule. Extract `branch_base` and `production_branch`. If not available in context, fall back to reading `.dmx/config.md`.
+
+Run:
+```
+git branch --show-current
+```
+
+Protected branches: `master`, `main`, `staging`, `development`, plus `{config.branch_base}` and `{config.production_branch}` when set in config (treat duplicate names once).
+
+If the current branch is one of the protected branches:
+1. Tell the user which branch they are on.
+2. Ask explicitly: "You are on `{branch}`. Implementing directly on this branch is usually unintentional. Do you want to proceed?"
+3. Stop and wait for their answer. Do not implement until they confirm.
+
+If they decline, stop. If they confirm, or the branch is not protected, continue.
+
+## Step 2 — Read spec.md and tasks.md
 
 Read both:
 - `.dmx/spec.md` — for context, summary, and technical approach
@@ -16,7 +34,7 @@ If `spec.md` does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` 
 
 If `tasks.md` does not exist, stop: "tasks.md not found. Run `/dmx/plan` to generate the task plan first."
 
-## Step 2 — Identify the next phase
+## Step 3 — Identify the next phase
 
 Scan tasks.md top-to-bottom and find the first phase that contains at least one unchecked task (`- [ ]`).
 
@@ -32,7 +50,7 @@ Next:
 
 Store the phase name and its full task list.
 
-## Step 3 — Announce the phase
+## Step 4 — Announce the phase
 
 Before doing any work, output:
 ```
@@ -42,7 +60,7 @@ Before doing any work, output:
 {list all tasks in the phase, unchecked}
 ```
 
-## Step 4 — Execute each task in sequence
+## Step 5 — Execute each task in sequence
 
 For each unchecked task in the phase, in order:
 
@@ -56,7 +74,7 @@ If you notice a pattern or decision worth capturing during implementation, appen
 
 Do not skip tasks. Do not reorder tasks. If a task is already checked, skip it silently.
 
-## Step 5 — Phase complete summary
+## Step 6 — Phase complete summary
 
 After all tasks in the phase are done, output:
 

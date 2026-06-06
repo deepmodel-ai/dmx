@@ -22,14 +22,16 @@ arguments:
 
 You are creating a git commit. Follow every step in order. Never push — committing and pushing are separate decisions.
 
-## Step 1 — Protected branch check
+## Step 1 — Load configuration and protected branch check
+
+The project configuration is injected into your context as a rule. Extract `branch_base` and `production_branch`. If not available in context, fall back to reading `.dmx/config.md`.
 
 Run:
 ```
 git branch --show-current
 ```
 
-Protected branches: `master`, `main`, `staging`, `development`.
+Protected branches: `master`, `main`, `staging`, `development`, plus `{config.branch_base}` and `{config.production_branch}` when set in config (treat duplicate names once).
 
 If the current branch is one of the protected branches:
 1. Tell the user which branch they are on.

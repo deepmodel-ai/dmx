@@ -62,7 +62,7 @@ Check for a PR template in the workspace root (try each path, use the first that
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → default base branch
+- `branch_base` → integration branch (default diff base)
 - `atlassian_domain`, `cloud_id` → Jira coordinates (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 

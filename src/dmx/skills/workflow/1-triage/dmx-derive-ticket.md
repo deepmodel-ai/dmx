@@ -14,7 +14,8 @@ You are formalising work that has already been started. The developer has uncomm
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → base branch
+- `branch_base` → integration branch
+- `production_branch` → production branch (when set in config)
 - `cloud_id`, `project_key` → Jira coordinates (only when ticketing is `jira`)
 - `atlassian_domain` → Jira domain (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
@@ -46,7 +47,7 @@ Record `original_branch` from `git branch --show-current`.
 
 Classify `original_branch`:
 
-**Protected branch** (`master`, `main`, `staging`, `development`):
+**Protected branch** (`master`, `main`, `staging`, `development`, or `{config.branch_base}` or `{config.production_branch}` when set in config):
 The developer is working directly on a protected branch. Changes must be moved to a new branch.
 Set `needs_stash = true`.
 

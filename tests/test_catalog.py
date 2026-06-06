@@ -212,3 +212,88 @@ class TestBundledSkills:
             f"Expected 23 bundled skills but got {len(skills)}. "
             "A skill file may have broken YAML frontmatter."
         )
+
+
+class TestBranchRoleSkillContent:
+    """Bundled skills must use config branch roles — not hardcoded master git refs."""
+
+    @pytest.fixture()
+    def bundled_skill_bodies(self) -> dict[str, str]:
+        import importlib.resources as pkg
+        from pathlib import Path as _Path
+
+        skills_dir = _Path(str(pkg.files("dmx") / "skills"))
+        return {skill.name: skill.body for skill in load_skills(skills_dir)}
+
+    def test_create_pr_hotfix_base_auto_detect(self, bundled_skill_bodies: dict[str, str]) -> None:
+        body = bundled_skill_bodies["create-pr"]
+        assert "spec frontmatter `type` is `hotfix`" in body
+        assert "contains `**Type:** hotfix`" in body
+        assert "**Resolve `production_branch` when needed**" in body
+        assert "do not override an explicit argument" in body
+
+    def test_hotfix_spec_includes_type_in_frontmatter(self, bundled_skill_bodies: dict[str, str]) -> None:
+        body = bundled_skill_bodies["hotfix"]
+        assert "type: hotfix" in body
+
+    def test_release_merge_targets_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+        body = bundled_skill_bodies["release-merge"]
+        assert "base:                  {config.production_branch}" in body
+        assert "base:                  master" not in body
+
+    def test_create_release_tags_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+        body = bundled_skill_bodies["create-release"]
+        assert "git checkout {config.production_branch}" in body
+        assert "--target {config.production_branch}" in body
+        assert "git checkout master" not in body
+
+    def test_hotfix_branches_from_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+        body = bundled_skill_bodies["hotfix"]
+        assert "from_branch: {config.production_branch}" in body
+        assert "from_branch: master" not in body
+
+    def test_no_hardcoded_master_git_refs_in_branch_role_skills(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
+        forbidden = (
+            "base:                  master",
+            "from_branch: master",
+            "git checkout master",
+            "--target master",
+            "head:   master",
+        )
+        for skill_name in (
+            "create-pr",
+            "release-merge",
+            "create-release",
+            "hotfix",
+            "close-ticket",
+        ):
+            body = bundled_skill_bodies[skill_name]
+            for pattern in forbidden:
+                assert pattern not in body, f"{skill_name} contains hardcoded master git ref: {pattern!r}"
+
+
+class TestSystemPromptBranchRoles:
+    """Always-apply system prompt must describe config branch roles in the commands table."""
+
+    @pytest.fixture()
+    def system_prompt_body(self) -> str:
+        import importlib.resources as pkg
+        from pathlib import Path as _Path
+
+        rules_dir = _Path(str(pkg.files("dmx") / "rules"))
+        rules = load_rules(rules_dir)
+        rule = next(r for r in rules if r.name == "system-prompt")
+        return rule.body
+
+    def test_hotfix_command_uses_production_branch(self, system_prompt_body: str) -> None:
+        assert "| `/dmx/hotfix` | Branch from `production_branch`" in system_prompt_body
+
+    def test_release_commands_use_branch_roles(self, system_prompt_body: str) -> None:
+        assert "`branch_base` → `production_branch`" in system_prompt_body
+        assert "Tag `production_branch`" in system_prompt_body
+
+    def test_sync_branch_uses_integration_branch(self, system_prompt_body: str) -> None:
+        assert "Rebase onto latest integration branch (`branch_base`)" in system_prompt_body
+        assert "Rebase onto latest base branch" not in system_prompt_body
