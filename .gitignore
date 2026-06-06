@@ -46,3 +46,8 @@ MANIFEST
 # Environment / secrets
 .env
 .env.*
+
+
+# Local planning docs (not published)
+docs/memory-bank-v2-tasks.md
+docs/memory-bank-v2-spec.md
