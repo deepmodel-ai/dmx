@@ -20,7 +20,8 @@ You are creating a new branch and scaffolding the spec for active development. F
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → base branch (default: `staging` if not set)
+- `branch_base` → integration branch (from `/dmx/init` config)
+- `production_branch` → production branch (when set in config; used in behind-production guard)
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
@@ -205,6 +206,6 @@ Next steps:
 ## Guards
 
 - Never use for hotfixes. If the user mentions "hotfix" or "production incident", direct them to `/dmx/hotfix`.
-- If `branch_base` in config is far behind `master`, warn: "Your base branch appears behind master — consider syncing before branching."
+- If `branch_base` in config appears far behind `{config.production_branch}`, warn: "Your base branch appears behind the production branch — consider syncing before branching."
 - If `.dmx/` does not exist, stop: "Memory bank not found. Run /dmx/init to set up this project."
 - For `none` mode, if neither `{{ticket_id}}` nor `{{description}}` was provided, stop: "Provide a `description` when ticketing is disabled."

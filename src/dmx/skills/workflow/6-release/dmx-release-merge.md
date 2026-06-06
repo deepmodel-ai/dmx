@@ -1,22 +1,37 @@
 ---
 name: release-merge
-title: Release Merge (Staging → Master)
-description: Open a pull request from staging to master as the formal release gate. Reads release notes from .dmx/releases/{version}.md if already drafted, otherwise generates them automatically. A human reviews and merges the PR before create-release is run.
+title: Release Merge (Integration → Production)
+description: Open a pull request from the integration branch to the production branch as the formal release gate. Reads release notes from .dmx/releases/{version}.md if already drafted, otherwise generates them automatically. A human reviews and merges the PR before create-release is run.
 arguments:
   - name: version
     description: Version number for this release, e.g. v0.14.0.
     required: true
 ---
 
-You are creating the staging → master release merge PR. Follow every step in order. This PR is a gate for human review — you are not merging it yourself.
+You are creating the `{config.branch_base}` → `{config.production_branch}` release merge PR. Follow every step in order. This PR is a gate for human review — you are not merging it yourself.
 
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
 - `owner`, `repo` → GitHub coordinates
-- `branch_base` → should be `staging` or `main`
+- `branch_base` → integration branch (feature PRs merge here)
+- `production_branch` → production branch (releases, hotfixes, tags)
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+
+If `production_branch` is set in config, use it.
+
+If missing from config:
+```
+git branch -a
+```
+Treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → stop: "Both master and main exist. Set `production_branch` in `.dmx/config.md` or re-run `/dmx/init`."
+- If neither exists → stop: "`production_branch` not set in config. Run /dmx/init to configure it."
+
+If `branch_base` equals `production_branch`, stop: "Integration and production branch are both `{config.branch_base}` — trunk model. A release-merge PR is not needed; run /dmx/create-release version:{{version}} directly after drafting release notes."
 
 ## Step 2 — Load or generate release notes
 
@@ -39,7 +54,7 @@ Construct the PR body using the extracted content. This is the engineering team'
 **Type of Change** — always mark `Release merge` with `[X]`. Mark others `[X]` only if represented in the release notes:
 
 ```markdown
-## Merge `{config.branch_base}` into `master` — {{version}}
+## Merge `{config.branch_base}` into `{config.production_branch}` — {{version}}
 
 ## Type of Change
 - [X] Release merge
@@ -53,7 +68,7 @@ Construct the PR body using the extracted content. This is the engineering team'
 
 {executive summary paragraph from the release notes}
 
-This PR merges `{config.branch_base}` into `master` for the **{{version}}** release.
+This PR merges `{config.branch_base}` into `{config.production_branch}` for the **{{version}}** release.
 
 ## What is fixed / implemented?
 
@@ -87,16 +102,16 @@ _N/A_
 
 Store this as `pr_body`.
 
-## Step 4 — Verify staging is ahead of master
+## Step 4 — Verify integration is ahead of production
 
 Run:
 ```
 git fetch origin
-git log origin/master..origin/{config.branch_base} --oneline
+git log origin/{config.production_branch}..origin/{config.branch_base} --oneline
 ```
 
 If this returns no commits, stop:
-"No commits ahead of master on {config.branch_base} — nothing to release. Ensure all feature PRs for this release have been merged first."
+"No commits ahead of {config.production_branch} on {config.branch_base} — nothing to release. Ensure all feature PRs for this release have been merged first."
 
 ## Step 5 — Check for an existing release-merge PR
 
@@ -105,7 +120,7 @@ Call `list_pull_requests` on `user-github`:
 owner:  {config.owner}
 repo:   {config.repo}
 state:  open
-base:   master
+base:   {config.production_branch}
 head:   {config.owner}:{config.branch_base}
 ```
 
@@ -118,10 +133,10 @@ Call `create_pull_request` on `user-github`:
 ```
 owner:                 {config.owner}
 repo:                  {config.repo}
-title:                 Release | {{version}} — {config.branch_base} → master
+title:                 Release | {{version}} — {config.branch_base} → {config.production_branch}
 body:                  {pr_body from Step 3}
 head:                  {config.branch_base}
-base:                  master
+base:                  {config.production_branch}
 draft:                 false
 maintainer_can_modify: true
 ```

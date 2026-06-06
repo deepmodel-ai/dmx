@@ -1,7 +1,7 @@
 ---
 name: create-release
 title: Create GitHub Release
-description: Tag master and publish a GitHub release with the drafted release notes. Reads from .dmx/releases/{version}.md if already drafted. Run only after the release-merge PR has been merged into master.
+description: Tag the production branch and publish a GitHub release with the drafted release notes. Reads from .dmx/releases/{version}.md if already drafted. Run only after the release-merge PR has been merged into the production branch (or directly on trunk repos where integration and production are the same branch).
 arguments:
   - name: version
     description: Version tag to create, e.g. v0.14.0. Must start with "v" followed by semver.
@@ -16,10 +16,23 @@ You are creating the official GitHub release. Follow every step in order. This a
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
-- `branch_base` → staging branch (used to verify master is ahead)
+- `branch_base` → integration branch
+- `production_branch` → production branch (tag and release target)
 - `owner`, `repo` → GitHub coordinates
 
 If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+
+If `production_branch` is set in config, use it.
+
+If missing from config:
+```
+git branch -a
+```
+Treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → stop: "Both master and main exist. Set `production_branch` in `.dmx/config.md` or re-run `/dmx/init`."
+- If neither exists → stop: "`production_branch` not set in config. Run /dmx/init to configure it."
 
 ## Step 2 — Validate the version format
 
@@ -31,15 +44,15 @@ If it does not match, stop: "Version `{{version}}` does not follow the expected 
 
 If `{{prerelease}}` was not provided, use `false`.
 
-## Step 4 — Verify master is ahead of the base branch
+## Step 4 — Verify production has absorbed integration
 
 Run:
 ```
 git fetch origin
-git log origin/{config.branch_base}..origin/master --oneline
+git log origin/{config.production_branch}..origin/{config.branch_base} --oneline
 ```
 
-If this returns no commits, warn: "master and {config.branch_base} are at the same point — the release-merge PR may not have been merged yet. Are you sure you want to proceed?"
+If this returns commits, warn: "{config.branch_base} is still ahead of {config.production_branch} — the release-merge PR may not have been merged yet. Are you sure you want to proceed?"
 
 Ask the user to confirm with Y/N before continuing. If they say N or do not confirm, stop.
 
@@ -67,7 +80,7 @@ Output:
 ```
 About to create release {{version}}:
 
-  Tag:        {{version}} on origin/master
+  Tag:        {{version}} on origin/{config.production_branch}
   Prerelease: {prerelease}
   Notes:      .dmx/releases/{{version}}.md
 
@@ -83,8 +96,8 @@ Wait for explicit `CONFIRM` (case-insensitive). Any other response — stop imme
 
 Run:
 ```
-git checkout master
-git pull origin master
+git checkout {config.production_branch}
+git pull origin {config.production_branch}
 git tag -a {{version}} -m "Release {{version}}"
 git push origin {{version}}
 ```
@@ -99,7 +112,7 @@ gh release create {{version}} \
   --title "{{version}}" \
   --notes-file .dmx/releases/{{version}}.md \
   {if prerelease: --prerelease} \
-  --target master
+  --target {config.production_branch}
 ```
 
 If `gh` is not available, stop: "The `gh` CLI is required for this step. Install it from https://cli.github.com and authenticate with `gh auth login`."
@@ -108,15 +121,15 @@ If `gh` is not available, stop: "The `gh` CLI is required for this step. Install
 
 ```
 Release created: {GitHub release URL}
-Tag: {{version}} on master
+Tag: {{version}} on {config.production_branch}
 
 Post-release checklist:
   - Verify the deployment pipeline has triggered (check GitHub Actions).
-  - If this was a hotfix, confirm back-merge PRs ({config.branch_base} ← master) have been merged.
+  - If this was a hotfix, confirm back-merge PRs ({config.production_branch} → {config.branch_base}) have been merged.
 ```
 
 ## Guards
 
-- Never tag any branch other than `master`.
+- Never tag any branch other than `{config.production_branch}`.
 - Never delete or move an existing tag.
 - Never proceed past Step 7 without explicit `CONFIRM` from the user.

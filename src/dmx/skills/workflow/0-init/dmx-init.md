@@ -10,7 +10,7 @@ You are setting up the AI SDLC framework for this project. Follow every step in 
 
 Check whether `.dmx/config.md` exists.
 
-If it does, tell the developer: "Existing config found — re-running will update it. Memory bank files with content will not be overwritten." Then proceed.
+If it does, read the existing file and record any values already set for `branch_base` and `production_branch`. Tell the developer: "Existing config found — re-running will update it. Memory bank files with content will not be overwritten. Existing `production_branch` will be kept." Then proceed.
 
 If it does not, this is a fresh init. Proceed.
 
@@ -29,7 +29,38 @@ Parse `owner` and `repo`:
 ```
 git branch -a
 ```
-Identify the base branch using this priority: `staging` → `main` → `master`. Use the first one found. If none found, set to `{REQUIRED}`.
+
+From the branch list, treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+
+**Integration branch (`branch_base`)** — feature PRs merge here; default diff base. Use this priority; take the first found: `staging` → `main` → `master`. If none found, set to `{REQUIRED}`.
+
+**Production branch (`production_branch`)** — releases, hotfixes, and tags target here. Skip detection if Step 1 already recorded `production_branch` from existing config.
+
+Otherwise:
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → ask:
+  ```
+  Both master and main exist. Which is your production branch (releases and hotfixes target here)?
+
+    1. master
+    2. main
+
+  Enter 1 or 2:
+  ```
+  Wait for the answer. Accept `1`, `2`, `master`, or `main`.
+- If neither exists → set to `{REQUIRED}` and tell the developer it must be set manually.
+
+If `staging`, `master`, and `main` are all present and `production_branch` was just resolved (detected or answered), confirm both roles:
+```
+Confirm branch roles:
+
+  Integration branch: {branch_base}
+  Production branch:  {production_branch}
+
+Correct? (y / enter corrections — integration: {branch}, production: {branch})
+```
+Wait. If they provide corrections, update `branch_base` and/or `production_branch` accordingly.
 
 Scan the project root for tech stack signals:
 - `package.json` → read `name`, `description`, `dependencies` for framework hints
@@ -189,11 +220,15 @@ If `setup_ide_rules` returns an empty `files` list (e.g. unsupported IDE), note 
 
 Create `.dmx/` if it does not exist.
 
+If `.dmx/config.md` already exists and contains `production_branch:`, keep the existing value — do not overwrite it. Write or update all other fields from this init run.
+
+When a skill reads config and `production_branch` is absent: auto-detect only when unambiguous (sole `master` or sole `main` in the repo); if both exist, stop and ask the user to set config or re-run `/dmx/init` — do not guess.
+
 Write `.dmx/config.md`:
 
 ```markdown
 ---
-description: AI SDLC project configuration. Read by every prompt to determine workflow mode, ticketing provider, base branch, and service credentials.
+description: AI SDLC project configuration. Read by every prompt to determine workflow mode, ticketing provider, integration branch, production branch, and service credentials.
 alwaysApply: true
 ---
 
@@ -205,8 +240,9 @@ workflow:     {workflow}
 
 ## Core Settings
 
-ticketing:    {ticketing}
-branch_base:  {branch_base}
+ticketing:           {ticketing}
+branch_base:         {branch_base}         # integration — feature PRs merge here
+production_branch:   {production_branch}   # production — releases, hotfixes, tags
 
 ## GitHub
 
@@ -311,10 +347,11 @@ mkdir -p .dmx/releases
 ```
 Setup complete.
 
-  Config:      .dmx/config.md
-  Workflow:    {workflow}
-  Ticketing:   {ticketing}
-  Base branch: {branch_base}
+  Config:              .dmx/config.md
+  Workflow:            {workflow}
+  Ticketing:           {ticketing}
+  Integration branch:  {branch_base}
+  Production branch:   {production_branch}
 
   Memory bank:
     .dmx/projectbrief.md       ← durable project knowledge

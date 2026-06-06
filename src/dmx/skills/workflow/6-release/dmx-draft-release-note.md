@@ -1,7 +1,7 @@
 ---
 name: draft-release-note
 title: Draft Release Note
-description: Generate structured release notes by diffing merged PRs and commits between the last published release and the current HEAD of the base branch. Enriches entries with ticket data from Jira, GitHub Issues, or PR titles alone.
+description: Generate structured release notes by diffing merged PRs and commits between the last published release and the current HEAD of the integration branch. Enriches entries with ticket data from Jira, GitHub Issues, or PR titles alone.
 arguments:
   - name: version
     description: Version number for this release, e.g. v0.14.0.
@@ -17,7 +17,8 @@ You are drafting release notes for version `{{version}}`. Output only the final 
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → the release branch (staging or main)
+- `branch_base` → integration branch (release notes diff from here)
+- `production_branch` → production branch (when set in config)
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
@@ -212,5 +213,5 @@ Release notes drafted: .dmx/releases/{{version}}.md
 {N} changes across {categories list}.
 
 Review and edit the file, then:
-  - Run /dmx/release-merge version:{{version}} to open the staging → master PR.
+  - Run /dmx/release-merge version:{{version}} to open the {config.branch_base} → {config.production_branch} PR.
 ```

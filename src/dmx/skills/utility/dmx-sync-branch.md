@@ -1,19 +1,20 @@
 ---
 name: sync-branch
 title: Sync Branch
-description: Rebase (or merge) the latest base branch onto the current feature or bug branch to keep it up to date. Pushes the result to origin.
+description: Rebase (or merge) the latest integration branch onto the current feature or bug branch to keep it up to date. Pushes the result to origin.
 arguments:
   - name: strategy
     description: "Integration strategy. Accepted values: rebase (default), merge."
     required: false
 ---
 
-You are syncing the current branch with the latest base branch. Follow every step in order.
+You are syncing the current branch with the latest integration branch (`branch_base`). Follow every step in order.
 
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
-- `branch_base` → the base branch to sync from
+- `branch_base` → integration branch to sync from
+- `production_branch` → production branch (when set in config)
 
 If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
@@ -31,7 +32,7 @@ git branch --show-current
 
 Store as `current_branch`.
 
-Guard: if `current_branch` is `{config.branch_base}`, `master`, or `development`, stop: "This command is only for feature or bug branches. Do not sync protected branches with it."
+Guard: if `current_branch` is a protected branch — `master`, `main`, `staging`, `development`, `{config.branch_base}`, or `{config.production_branch}` when set in config — stop: "This command is only for feature or bug branches. Do not sync protected branches with it."
 
 ## Step 4 — Check for a clean working tree
 

@@ -34,7 +34,7 @@ Before every task, I MUST read all memory bank files. This is not optional.
 
 ```
 .dmx/
-  config.md              ← project settings (ticketing, base branch, credentials)
+  config.md              ← project settings (ticketing, branch_base/integration, production_branch/releases-hotfixes-tags, credentials)
   projectbrief.md        ← goals, scope, core requirements         [durable]
   productContext.md      ← why the product exists, how it works    [durable]
   systemPatterns.md      ← architecture, design patterns           [durable]
@@ -92,7 +92,7 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/init` | Write IDE rules + scaffold `.dmx/` memory bank |
 | `/dmx/create-ticket` | Create a ticket in the configured provider |
 | `/dmx/derive-ticket` | Derive ticket from current context |
-| `/dmx/hotfix` | Branch from base for production incident |
+| `/dmx/hotfix` | Branch from `production_branch` for production incident |
 | `/dmx/plan` | Validate Q&A → generate phased `tasks.md` |
 | `/dmx/implement-next-phase` | Execute full next phase, stop |
 | `/dmx/implement-next-task` | Execute single next task, stop |
@@ -100,8 +100,8 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/create-pr` | Full memory sync, draft PR description, open PR |
 | `/dmx/close-ticket` | External cleanup: close ticket, delete branch |
 | `/dmx/draft-release-note` | Generate release notes |
-| `/dmx/release-merge` | Open staging → base branch PR |
-| `/dmx/create-release` | Tag base + publish release |
+| `/dmx/release-merge` | Open `branch_base` → `production_branch` release gate PR |
+| `/dmx/create-release` | Tag `production_branch` + publish release |
 | `/dmx/review` | Code review |
 | `/dmx/secure` | Security analysis |
 | `/dmx/test` | Write tests |
@@ -110,5 +110,5 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/create-branch` | Create branch + spec scaffold |
 | `/dmx/draft-pr-description` | Draft PR description |
 | `/dmx/status` | Open tickets + open PRs |
-| `/dmx/sync-branch` | Rebase onto latest base branch |
+| `/dmx/sync-branch` | Rebase onto latest integration branch (`branch_base`) |
 | `/dmx/update-memory` | On-demand full memory bank sync |

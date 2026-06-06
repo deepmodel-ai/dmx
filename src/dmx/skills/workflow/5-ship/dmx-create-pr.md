@@ -7,7 +7,7 @@ arguments:
     description: PR body markdown. If omitted, dmx-draft-pr-description is called automatically.
     required: false
   - name: base
-    description: Target branch. Defaults to branch_base from config. Use master only for hotfixes.
+    description: Target branch. Defaults to branch_base for features; auto-detects production_branch for hotfixes. Explicit value always wins.
     required: false
   - name: draft
     description: "Set to true to open the PR as a draft. Defaults to false."
@@ -20,20 +20,45 @@ You are opening a GitHub pull request. Follow every step in order.
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → default base branch
+- `branch_base` → integration branch (default target for feature PRs)
+- `production_branch` → production branch (hotfix PR target)
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates (fall back to parsing `git remote get-url origin`)
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
-## Step 2 — Resolve defaults
+## Step 2 — Resolve PR base and defaults
 
-- If `{{base}}` was not provided, use `{config.branch_base}`.
-- If `{{draft}}` was not provided, use `false`.
+Read `.dmx/spec.md` if it exists — store for later steps.
+
+Run `git branch --show-current` and store as `current_branch`.
+
+**Resolve `base`:**
+
+- If `{{base}}` was provided, use it — do not override an explicit argument.
+- Else if spec frontmatter `type` is `hotfix`, or `.dmx/spec.md` contains `**Type:** hotfix`, or `current_branch` starts with `hotfix-`:
+  - Resolve `production_branch` (see below) and use it as `base`.
+- Else use `{config.branch_base}`.
+
+**Resolve `production_branch` when needed** (hotfix PR base above, or when this skill requires it):
+
+If `production_branch` is set in config, use it.
+
+If missing from config:
+```
+git branch -a
+```
+Treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → stop: "Both master and main exist. Set `production_branch` in `.dmx/config.md` or re-run `/dmx/init`."
+- If neither exists → stop: "`production_branch` not set in config. Run /dmx/init to configure it."
+
+If `{{draft}}` was not provided, use `false`.
 
 ## Step 3 — Detect the ticket reference
 
-Read `.dmx/spec.md` if it exists and extract the `ticket` field from YAML frontmatter. Also extract `summary`, `branch`, and `ticketing`.
+Use `.dmx/spec.md` from Step 2 if already read; otherwise read it now. Extract the `ticket` field from YAML frontmatter. Also extract `summary`, `branch`, and `ticketing`.
 
 If `spec.md` is absent or `ticket` is empty, fall back to parsing the current branch name:
 - Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result

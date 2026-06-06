@@ -17,11 +17,24 @@ You are closing out a merged ticket. Follow every step in order.
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → base branch for checkout and back-merge
+- `branch_base` → integration branch for checkout and back-merge
+- `production_branch` → production branch (hotfix merge target)
 - `cloud_id`, `atlassian_domain` → Jira coordinates (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
 If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+
+If `production_branch` is set in config, use it.
+
+If missing from config:
+```
+git branch -a
+```
+Treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → stop: "Both master and main exist. Set `production_branch` in `.dmx/config.md` or re-run `/dmx/init`."
+- If neither exists → stop: "`production_branch` not set in config. Run /dmx/init to configure it."
 
 ## Step 2 — Detect the working branch
 
@@ -29,7 +42,7 @@ If `{{branch}}` was provided, use it. Otherwise run `git branch --show-current`.
 
 Store as `close_branch`.
 
-Guard: if `close_branch` is `staging`, `master`, `main`, or `development`, stop: "Cannot close a protected branch."
+Guard: if `close_branch` is a protected branch — `master`, `main`, `staging`, `development`, `{config.branch_base}`, or `{config.production_branch}` — stop: "Cannot close a protected branch."
 
 ## Step 3 — Detect the ticket reference
 
@@ -115,23 +128,23 @@ If the remote branch no longer exists, ignore the error.
 
 ## Step 9 — Hotfix back-merge check
 
-If `base.ref` from Step 4 is `master`:
+If `base.ref` from Step 4 is `{config.production_branch}`:
 
-Tell the user: "Hotfix merged to master. Raising back-merge PRs..."
+Tell the user: "Hotfix merged to {config.production_branch}. Raising back-merge PRs..."
 
-Call `create_pull_request` on `user-github` for `master → {config.branch_base}`:
+Call `create_pull_request` on `user-github` for `{config.production_branch} → {config.branch_base}`:
 ```
 owner:  {config.owner}
 repo:   {config.repo}
-title:  chore | Back-merge master into {config.branch_base} after {close_branch}
-body:   "Hotfix `{close_branch}` was merged to master. This PR brings those changes into {config.branch_base}."
-head:   master
+title:  chore | Back-merge {config.production_branch} into {config.branch_base} after {close_branch}
+body:   "Hotfix `{close_branch}` was merged to {config.production_branch}. This PR brings those changes into {config.branch_base}."
+head:   {config.production_branch}
 base:   {config.branch_base}
 draft:  false
 maintainer_can_modify: true
 ```
 
-If a `development` branch exists, raise a second PR for `master → development` with the same pattern.
+If a `development` branch exists, raise a second PR for `{config.production_branch} → development` with the same pattern.
 
 ## Step 10 — Return the result
 
@@ -143,8 +156,8 @@ Ticket {ticket_ref} closed.
   PR link: added to ticket
 
 {if hotfix} Back-merge PRs raised:
-  - {config.branch_base} ← master: {PR URL}
-  - development ← master: {PR URL}
+  - {config.production_branch} → {config.branch_base}: {PR URL}
+  - {config.production_branch} → development: {PR URL}
 
 Next:
   - Run /dmx/create-ticket to start the next piece of work.

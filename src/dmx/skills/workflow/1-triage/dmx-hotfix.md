@@ -1,7 +1,7 @@
 ---
 name: hotfix
 title: Start Hotfix
-description: Create a hotfix branch from master for a production incident, scaffold the spec, and transition the ticket to In Progress. Works with Jira, GitHub Issues, or no ticketing system.
+description: Create a hotfix branch from the production branch for a production incident, scaffold the spec, and transition the ticket to In Progress. Works with Jira, GitHub Issues, or no ticketing system.
 arguments:
   - name: ticket_id
     description: "Ticket identifier for the production incident. Jira: DM-1662. GitHub Issues: 123. Omit when ticketing is none."
@@ -11,17 +11,30 @@ arguments:
     required: false
 ---
 
-You are starting a hotfix for a production incident. Hotfix branches are always created from `master`, not `branch_base`. Follow every step in order.
+You are starting a hotfix for a production incident. Hotfix branches are always created from `{config.production_branch}`, not `{config.branch_base}`. Follow every step in order.
 
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
-- `branch_base` → used for back-merge target after hotfix is merged
+- `branch_base` → integration branch (back-merge target after hotfix is merged)
+- `production_branch` → production branch (hotfix source and PR target)
 - `cloud_id` → Jira cloud ID (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+
+If `production_branch` is set in config, use it.
+
+If missing from config:
+```
+git branch -a
+```
+Treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
+- If only `master` exists → `production_branch` = `master`
+- If only `main` exists → `production_branch` = `main`
+- If **both** `master` and `main` exist → stop: "Both master and main exist. Set `production_branch` in `.dmx/config.md` or re-run `/dmx/init`."
+- If neither exists → stop: "`production_branch` not set in config. Run /dmx/init to configure it."
 
 ## Step 2 — Fetch ticket details
 
@@ -68,14 +81,14 @@ If not, slugify the `summary` (lowercase, hyphens, truncate to 60 characters).
 | `github-issues` | `hotfix-gh-{number}-{description}` | `hotfix-gh-99-fix-token-expiry` |
 | `none` | `hotfix-{description}` | `hotfix-fix-token-expiry` |
 
-## Step 5 — Create the remote branch from master
+## Step 5 — Create the remote branch from production
 
 Call `create_branch` on `user-github`:
 ```
 owner:       {config.owner}
 repo:        {config.repo}
 branch:      {branch name}
-from_branch: master
+from_branch: {config.production_branch}
 ```
 
 If branch already exists, stop: "Branch `{branch_name}` already exists."
@@ -98,6 +111,7 @@ ticket: {ticket_ref or ""}
 branch: {branch_name}
 summary: {summary}
 ticketing: {ticketing}
+type: hotfix
 ---
 
 # {summary}
@@ -153,15 +167,15 @@ Add `in-progress` label via `update_issue`.
 
 ```
 Hotfix branch created: {branch_name}
-Based on: master
+Based on: {config.production_branch}
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Progress
 Spec: .dmx/spec.md
 
 Hotfix workflow:
   1. Implement the fix (use /dmx/implement-next-phase or /dmx/implement-next-task).
   2. Commit and push.
-  3. Open a PR to master (not {branch_base}): /dmx/create-pr with base: master
-  4. After the PR is merged, run /dmx/cleanup.
-     → cleanup will automatically raise back-merge PRs to {branch_base} and development.
+  3. Open a PR to {config.production_branch} (not {config.branch_base}): /dmx/create-pr with base: {config.production_branch}
+  4. After the PR is merged, run /dmx/close-ticket.
+     → close-ticket will automatically raise back-merge PRs to {config.branch_base} and development.
   5. Create a release: /dmx/create-release
 ```

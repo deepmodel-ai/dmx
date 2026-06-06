@@ -21,7 +21,8 @@ You are starting a new piece of work. Follow every step in order.
 The project configuration is injected into your context as a rule. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `workflow` → `freestyle` | `sdlc`
-- `branch_base` → base branch
+- `branch_base` → integration branch (feature PR target)
+- `production_branch` → production branch (when set in config; used in behind-production guard)
 - `atlassian_domain`, `cloud_id`, `project_key` → Jira coordinates (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
@@ -257,5 +258,5 @@ Spec is pre-filled with project context. Review it, then:
 
 - Do not create a ticket with a summary longer than 80 characters. Shorten it first.
 - If ticket creation fails (API error), stop before creating the branch. Surface the full error.
-- If `branch_base` in config appears far behind `master`, warn: "Base branch may be behind master — consider syncing before branching."
+- If `branch_base` in config appears far behind `{config.production_branch}`, warn: "Base branch may be behind the production branch — consider syncing before branching."
 - Never use for hotfixes. If `{{task}}` contains "hotfix" or "production incident", stop: "Use /dmx/hotfix for production incidents."
