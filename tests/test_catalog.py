@@ -225,9 +225,7 @@ class TestBranchRoleSkillContent:
         skills_dir = _Path(str(pkg.files("dmx") / "skills"))
         return {skill.name: skill.body for skill in load_skills(skills_dir)}
 
-    def test_create_pr_hotfix_base_auto_detect(
-        self, bundled_skill_bodies: dict[str, str]
-    ) -> None:
+    def test_create_pr_hotfix_base_auto_detect(self, bundled_skill_bodies: dict[str, str]) -> None:
         body = bundled_skill_bodies["create-pr"]
         assert "spec frontmatter `type` is `hotfix`" in body
         assert "contains `**Type:** hotfix`" in body
