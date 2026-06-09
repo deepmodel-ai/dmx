@@ -13,7 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Memory bank layout (branch-scoped model)** — `spec.md` and `tasks.md` now live directly at `.dmx/spec.md` and `.dmx/tasks.md` on the feature branch instead of the nested `.dmx/tickets/active/{ref}/` path. The `tickets/active/` and `tickets/archived/` directories are no longer created by `/dmx/init` and are not used by any skill. `spec.md` now includes a YAML frontmatter block (`ticket`, `branch`, `summary`, `ticketing`).
 - **`activeContext.md` repurposed** — no longer holds an `## Active Ticket` pointer or `## Current Focus`. Now functions as a **learning inbox** with three sections: `## Open Learnings`, `## Open Decisions`, `## Session Notes`. Items are promoted to durable core files on commit and PR; the file is fully refreshed by `/dmx/update-memory`.
-- **Workflow version marker updated** — IDE rule files now embed `<!-- deepmodel:dmx:start 0.1.0 -->` (SemVer) instead of the legacy `workflow-v1` string. Re-run `/dmx/init` to refresh existing projects.
+- **Workflow version marker updated** — IDE rule files now embed `<!-- deepmodel:dmx:start 0.2.0 -->` (SemVer) instead of the legacy `workflow-v1` string. Re-run `/dmx/init` to refresh existing projects.
 - **`ticket_id` argument removed** from `/dmx/plan`, `/dmx/implement-next-phase`, `/dmx/implement-next-task`, `/dmx/validate`, `/dmx/update-memory`, `/dmx/create-pr`, and `/dmx/draft-pr-description`. All skills now derive ticket context from `spec.md` frontmatter or branch-name parsing.
 - **`/dmx/close-ticket` is now git-clean** — removed the ticket folder archive step and the `activeContext.md` clear step. The skill performs external-only cleanup: ticket transition, PR comment, and branch deletion. Memory was already synced by `/dmx/create-pr`.
 - **Configurable branch roles** — release, hotfix, and ship skills read `branch_base` (integration) and `production_branch` from config instead of assuming `master`.
@@ -30,7 +30,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 If you have an existing project using the `tickets/active/` layout:
 
-1. Re-run `/dmx/init` — it will refresh the IDE rules to the `0.1.0` marker and update `activeContext.md` to the learning-inbox structure.
+1. Re-run `/dmx/init` — it will refresh the IDE rules to the `0.2.0` marker and update `activeContext.md` to the learning-inbox structure.
 2. If you have an active ticket in `.dmx/tickets/active/{ref}/`, copy `spec.md` and `tasks.md` to `.dmx/spec.md` and `.dmx/tasks.md` on the relevant branch. Add the YAML frontmatter block to the top of `spec.md`.
 3. The old `tickets/` directory can be deleted — no skill reads from it any more.
 
