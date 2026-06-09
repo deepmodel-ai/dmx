@@ -225,29 +225,39 @@ class TestBranchRoleSkillContent:
         skills_dir = _Path(str(pkg.files("dmx") / "skills"))
         return {skill.name: skill.body for skill in load_skills(skills_dir)}
 
-    def test_create_pr_hotfix_base_auto_detect(self, bundled_skill_bodies: dict[str, str]) -> None:
+    def test_create_pr_hotfix_base_auto_detect(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
         body = bundled_skill_bodies["create-pr"]
         assert "spec frontmatter `type` is `hotfix`" in body
         assert "contains `**Type:** hotfix`" in body
         assert "**Resolve `production_branch` when needed**" in body
         assert "do not override an explicit argument" in body
 
-    def test_hotfix_spec_includes_type_in_frontmatter(self, bundled_skill_bodies: dict[str, str]) -> None:
+    def test_hotfix_spec_includes_type_in_frontmatter(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
         body = bundled_skill_bodies["hotfix"]
         assert "type: hotfix" in body
 
-    def test_release_merge_targets_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+    def test_release_merge_targets_production_branch(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
         body = bundled_skill_bodies["release-merge"]
         assert "base:                  {config.production_branch}" in body
         assert "base:                  master" not in body
 
-    def test_create_release_tags_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+    def test_create_release_tags_production_branch(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
         body = bundled_skill_bodies["create-release"]
         assert "git checkout {config.production_branch}" in body
         assert "--target {config.production_branch}" in body
         assert "git checkout master" not in body
 
-    def test_hotfix_branches_from_production_branch(self, bundled_skill_bodies: dict[str, str]) -> None:
+    def test_hotfix_branches_from_production_branch(
+        self, bundled_skill_bodies: dict[str, str]
+    ) -> None:
         body = bundled_skill_bodies["hotfix"]
         assert "from_branch: {config.production_branch}" in body
         assert "from_branch: master" not in body
@@ -271,7 +281,9 @@ class TestBranchRoleSkillContent:
         ):
             body = bundled_skill_bodies[skill_name]
             for pattern in forbidden:
-                assert pattern not in body, f"{skill_name} contains hardcoded master git ref: {pattern!r}"
+                assert pattern not in body, (
+                    f"{skill_name} contains hardcoded master git ref: {pattern!r}"
+                )
 
 
 class TestSystemPromptBranchRoles:
