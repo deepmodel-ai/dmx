@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-05
+
 ### Changed — Breaking
 
 - **Memory bank layout (branch-scoped model)** — `spec.md` and `tasks.md` now live directly at `.dmx/spec.md` and `.dmx/tasks.md` on the feature branch instead of the nested `.dmx/tickets/active/{ref}/` path. The `tickets/active/` and `tickets/archived/` directories are no longer created by `/dmx/init` and are not used by any skill. `spec.md` now includes a YAML frontmatter block (`ticket`, `branch`, `summary`, `ticketing`).
@@ -61,5 +63,6 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/deepmodel-ai/dmx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepmodel-ai/dmx/releases/tag/v0.1.0
