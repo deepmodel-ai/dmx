@@ -4,71 +4,65 @@
 [![Test](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml/badge.svg)](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-It has never been easier to build software.
-It has never been harder to build useful software.
+**The missing orchestrator for AI-native engineering.**
 
-AI generated code is hard to debug, hard to maintain, and dangerous to trust in production. AI-driven tech debt accumulates at machine speed.
+Most teams building with AI run into the same problems:
 
-dmx gives you an AI-native developer workflow built on two ideas: spec-driven development, where work begins with a detailed spec before any code is written; and a shared memory bank, where project context is stored in the repo so every developer and every AI session starts from the same understanding. It runs inside IDEs like Cursor, Claude Code, GitHub Copilot, and Antigravity, and provides slash commands and always-apply rules that keep you in control of what gets built, how it gets built, and why.
+- Workflow lives in chat history. No process, nothing that persists, nothing you can hand off.
+- Every developer is using AI differently. Different tools, different prompts, different output.
+- Results are unpredictable. Brilliant one session, wrong the next.
+- No shared context. Every session starts from scratch, every developer builds their own mental model.
+- Missing context causes drift. The same problem solved three ways in the same codebase.
 
-> [!NOTE]
-> dmx implements the [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — an open framework for disciplined AI-native engineering.
+The [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) is the framework we built to fix this: start with a spec, build in phases, verify output, keep context in the repo. dmx is the orchestrator that makes the AI SDLC executable.
 
-## How it works
+dmx runs as an MCP server inside Cursor, Claude Code, GitHub Copilot, and Antigravity. It gives you AI skills that govern the full engineering lifecycle — from first spec to production release — as structured loops. Each loop has a skill sequence, a shared memory context, and a validator. A loop without a validator is just a script.
 
-dmx is implemented as an MCP server. Connect it to your IDE ([get started ↓](#get-started-in-3-steps)) and you get access to a series of skills and rules that orchestrate the developer workflow. Use them to create tickets, name branches, write commits, draft PRs, and publish releases. The AI implements each phase and stops — you review, commit, and decide what comes next.
+```
+/dmx/create-ticket         # describe the work → spec → branch
+/dmx/plan                  # spec → phased task list
+/dmx/implement-next-phase  # build next phase, stop, wait for review
+/dmx/validate              # quality gate: spec, security, coverage
+/dmx/create-pr             # sync memory, draft PR body, open PR
+/dmx/create-release        # tag and publish the release
+```
 
-Before running any command, run `/dmx/init` once per project. It writes the always-apply rules into your IDE and initializes the `.dmx/` memory bank — persistent project context that every future AI session reads before doing anything.
+Every command stops and waits. You review, decide, and move forward. Project context lives in `.dmx/` — committed to the repo, read by every AI session.
 
-| Phase | Command | What it does |
-|---|---|---|
-| **Specify** | Option A: `/dmx/create-ticket` | Describe the work. dmx creates a ticket, names and checks out the branch, and writes `.dmx/spec.md` pre-filled with project context. AI asks clarifying questions — you answer before any code is written. |
-| **Specify** | Option B: `/dmx/derive-ticket` | Already wrote some code? dmx reads your uncommitted changes, infers what was built, creates the ticket, moves you to a properly named branch, and writes the spec based on your code. |
-| **Plan** | `/dmx/plan` | Reads the answered spec and generates a phased `.dmx/tasks.md`. You review it before implementation starts. |
-| **Build** | Option A: `/dmx/implement-next-phase` | Implements every task in the next phase, then stops. You review the output, run `/dmx/commit` to write the commit message, and move forward. |
-| **Build** | Option B: `/dmx/implement-next-task` | Implements a single task and stops. Use this for fine-grained control when tasks are large or risky. |
-| **Validate** | `/dmx/validate` | Runs a quality gate against spec, security, and coverage. |
-| **Validate** | `/dmx/create-pr` | Syncs the memory bank, drafts the PR body, and opens the pull request. |
-| **Hotfix** | `/dmx/hotfix` | Production incident: branch from `production_branch`, scaffold spec, implement, PR to production. |
-| **Release** | `/dmx/draft-release-note` | Generates release notes from merged PRs on the integration branch. |
-| **Release** | `/dmx/release-merge` | Opens the integration → production release gate PR (staging-gate repos). |
-| **Ship** | `/dmx/create-release` | Tags the production branch and publishes the release. You confirm before it goes out. |
-| **Ship** | `/dmx/close-ticket` | After the PR is merged: transitions the ticket to Done, adds the PR link as a comment, and deletes the branch. No `.dmx/` changes — memory was already synced by `create-pr`. |
+## Roadmap
 
-![AI SDLC Phase Arc](https://raw.githubusercontent.com/deepmodel-ai/ai-sdlc/main/assets/phase-arc.drawio.svg)
+- [x] Full lifecycle workflow — spec, plan, build, validate, release
+- [x] `.dmx/` memory bank — shared project context committed to the repo
+- [ ] Loop runtime — loops start foreground (developer reviews every step) and graduate to background as validators build a track record
+- [ ] Team server — hosted MCP endpoint, shared loops and rules across the team
+- [ ] Gateway — model governance, cost visibility, autonomous background execution
 
-## Memory bank
+## Get started
 
-The `.dmx/` directory is the project's shared memory — committed to the repo so every developer and every AI session starts from the same understanding.
+```json
+{
+  "mcpServers": {
+    "dmx": {
+      "command": "uvx",
+      "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
+    }
+  }
+}
+```
 
-| File | Role | Lifetime |
-|---|---|---|
-| `config.md` | Project settings — ticketing, integration/production branches, credentials; injected as always-apply rule | Updated by `/dmx/init` |
-| `projectbrief.md` | Goals, scope, non-negotiables | Durable — updated rarely |
-| `productContext.md` | User-facing behaviour and flows | Durable — updated when features ship |
-| `systemPatterns.md` | Architecture, patterns, component relationships | Durable — updated when design changes |
-| `techContext.md` | Stack, dependencies, constraints | Durable — updated when tooling changes |
-| `activeContext.md` | Learning inbox: open learnings, decisions, session notes | Branch-local — promoted to durable files on commit/PR |
-| `spec.md` | What is being built and why — YAML frontmatter + scope + Q&A | Branch-scoped — created by `create-ticket`, committed with the PR |
-| `tasks.md` | Phased implementation plan | Branch-scoped — created by `plan`, committed with the PR |
+Add to your IDE config ([Claude Code, Copilot, Antigravity ↓](#step-1--add-the-mcp-server)). Run `/dmx/init` once per project. Then:
 
-**Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch — no ticket folder nesting. When a PR merges, they go with it; the next branch starts fresh.
+```
+/dmx/create-ticket
+```
 
-**Three-tier memory sync**: learnings accumulate in `activeContext.md` during implementation. `/dmx/commit` promotes qualifying items (light sync), `/dmx/create-pr` promotes all remaining items (full sync), and `/dmx/update-memory` does a deep reconciliation on demand.
+## Learn more
 
-**Project configuration** (`.dmx/config.md`): written by `/dmx/init` and injected as an always-apply rule. Two branch fields define where work flows:
+- [When Is a Loop Ready to Run Without You?](https://himakara.hashnode.dev/when-is-a-loop-ready-to-run-without-you) — the thinking behind dmx
+- [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — the open framework dmx implements
 
-| Field | Role | Typical value |
-|---|---|---|
-| `branch_base` | Integration branch — feature PRs merge here; default diff base | `staging` or `main` |
-| `production_branch` | Production branch — releases, hotfixes, and tags target here | `master` or `main` |
-
-Trunk repos set both to `main`. Staging-gate repos use `branch_base: staging` and `production_branch: master`. `/dmx/init` auto-detects both on first run.
-
-> **Upgrading an existing project:** If `.dmx/config.md` predates `production_branch`, re-run `/dmx/init`. Init adds the field when missing and does **not** overwrite `production_branch` if it is already set. Hotfix and release skills also auto-detect when only `master` or only `main` exists; if both exist, set the field explicitly or re-run init.
-
-
-## Get started in 3 steps
+<details>
+<summary>Full install guide</summary>
 
 ### Step 1 — Add the MCP server
 
@@ -86,7 +80,7 @@ Add to your Cursor MCP config (`~/.cursor/mcp.json`) and restart:
 ```
 
 <details>
-<summary>Claude Code, Copilot, Antigravity →</summary>
+<summary>Claude Code, Copilot, Antigravity</summary>
 
 **Claude Code** — `~/.claude/claude_desktop_config.json`
 
@@ -149,11 +143,10 @@ Safe to re-run. Updates config without overwriting memory bank files that alread
 
 Describe what you want to build. dmx scaffolds the spec, asks clarifying questions, and waits for your answers before writing a line of code.
 
-
-## Skill catalog
+</details>
 
 <details>
-<summary>All 23 slash commands →</summary>
+<summary>Full skill catalog </summary>
 
 ### Workflow
 
@@ -170,7 +163,7 @@ Describe what you want to build. dmx scaffolds the spec, asks clarifying questio
 | `/dmx/commit` | Conventional commit from staged diff |
 | `/dmx/create-pr` | Open PR with correct title + description |
 | `/dmx/draft-pr-description` | Generate PR body without opening the PR |
-| `/dmx/close-ticket` | Post-merge: close ticket, delete branch (no `.dmx/` changes) |
+| `/dmx/close-ticket` | Post-merge: close ticket, delete branch |
 
 ### Release
 
@@ -195,29 +188,24 @@ Describe what you want to build. dmx scaffolds the spec, asks clarifying questio
 
 </details>
 
-
-## Self-hosting
-
 <details>
-<summary>CLI reference and environment variables →</summary>
+<summary>Memory bank (.dmx/) </summary>
 
-```
-dmx serve               # stdio transport (default)
-dmx serve --http        # SSE transport on :8080
-dmx serve --http --port 9000
-dmx serve --watch       # hot-reload on file change (requires watchfiles extra)
-dmx list-skills         # print all loaded skills
-```
+The `.dmx/` directory is the project's shared memory — committed to the repo so every developer and every AI session starts from the same understanding.
 
-| Variable | Purpose | Default |
+| File | Role | Lifetime |
 |---|---|---|
-| `PORT` | HTTP port | `8080` |
-| `DMX_SKILLS_DIR` | Override bundled skills directory | bundled |
-| `DMX_RULES_DIR` | Override bundled rules directory | bundled |
-| `DMX_IDE` | Force IDE detection | auto-detect |
-| `MCP_API_KEY` | Bearer token for HTTP auth | — |
-| `REQUIRE_API_KEY` | Enable HTTP bearer auth | `false` |
+| `config.md` | Project settings — ticketing, integration/production branches, credentials; injected as always-apply rule | Updated by `/dmx/init` |
+| `projectbrief.md` | Goals, scope, non-negotiables | Durable — updated rarely |
+| `productContext.md` | User-facing behaviour and flows | Durable — updated when features ship |
+| `systemPatterns.md` | Architecture, patterns, component relationships | Durable — updated when design changes |
+| `techContext.md` | Stack, dependencies, constraints | Durable — updated when tooling changes |
+| `activeContext.md` | Learning inbox: open learnings, decisions, session notes | Branch-local — promoted to durable files on commit/PR |
+| `spec.md` | What is being built and why — YAML frontmatter + scope + Q&A | Branch-scoped — created by `create-ticket`, committed with the PR |
+| `tasks.md` | Phased implementation plan | Branch-scoped — created by `plan`, committed with the PR |
 
-Requires Python 3.11+ and `uv`.
+**Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch. When a PR merges, they go with it; the next branch starts fresh.
+
+**Three-tier memory sync**: learnings accumulate in `activeContext.md` during implementation. `/dmx/commit` promotes qualifying items (light sync), `/dmx/create-pr` promotes all remaining items (full sync), and `/dmx/update-memory` does a deep reconciliation on demand.
 
 </details>
