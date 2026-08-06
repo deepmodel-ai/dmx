@@ -29,11 +29,45 @@ dmx runs as an MCP server inside Cursor, Claude Code, GitHub Copilot, and Antigr
 
 Every command stops and waits. You review, decide, and move forward. Project context lives in `.dmx/` — committed to the repo, read by every AI session.
 
+When a skill sequence is trusted, formalize it as a **loop** — declarative YAML config, automated validators, and persisted state:
+
+```
+/run-loop spec             # start the spec loop (ticket → branch → spec)
+/loop-continue             # resume after a human gate
+```
+
+## Loop runtime
+
+Loops are declarative configs that run an ordered skill sequence with durable state and automated validation. Default configs ship with dmx; teams override via `.dmx/loops/{name}.yaml`.
+
+**Foreground** is running `/dmx/*` skills manually — you are the orchestrator. **Background** is the loop runtime: you define the sequence, write validators that encode your judgment, and review the artifact. Trust is earned by validators, not a config flag.
+
+| Command | What it does |
+|---|---|
+| `/run-loop` | Start a loop by name — loads config, writes state, runs the first skill |
+| `/loop-continue` | Resume a paused loop after human review at a gate |
+
+Bundled loops for the SDLC pipeline:
+
+| Loop | Skills | Chains to |
+|---|---|---|
+| `spec` | create-ticket | `plan` |
+| `plan` | plan | `dev` |
+| `dev` | implement-next-phase, commit | `validate` |
+| `validate` | validate | `release` |
+| `release` | create-pr, update-memory | — |
+
+Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/loop-state.json` (active run) and `.dmx/jobs/{job_id}/` (per-run history).
+
+Validators are plain Python functions at `validators/{name}.py` in the app repo (bundled fallbacks ship with dmx). The orchestrator invokes them via subprocess after all skills complete — the coding agent runs skills; validators run deterministically.
+
+**Status:** config, state persistence, MCP orchestration (`run_loop`, `loop_advance`, `loop_continue`), and human-gate sequencing are implemented. Validator execution, policy engine, `repeat_until` iteration, and loop chaining are in progress ([#5](https://github.com/deepmodel-ai/dmx/issues/5)).
+
 ## Roadmap
 
 - [x] Full lifecycle workflow — spec, plan, build, validate, release
 - [x] `.dmx/` memory bank — shared project context committed to the repo
-- [ ] Loop runtime — loops start foreground (developer reviews every step) and graduate to background as validators build a track record
+- [ ] Loop runtime — validators, policy engine, `repeat_until`, and autonomous chaining ([#5](https://github.com/deepmodel-ai/dmx/issues/5))
 - [ ] Team server — hosted MCP endpoint, shared loops and rules across the team
 - [ ] Gateway — model governance, cost visibility, autonomous background execution
 
@@ -186,6 +220,13 @@ Describe what you want to build. dmx scaffolds the spec, asks clarifying questio
 | `/dmx/docs` | Write clear, human-first documentation |
 | `/dmx/secure` | Security analysis — thinks like an attacker |
 
+### Loop
+
+| Skill | What it does |
+|---|---|
+| `/run-loop` | Start a loop by name — reads loop config, initialises state, runs first skill |
+| `/loop-continue` | Resume a paused loop after human review at a gate |
+
 </details>
 
 <details>
@@ -203,6 +244,9 @@ The `.dmx/` directory is the project's shared memory — committed to the repo s
 | `activeContext.md` | Learning inbox: open learnings, decisions, session notes | Branch-local — promoted to durable files on commit/PR |
 | `spec.md` | What is being built and why — YAML frontmatter + scope + Q&A | Branch-scoped — created by `create-ticket`, committed with the PR |
 | `tasks.md` | Phased implementation plan | Branch-scoped — created by `plan`, committed with the PR |
+| `loops/` | Loop config overrides (YAML) | Optional — overrides bundled defaults from dmx |
+| `loop-state.json` | Active loop run pointer | Ephemeral — written during a loop run |
+| `jobs/` | Per-run loop state (skill progress, validator results) | Branch-scoped — committed with the PR when present |
 
 **Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch. When a PR merges, they go with it; the next branch starts fresh.
 
