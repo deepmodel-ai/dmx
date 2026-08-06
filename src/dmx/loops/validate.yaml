@@ -1,0 +1,27 @@
+name: validate
+skills:
+  - dmx-review-changes
+trigger:
+  type: on_complete
+goal_state: "All required checks pass, code reviewed, ready for PR"
+validators:
+  - tool: run_tests
+    checks:
+      - name: tests_pass
+        required: true
+  - tool: spec_adherence
+    checks:
+      - name: scope_matches_spec
+        required: true
+      - name: no_regressions
+        required: true
+on_optional_failure: warn
+failure_handling: pause
+human_gate: true
+on_complete:
+  on_success:
+    trigger_loop: release
+  on_failure:
+    trigger_loop: null
+  on_warning:
+    trigger_loop: null
