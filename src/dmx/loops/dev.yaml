@@ -1,7 +1,7 @@
 name: dev
 skills:
-  - dmx-implement-next-phase
-  - dmx-commit
+  - implement-next-phase
+  - commit
 trigger:
   type: on_complete
 goal_state: "All phases implemented and committed, no unchecked tasks remaining"

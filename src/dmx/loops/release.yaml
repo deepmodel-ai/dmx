@@ -1,7 +1,7 @@
 name: release
 skills:
-  - dmx-create-pr
-  - dmx-update-memory
+  - create-pr
+  - update-memory
 trigger:
   type: on_complete
 goal_state: "PR created, ticket transitioned to review, memory bank updated"

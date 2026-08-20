@@ -1,6 +1,6 @@
 name: spec
 skills:
-  - dmx-create-ticket
+  - create-ticket
 trigger:
   type: manual
 goal_state: "Ticket created, branch checked out, spec.md complete with all Q&A answered"

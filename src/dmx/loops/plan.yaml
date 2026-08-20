@@ -1,6 +1,6 @@
 name: plan
 skills:
-  - dmx-create-plan
+  - plan
 trigger:
   type: on_complete
 goal_state: "tasks.md created with all phases and tasks defined, no ambiguity remaining"
