@@ -70,6 +70,24 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _TICKET_KEY_RE = re.compile(r"^ticket_id\s*:\s*(.+)$", re.MULTILINE)
 
 
+def current_branch(workspace_root: Path) -> str | None:
+    """Return the current git branch name, or None if not resolvable."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=workspace_root,
+        )
+        branch = result.stdout.strip()
+        if branch and branch != "HEAD":
+            return branch
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def resolve_job_id(workspace_root: Path) -> str:
     """Resolve job ID for the current workspace.
 
@@ -95,20 +113,9 @@ def resolve_job_id(workspace_root: Path) -> str:
                 if ticket_id:
                     return ticket_id
 
-    # Fall back to branch name.
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=workspace_root,
-        )
-        branch = result.stdout.strip()
-        if branch and branch != "HEAD":
-            return branch
-    except Exception:  # noqa: BLE001
-        pass
+    branch = current_branch(workspace_root)
+    if branch:
+        return branch
 
     return "unknown"
 

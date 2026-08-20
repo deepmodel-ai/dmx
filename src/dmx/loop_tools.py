@@ -19,7 +19,8 @@ Tool contracts
     - Persists the skill output.
     - If more skills remain and ``human_gate: true``: pauses, returns pause msg.
     - If more skills remain and ``human_gate: false``: returns next instruction.
-    - If all skills complete: runs validators (Phase 2), writes outcome,
+    - If all skills complete: runs validators, applies policy
+      (``failure_handling`` / ``on_optional_failure``), writes outcome,
       returns completion message (and chains next loop if configured).
 
 ``loop_continue()``
@@ -42,6 +43,7 @@ from dmx.loop_state import (
     LoopOutcome,
     LoopStatus,
     clear_active_pointer,
+    current_branch,
     make_task_id,
     read_active_pointer,
     read_state,
@@ -49,6 +51,7 @@ from dmx.loop_state import (
     write_initial_state,
     write_state,
 )
+from dmx.validator_runner import evaluate_validator_results, run_validators
 
 __all__ = ["register_loop_tools"]
 
@@ -177,6 +180,82 @@ def _complete_message(
     if next_loop:
         msg += f"\n\nChaining to: **{next_loop}** loop. Call `run_loop` with name=`{next_loop}`."
     return msg
+
+
+def _validator_failure_message(
+    loop_name: str,
+    job_id: str,
+    task_id: str,
+    message: str,
+) -> str:
+    """Return the pause message shown when required validator checks fail."""
+    short_task = task_id[:8]
+    return (
+        f"**{loop_name} loop — paused (validation failed)** ⚠️\n\n"
+        f"Job: `{job_id}` | Task: `{short_task}`\n\n"
+        f"{message}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Validator execution + policy decision
+# ---------------------------------------------------------------------------
+
+
+def _finish_loop(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    skill_outputs: dict[str, str],
+) -> str:
+    """Run validators, apply policy, persist the outcome, and return a message.
+
+    Called once all skills in the loop have completed. Required check
+    failures apply ``failure_handling``; optional check failures apply
+    ``on_optional_failure``. On pause, the active pointer is left in place —
+    the next ``loop_continue`` call re-runs validators (acting as a retry).
+    On complete/failed, the active pointer is cleared and the configured
+    ``on_complete`` loop is surfaced.
+    """
+    loop_context = {
+        "job_id": job_id,
+        "task_id": task_id,
+        "loop_name": loop_name,
+        "branch": current_branch(root),
+        "ticket_ref": job_id if job_id != "unknown" else None,
+    }
+
+    validator_results = run_validators(config, root, skill_outputs, loop_context)
+    decision = evaluate_validator_results(config, validator_results)
+    outcome = decision["outcome"]
+    next_status = decision["next_status"]
+
+    write_state(root, job_id, loop_name, task_id, {
+        "validator_results": validator_results,
+        "outcome": outcome,
+        "status": next_status,
+    })
+
+    if next_status == LoopStatus.paused.value:
+        logger.info(
+            "loop %s: validators failed, pausing for review — %s", loop_name, decision["message"]
+        )
+        return _validator_failure_message(loop_name, job_id, task_id, decision["message"])
+
+    clear_active_pointer(root)
+
+    next_loop: str | None = None
+    if outcome == LoopOutcome.success.value:
+        next_loop = config.on_complete.on_success.trigger_loop
+    elif outcome == LoopOutcome.failure.value:
+        next_loop = config.on_complete.on_failure.trigger_loop
+    else:
+        next_loop = config.on_complete.on_warning.trigger_loop
+
+    logger.info("loop %s complete — outcome=%s next_loop=%s", loop_name, outcome, next_loop)
+    return _complete_message(loop_name, job_id, outcome, next_loop)
 
 
 # ---------------------------------------------------------------------------
@@ -311,35 +390,8 @@ def register_loop_tools(app: FastMCP) -> None:
             })
             return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
         else:
-            # All skills complete — run validators (Phase 2: stub pass for Phase 1).
-            # TODO (Phase 2 — Task 9): run real subprocess validators here.
-            validator_results: list[dict] = []
-            outcome = LoopOutcome.success.value
-
-            write_state(root, job_id, loop_name, task_id, {
-                "current_skill_index": next_idx,
-                "skills_completed": skills_completed,
-                "skill_outputs": skill_outputs,
-                "validator_results": validator_results,
-                "outcome": outcome,
-                "status": LoopStatus.complete.value,
-            })
-            clear_active_pointer(root)
-
-            # Determine next loop from on_complete config.
-            next_loop: str | None = None
-            if outcome == LoopOutcome.success.value:
-                next_loop = config.on_complete.on_success.trigger_loop
-            elif outcome == LoopOutcome.failure.value:
-                next_loop = config.on_complete.on_failure.trigger_loop
-            else:
-                next_loop = config.on_complete.on_warning.trigger_loop
-
-            logger.info(
-                "loop_advance: %s complete — outcome=%s next_loop=%s",
-                loop_name, outcome, next_loop,
-            )
-            return _complete_message(loop_name, job_id, outcome, next_loop)
+            # All skills complete — run validators and apply policy.
+            return _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
     @app.tool
     async def loop_continue(
@@ -386,7 +438,8 @@ def register_loop_tools(app: FastMCP) -> None:
         })
 
         if idx >= len(skills):
-            # All skills already complete — human approved, now run validators and finish.
+            # All skills already complete — human approved (or a previous
+            # validator run paused for review). Run validators and finish.
             logger.info("loop_continue: %s all skills done, running validators", loop_name)
 
             try:
@@ -394,26 +447,8 @@ def register_loop_tools(app: FastMCP) -> None:
             except Exception as exc:  # noqa: BLE001
                 return f"Error reloading loop config: {exc}"
 
-            # TODO (Phase 2 — Task 9): run real subprocess validators here.
-            validator_results: list[dict] = []
-            outcome = LoopOutcome.success.value
-
-            write_state(root, job_id, loop_name, task_id, {
-                "validator_results": validator_results,
-                "outcome": outcome,
-                "status": LoopStatus.complete.value,
-            })
-            clear_active_pointer(root)
-
-            next_loop: str | None = None
-            if outcome == LoopOutcome.success.value:
-                next_loop = config.on_complete.on_success.trigger_loop
-            elif outcome == LoopOutcome.failure.value:
-                next_loop = config.on_complete.on_failure.trigger_loop
-            else:
-                next_loop = config.on_complete.on_warning.trigger_loop
-
-            return _complete_message(loop_name, job_id, outcome, next_loop)
+            skill_outputs: dict[str, str] = state.get("skill_outputs", {})
+            return _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
         logger.info("loop_continue: %s job=%s task=%s skill_index=%d", loop_name, job_id, task_id, idx)
 

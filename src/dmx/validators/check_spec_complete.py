@@ -6,11 +6,18 @@ required sections.  App repos can override this by placing their own
 
 Contract
 --------
-Called by the orchestrator via subprocess::
+Called by the orchestrator via subprocess. The input contract is written to
+stdin as JSON::
 
-    python validators/check_spec_complete.py <workspace_root>
+    python validators/check_spec_complete.py < contract.json
 
-Reads ``.dmx/spec.md`` relative to *workspace_root*.
+    {
+      "skill_outputs": {...},
+      "goal_state": "...",
+      "loop_context": {..., "workspace_root": "/path/to/repo"}
+    }
+
+Reads ``.dmx/spec.md`` relative to ``loop_context.workspace_root``.
 
 Exits 0 on pass, 1 on failure.
 Writes JSON to stdout::
@@ -134,7 +141,8 @@ def run(workspace_root: Path) -> dict:
 
 
 if __name__ == "__main__":
-    workspace = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
-    result = run(workspace)
-    print(json.dumps(result, indent=2))
+    contract = json.loads(sys.stdin.read() or "{}")
+    workspace_root = contract.get("loop_context", {}).get("workspace_root") or "."
+    result = run(Path(workspace_root))
+    print(json.dumps(result))
     sys.exit(0 if result["pass"] else 1)
