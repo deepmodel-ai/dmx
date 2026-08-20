@@ -168,6 +168,7 @@ def write_initial_state(
         "skill_outputs": {},
         "validator_results": [],
         "outcome": None,
+        "iteration_count": 0,
         "timestamp": _now_iso(),
         "updated_at": _now_iso(),
     }

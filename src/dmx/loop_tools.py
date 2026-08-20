@@ -51,6 +51,7 @@ from dmx.loop_state import (
     write_initial_state,
     write_state,
 )
+from dmx.repeat_until import evaluate_repeat_until
 from dmx.validator_runner import evaluate_validator_results, run_validators
 
 __all__ = ["register_loop_tools"]
@@ -197,6 +198,23 @@ def _validator_failure_message(
     )
 
 
+def _iterating_message(
+    loop_name: str,
+    job_id: str,
+    task_id: str,
+    iteration: int,
+    config: LoopConfig,
+) -> str:
+    """Return the message shown when repeat_until re-triggers the loop."""
+    short_task = task_id[:8]
+    header = (
+        f"**{loop_name} loop — iterating (round {iteration})** 🔁\n\n"
+        f"Job: `{job_id}` | Task: `{short_task}` | "
+        f"`repeat_until: {config.repeat_until}` not yet met — restarting the skill sequence.\n\n"
+    )
+    return header + _skill_instruction(config.skills[0], loop_name, 0, len(config.skills))
+
+
 # ---------------------------------------------------------------------------
 # Validator execution + policy decision
 # ---------------------------------------------------------------------------
@@ -216,8 +234,13 @@ def _finish_loop(
     failures apply ``failure_handling``; optional check failures apply
     ``on_optional_failure``. On pause, the active pointer is left in place —
     the next ``loop_continue`` call re-runs validators (acting as a retry).
-    On complete/failed, the active pointer is cleared and the configured
-    ``on_complete`` loop is surfaced.
+
+    If validators pass (success or warning) and the loop declares
+    ``repeat_until``, the condition is evaluated before finishing. If not
+    yet met, the loop transitions to ``iterating`` and restarts from the
+    first skill — this is not recorded as a failure. Once the condition is
+    met, or when the loop has no ``repeat_until``, the active pointer is
+    cleared and the configured ``on_complete`` loop is surfaced.
     """
     loop_context = {
         "job_id": job_id,
@@ -243,6 +266,21 @@ def _finish_loop(
             "loop %s: validators failed, pausing for review — %s", loop_name, decision["message"]
         )
         return _validator_failure_message(loop_name, job_id, task_id, decision["message"])
+
+    if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root):
+        current_state = read_state(root, job_id, loop_name, task_id)
+        iteration = current_state.get("iteration_count", 0) + 1
+        write_state(root, job_id, loop_name, task_id, {
+            "status": LoopStatus.iterating.value,
+            "iteration_count": iteration,
+            "current_skill_index": 0,
+            "skills_completed": [],
+        })
+        logger.info(
+            "loop %s: repeat_until '%s' not met — iterating (round %d)",
+            loop_name, config.repeat_until, iteration,
+        )
+        return _iterating_message(loop_name, job_id, task_id, iteration, config)
 
     clear_active_pointer(root)
 
