@@ -42,12 +42,14 @@ def _setup(tmp_path: Path, config: LoopConfig, job_id: str = "J", task_id: str =
 
 class TestFinishLoopWithoutRepeatUntil:
     def test_all_checks_pass_completes_and_clears_pointer(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-            "on_complete": {"on_success": {"trigger_loop": "plan"}},
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "plan"}},
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -66,12 +68,14 @@ class TestFinishLoopWithoutRepeatUntil:
         assert pointer["active_loop_name"] == "plan"
 
     def test_required_failure_with_fail_policy_clears_pointer(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "failure_handling": "fail",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "failure_handling": "fail",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", FAILING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -83,12 +87,14 @@ class TestFinishLoopWithoutRepeatUntil:
         assert state["status"] == LoopStatus.failed.value
 
     def test_required_failure_with_pause_policy_keeps_pointer(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "failure_handling": "pause",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "failure_handling": "pause",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", FAILING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -102,13 +108,15 @@ class TestFinishLoopWithoutRepeatUntil:
 
 class TestFinishLoopWithRepeatUntil:
     def _dev_config(self) -> LoopConfig:
-        return LoopConfig.model_validate({
-            "name": "dev",
-            "skills": ["implement-next-phase", "commit"],
-            "repeat_until": "all_phases_complete",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-            "on_complete": {"on_success": {"trigger_loop": "validate"}},
-        })
+        return LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase", "commit"],
+                "repeat_until": "all_phases_complete",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "validate"}},
+            }
+        )
 
     def test_condition_not_met_iterates(self, tmp_path: Path) -> None:
         config = self._dev_config()
@@ -119,10 +127,17 @@ class TestFinishLoopWithRepeatUntil:
         )
         # Simulate having advanced past both skills already.
         from dmx.loop_state import write_state
-        write_state(tmp_path, "J", "dev", "T", {
-            "current_skill_index": 2,
-            "skills_completed": ["implement-next-phase", "commit"],
-        })
+
+        write_state(
+            tmp_path,
+            "J",
+            "dev",
+            "T",
+            {
+                "current_skill_index": 2,
+                "skills_completed": ["implement-next-phase", "commit"],
+            },
+        )
 
         message = _finish_loop(tmp_path, "J", "dev", "T", config, {})
 
@@ -177,11 +192,13 @@ class TestOnCompleteChaining:
     def test_no_trigger_loop_returns_terminal_message_and_clears_pointer(
         self, tmp_path: Path
     ) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -191,12 +208,14 @@ class TestOnCompleteChaining:
         assert read_active_pointer(tmp_path) is None
 
     def test_trigger_loop_starts_next_loop_with_fresh_task_id(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-            "on_complete": {"on_success": {"trigger_loop": "plan"}},
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "plan"}},
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -217,13 +236,15 @@ class TestOnCompleteChaining:
         assert next_state["current_skill_index"] == 0
 
     def test_trigger_loop_applies_to_failure_outcome(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "dev",
-            "skills": ["implement-next-phase"],
-            "failure_handling": "fail",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-            "on_complete": {"on_failure": {"trigger_loop": "spec"}},
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase"],
+                "failure_handling": "fail",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_failure": {"trigger_loop": "spec"}},
+            }
+        )
         _write_validator(tmp_path, "v", FAILING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -235,12 +256,14 @@ class TestOnCompleteChaining:
         assert pointer["active_loop_name"] == "spec"
 
     def test_unknown_trigger_loop_surfaces_error_without_crashing(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-            "on_complete": {"on_success": {"trigger_loop": "does-not-exist"}},
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "does-not-exist"}},
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -276,11 +299,13 @@ class TestLoopMemoryHooks:
         assert "run /create-ticket now" in message.lower()
 
     def test_finish_loop_writes_session_note_on_completion(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -294,12 +319,14 @@ class TestLoopMemoryHooks:
         assert "J" in content
 
     def test_finish_loop_writes_session_note_on_validator_pause(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "spec",
-            "skills": ["create-ticket"],
-            "failure_handling": "pause",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "spec",
+                "skills": ["create-ticket"],
+                "failure_handling": "pause",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", FAILING_VALIDATOR)
         _setup(tmp_path, config)
 
@@ -309,12 +336,14 @@ class TestLoopMemoryHooks:
         assert "paused for validator review" in content
 
     def test_finish_loop_writes_session_note_on_iterating(self, tmp_path: Path) -> None:
-        config = LoopConfig.model_validate({
-            "name": "dev",
-            "skills": ["implement-next-phase", "commit"],
-            "repeat_until": "all_phases_complete",
-            "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase", "commit"],
+                "repeat_until": "all_phases_complete",
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
         (tmp_path / ".dmx" / "tasks.md").write_text(

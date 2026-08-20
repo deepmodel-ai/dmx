@@ -40,6 +40,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 _PHASE_RE = re.compile(r"^##\s+Phase\s+\d+\s*:.*$", re.MULTILINE)
 _TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s*(.*)$", re.MULTILINE)
@@ -70,7 +71,7 @@ def _tasks_have_descriptions(content: str) -> tuple[bool, str]:
     return True, f"{len(task_lines)} task(s) have concrete descriptions"
 
 
-def run(workspace_root: Path) -> dict:
+def run(workspace_root: Path) -> dict[str, Any]:
     tasks = workspace_root / ".dmx" / "tasks.md"
     content = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
 

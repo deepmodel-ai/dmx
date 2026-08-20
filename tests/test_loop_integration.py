@@ -37,10 +37,15 @@ if TYPE_CHECKING:
 # loop configs, keyed by the validator tool name that reports it.
 _STUB_CHECKS = {
     "check_spec_complete": [
-        "spec_exists", "qa_answered", "technical_approach_filled", "scope_defined",
+        "spec_exists",
+        "qa_answered",
+        "technical_approach_filled",
+        "scope_defined",
     ],
     "check_plan_complete": [
-        "tasks_file_exists", "phases_defined", "tasks_have_descriptions",
+        "tasks_file_exists",
+        "phases_defined",
+        "tasks_have_descriptions",
     ],
     "run_tests": ["tests_pass", "coverage_threshold"],
     "spec_adherence": ["scope_matches_spec", "edge_cases_addressed", "no_regressions"],
@@ -219,17 +224,17 @@ class TestRepeatUntilIntegration:
 
 class TestValidatorFailureRetryIntegration:
     @pytest.mark.asyncio
-    async def test_spec_loop_pauses_on_failure_then_chains_on_retry(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_spec_loop_pauses_on_failure_then_chains_on_retry(self, tmp_path: Path) -> None:
         validators_dir = tmp_path / "validators"
         validators_dir.mkdir(parents=True)
-        failing_checks_literal = repr([
-            {"name": "spec_exists", "pass": True},
-            {"name": "qa_answered", "pass": False},
-            {"name": "technical_approach_filled", "pass": True},
-            {"name": "scope_defined", "pass": True},
-        ])
+        failing_checks_literal = repr(
+            [
+                {"name": "spec_exists", "pass": True},
+                {"name": "qa_answered", "pass": False},
+                {"name": "technical_approach_filled", "pass": True},
+                {"name": "scope_defined", "pass": True},
+            ]
+        )
         (validators_dir / "check_spec_complete.py").write_text(
             "import json, sys\n"
             f"print(json.dumps({{'pass': False, 'message': 'spec incomplete', "

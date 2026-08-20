@@ -38,7 +38,10 @@ import logging
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from fastmcp import Context, FastMCP
+from fastmcp import (
+    Context,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
+    FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
+)
 
 from dmx.loop_memory import append_session_note, read_memory_context
 from dmx.loop_schema import LoopConfig, load_loop, load_loops_dir
@@ -100,10 +103,7 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
     app_loops = load_loops_dir(workspace_root / ".dmx" / "loops")
     bundled_loops = load_loops_dir(_bundled_loops_dir())
     available = sorted(set(app_loops) | set(bundled_loops))
-    raise FileNotFoundError(
-        f"Loop '{name}' not found. "
-        f"Available loops: {available or ['(none)']}"
-    )
+    raise FileNotFoundError(f"Loop '{name}' not found. Available loops: {available or ['(none)']}")
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +126,7 @@ async def _resolve_workspace_root(ctx: Context, explicit: str | None) -> Path:
     except Exception:  # noqa: BLE001
         pass
     import os
+
     return Path(os.getcwd())
 
 
@@ -314,11 +315,17 @@ def _finish_loop(
     outcome = decision["outcome"]
     next_status = decision["next_status"]
 
-    write_state(root, job_id, loop_name, task_id, {
-        "validator_results": validator_results,
-        "outcome": outcome,
-        "status": next_status,
-    })
+    write_state(
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        {
+            "validator_results": validator_results,
+            "outcome": outcome,
+            "status": next_status,
+        },
+    )
 
     if next_status == LoopStatus.paused.value:
         logger.info(
@@ -334,15 +341,23 @@ def _finish_loop(
     if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root):
         current_state = read_state(root, job_id, loop_name, task_id)
         iteration = current_state.get("iteration_count", 0) + 1
-        write_state(root, job_id, loop_name, task_id, {
-            "status": LoopStatus.iterating.value,
-            "iteration_count": iteration,
-            "current_skill_index": 0,
-            "skills_completed": [],
-        })
+        write_state(
+            root,
+            job_id,
+            loop_name,
+            task_id,
+            {
+                "status": LoopStatus.iterating.value,
+                "iteration_count": iteration,
+                "current_skill_index": 0,
+                "skills_completed": [],
+            },
+        )
         logger.info(
             "loop %s: repeat_until '%s' not met — iterating (round %d)",
-            loop_name, config.repeat_until, iteration,
+            loop_name,
+            config.repeat_until,
+            iteration,
         )
         append_session_note(
             root,
@@ -375,9 +390,7 @@ def _finish_loop(
         )
         return chain_header + _start_loop(root, next_loop)
 
-    append_session_note(
-        root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`)."
-    )
+    append_session_note(root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`).")
     return _complete_message(loop_name, job_id, outcome)
 
 
@@ -436,9 +449,7 @@ def register_loop_tools(app: FastMCP) -> None:
 
         pointer = read_active_pointer(root)
         if not pointer:
-            return (
-                "No active loop run found. Start a loop with `run_loop` first."
-            )
+            return "No active loop run found. Start a loop with `run_loop` first."
 
         job_id = pointer["active_job_id"]
         task_id = pointer["active_task_id"]
@@ -464,18 +475,30 @@ def register_loop_tools(app: FastMCP) -> None:
             return f"Error reloading loop config: {exc}"
 
         # Persist output and completed list regardless of branch taken below.
-        write_state(root, job_id, loop_name, task_id, {
-            "current_skill_index": next_idx,
-            "skills_completed": skills_completed,
-            "skill_outputs": skill_outputs,
-        })
+        write_state(
+            root,
+            job_id,
+            loop_name,
+            task_id,
+            {
+                "current_skill_index": next_idx,
+                "skills_completed": skills_completed,
+                "skill_outputs": skill_outputs,
+            },
+        )
 
         if next_idx < len(skills):
             # More skills remain.
             if config.human_gate:
-                write_state(root, job_id, loop_name, task_id, {
-                    "status": LoopStatus.paused.value,
-                })
+                write_state(
+                    root,
+                    job_id,
+                    loop_name,
+                    task_id,
+                    {
+                        "status": LoopStatus.paused.value,
+                    },
+                )
                 return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
             else:
                 # human_gate: false — return next skill instruction immediately.
@@ -484,9 +507,15 @@ def register_loop_tools(app: FastMCP) -> None:
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
             # running validators and chaining. loop_continue triggers the final step.
-            write_state(root, job_id, loop_name, task_id, {
-                "status": LoopStatus.paused.value,
-            })
+            write_state(
+                root,
+                job_id,
+                loop_name,
+                task_id,
+                {
+                    "status": LoopStatus.paused.value,
+                },
+            )
             return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
         else:
             # All skills complete — run validators and apply policy.
@@ -532,9 +561,15 @@ def register_loop_tools(app: FastMCP) -> None:
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
 
-        write_state(root, job_id, loop_name, task_id, {
-            "status": LoopStatus.running.value,
-        })
+        write_state(
+            root,
+            job_id,
+            loop_name,
+            task_id,
+            {
+                "status": LoopStatus.running.value,
+            },
+        )
 
         if idx >= len(skills):
             # All skills already complete — human approved (or a previous
@@ -549,7 +584,9 @@ def register_loop_tools(app: FastMCP) -> None:
             skill_outputs: dict[str, str] = state.get("skill_outputs", {})
             return _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
-        logger.info("loop_continue: %s job=%s task=%s skill_index=%d", loop_name, job_id, task_id, idx)
+        logger.info(
+            "loop_continue: %s job=%s task=%s skill_index=%d", loop_name, job_id, task_id, idx
+        )
 
         next_skill = skills[idx]
         return _skill_instruction(next_skill, loop_name, idx, len(skills))

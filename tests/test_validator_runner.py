@@ -176,14 +176,16 @@ class TestRunValidators:
     def test_runs_all_declared_validators(self, tmp_path: Path) -> None:
         _write_validator(tmp_path / "validators" / "run_tests.py", PASSING_VALIDATOR)
         _write_validator(tmp_path / "validators" / "spec_adherence.py", FAILING_VALIDATOR)
-        config = LoopConfig.model_validate({
-            "name": "dev",
-            "skills": ["s"],
-            "validators": [
-                {"tool": "run_tests", "checks": [{"name": "check_a", "required": True}]},
-                {"tool": "spec_adherence", "checks": [{"name": "check_a", "required": True}]},
-            ],
-        })
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["s"],
+                "validators": [
+                    {"tool": "run_tests", "checks": [{"name": "check_a", "required": True}]},
+                    {"tool": "spec_adherence", "checks": [{"name": "check_a", "required": True}]},
+                ],
+            }
+        )
         results = run_validators(config, tmp_path, {}, {"job_id": "J"})
         assert len(results) == 2
         assert results[0]["tool"] == "run_tests"
@@ -207,20 +209,32 @@ class TestRunValidators:
 class TestEvaluateValidatorResults:
     def test_all_pass_is_success(self) -> None:
         config = _loop_config()
-        results = [{"tool": "v", "pass": True, "checks": [
-            {"name": "check_a", "pass": True},
-            {"name": "check_b", "pass": True},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": True,
+                "checks": [
+                    {"name": "check_a", "pass": True},
+                    {"name": "check_b", "pass": True},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.success.value
         assert decision["next_status"] == LoopStatus.complete.value
 
     def test_required_failure_with_pause_policy(self) -> None:
         config = _loop_config(failure_handling="pause")
-        results = [{"tool": "v", "pass": False, "checks": [
-            {"name": "check_a", "pass": False},
-            {"name": "check_b", "pass": True},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": False,
+                "checks": [
+                    {"name": "check_a", "pass": False},
+                    {"name": "check_b", "pass": True},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.failure.value
         assert decision["next_status"] == LoopStatus.paused.value
@@ -228,30 +242,48 @@ class TestEvaluateValidatorResults:
 
     def test_required_failure_with_fail_policy(self) -> None:
         config = _loop_config(failure_handling="fail")
-        results = [{"tool": "v", "pass": False, "checks": [
-            {"name": "check_a", "pass": False},
-            {"name": "check_b", "pass": True},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": False,
+                "checks": [
+                    {"name": "check_a", "pass": False},
+                    {"name": "check_b", "pass": True},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.failure.value
         assert decision["next_status"] == LoopStatus.failed.value
 
     def test_optional_failure_with_warn_policy(self) -> None:
         config = _loop_config(on_optional_failure="warn")
-        results = [{"tool": "v", "pass": False, "checks": [
-            {"name": "check_a", "pass": True},
-            {"name": "check_b", "pass": False},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": False,
+                "checks": [
+                    {"name": "check_a", "pass": True},
+                    {"name": "check_b", "pass": False},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.warning.value
         assert decision["next_status"] == LoopStatus.complete.value
 
     def test_optional_failure_with_ignore_policy(self) -> None:
         config = _loop_config(on_optional_failure="ignore")
-        results = [{"tool": "v", "pass": False, "checks": [
-            {"name": "check_a", "pass": True},
-            {"name": "check_b", "pass": False},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": False,
+                "checks": [
+                    {"name": "check_a", "pass": True},
+                    {"name": "check_b", "pass": False},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.success.value
         assert decision["next_status"] == LoopStatus.complete.value
@@ -265,10 +297,16 @@ class TestEvaluateValidatorResults:
 
     def test_required_failure_takes_precedence_over_optional(self) -> None:
         config = _loop_config(failure_handling="fail", on_optional_failure="warn")
-        results = [{"tool": "v", "pass": False, "checks": [
-            {"name": "check_a", "pass": False},
-            {"name": "check_b", "pass": False},
-        ]}]
+        results = [
+            {
+                "tool": "v",
+                "pass": False,
+                "checks": [
+                    {"name": "check_a", "pass": False},
+                    {"name": "check_b", "pass": False},
+                ],
+            }
+        ]
         decision = evaluate_validator_results(config, results)
         assert decision["outcome"] == LoopOutcome.failure.value
         assert decision["next_status"] == LoopStatus.failed.value

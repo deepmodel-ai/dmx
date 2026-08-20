@@ -156,7 +156,7 @@ class TestRunTests:
 
     def test_makefile_target_passing(self, tmp_path: Path) -> None:
         (tmp_path / "Makefile").write_text(
-            'test:\n\tpython3 -c "print(\'ok\')"\n', encoding="utf-8"
+            "test:\n\tpython3 -c \"print('ok')\"\n", encoding="utf-8"
         )
         result = run_tests.run(tmp_path)
         assert result["pass"] is True

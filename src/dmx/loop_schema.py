@@ -19,30 +19,31 @@ Schema hierarchy::
 
 from __future__ import annotations
 
-from enum import Enum
-from pathlib import Path
-from typing import Annotated
+from enum import StrEnum
+from typing import TYPE_CHECKING, Annotated
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class TriggerType(str, Enum):
+class TriggerType(StrEnum):
     manual = "manual"
     on_complete = "on_complete"  # fired by another loop's on_complete
 
 
-class FailureHandling(str, Enum):
+class FailureHandling(StrEnum):
     pause = "pause"
     fail = "fail"
 
 
-class OnOptionalFailure(str, Enum):
+class OnOptionalFailure(StrEnum):
     warn = "warn"
     ignore = "ignore"
 
@@ -130,7 +131,7 @@ class LoopConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def repeat_until_known(self) -> "LoopConfig":
+    def repeat_until_known(self) -> LoopConfig:
         """Warn if repeat_until is set to an unrecognised condition.
 
         Known conditions are checked at *evaluation* time by the orchestrator;
@@ -195,5 +196,6 @@ def load_loops_dir(loops_dir: Path) -> dict[str, LoopConfig]:
             loops[cfg.name] = cfg
         except Exception as exc:  # noqa: BLE001
             import logging
+
             logging.getLogger(__name__).warning("skipping malformed loop config %s: %s", p, exc)
     return loops

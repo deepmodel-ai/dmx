@@ -40,7 +40,7 @@ import json
 import re
 import sys
 from pathlib import Path
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Check implementations
@@ -110,7 +110,7 @@ def _scope_defined(content: str) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
-def run(workspace_root: Path) -> dict:
+def run(workspace_root: Path) -> dict[str, Any]:
     spec = workspace_root / ".dmx" / "spec.md"
     content = spec.read_text(encoding="utf-8") if spec.exists() else ""
 
@@ -121,10 +121,7 @@ def run(workspace_root: Path) -> dict:
         ("scope_defined", _scope_defined(content)),
     ]
 
-    checks = [
-        {"name": name, "pass": passed, "message": msg}
-        for name, (passed, msg) in checks_raw
-    ]
+    checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
 
     overall = all(c["pass"] for c in checks)
     summary_msg = (

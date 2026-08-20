@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from dmx.loop_state import (
     LoopStatus,
@@ -21,6 +17,8 @@ from dmx.loop_state import (
     write_state,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # make_task_id
@@ -124,10 +122,16 @@ class TestStateIO:
     def test_write_state_merges(self, tmp_path: Path) -> None:
         root = self._workspace(tmp_path)
         write_initial_state(root, "spec", "JOB", "TASK", ["s"])
-        updated = write_state(root, "JOB", "spec", "TASK", {
-            "status": LoopStatus.running.value,
-            "current_skill_index": 1,
-        })
+        updated = write_state(
+            root,
+            "JOB",
+            "spec",
+            "TASK",
+            {
+                "status": LoopStatus.running.value,
+                "current_skill_index": 1,
+            },
+        )
         assert updated["status"] == LoopStatus.running.value
         assert updated["current_skill_index"] == 1
         # Ensure other fields preserved.

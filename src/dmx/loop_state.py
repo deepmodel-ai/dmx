@@ -22,18 +22,19 @@ import json
 import re
 import subprocess
 from datetime import UTC, datetime
-from enum import Enum
-from pathlib import Path
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Status enum
 # ---------------------------------------------------------------------------
 
 
-class LoopStatus(str, Enum):
+class LoopStatus(StrEnum):
     pending = "pending"
     running = "running"
     paused = "paused"
@@ -42,7 +43,7 @@ class LoopStatus(str, Enum):
     failed = "failed"
 
 
-class LoopOutcome(str, Enum):
+class LoopOutcome(StrEnum):
     success = "success"
     failure = "failure"
     warning = "warning"
@@ -183,9 +184,7 @@ def write_initial_state(
         "active_task_id": task_id,
         "active_loop_name": loop_name,
     }
-    active_pointer_path(workspace_root).write_text(
-        json.dumps(pointer, indent=2), encoding="utf-8"
-    )
+    active_pointer_path(workspace_root).write_text(json.dumps(pointer, indent=2), encoding="utf-8")
 
     return path
 
@@ -198,7 +197,7 @@ def read_state(
 ) -> dict[str, Any]:
     """Read and return the state dict for a loop run."""
     path = state_path(workspace_root, job_id, loop_name, task_id)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return dict(json.loads(path.read_text(encoding="utf-8")))
 
 
 def write_state(
@@ -233,7 +232,7 @@ def read_active_pointer(workspace_root: Path) -> dict[str, str] | None:
     p = active_pointer_path(workspace_root)
     if not p.exists():
         return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    return dict(json.loads(p.read_text(encoding="utf-8")))
 
 
 def clear_active_pointer(workspace_root: Path) -> None:

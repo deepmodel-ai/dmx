@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from dmx.loop_schema import (
     FailureHandling,
@@ -16,6 +17,8 @@ from dmx.loop_schema import (
     load_loops_dir,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,19 +88,19 @@ class TestLoopConfigValidation:
         assert cfg.on_complete.on_failure.trigger_loop is None
 
     def test_empty_skills_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LoopConfig.model_validate({"name": "x", "skills": []})
 
     def test_missing_skills_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LoopConfig.model_validate({"name": "x"})
 
     def test_empty_name_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LoopConfig.model_validate({"name": "", "skills": ["s"]})
 
     def test_empty_skill_name_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LoopConfig.model_validate({"name": "x", "skills": [""]})
 
     def test_human_gate_defaults_true(self) -> None:
@@ -117,20 +120,16 @@ class TestLoopConfigValidation:
         assert cfg.on_optional_failure == OnOptionalFailure.ignore
 
     def test_trigger_type_on_complete(self) -> None:
-        cfg = LoopConfig.model_validate(
-            {**MINIMAL_LOOP, "trigger": {"type": "on_complete"}}
-        )
+        cfg = LoopConfig.model_validate({**MINIMAL_LOOP, "trigger": {"type": "on_complete"}})
         assert cfg.trigger.type == TriggerType.on_complete
 
     def test_unknown_failure_handling_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LoopConfig.model_validate({**MINIMAL_LOOP, "failure_handling": "retry"})
 
     def test_validator_empty_tool_raises(self) -> None:
-        with pytest.raises(Exception):
-            LoopConfig.model_validate(
-                {**MINIMAL_LOOP, "validators": [{"tool": "", "checks": []}]}
-            )
+        with pytest.raises(ValidationError):
+            LoopConfig.model_validate({**MINIMAL_LOOP, "validators": [{"tool": "", "checks": []}]})
 
     def test_repeat_until_none(self) -> None:
         cfg = LoopConfig.model_validate(MINIMAL_LOOP)

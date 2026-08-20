@@ -41,6 +41,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 TEST_TIMEOUT_SECONDS = 600
 
@@ -67,7 +68,7 @@ def _detect_test_command(workspace_root: Path) -> list[str] | None:
     return None
 
 
-def run(workspace_root: Path) -> dict:
+def run(workspace_root: Path) -> dict[str, Any]:
     cmd = _detect_test_command(workspace_root)
     if cmd is None:
         return {

@@ -106,7 +106,7 @@ def _memory_updated(workspace_root: Path) -> tuple[bool, str]:
     return False, "No memory bank update detected"
 
 
-def run(workspace_root: Path, loop_context: dict[str, Any]) -> dict:
+def run(workspace_root: Path, loop_context: dict[str, Any]) -> dict[str, Any]:
     checks_raw = [
         ("pr_exists", _pr_exists(workspace_root)),
         ("ticket_transitioned", _ticket_transitioned(loop_context)),

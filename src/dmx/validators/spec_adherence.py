@@ -121,7 +121,7 @@ def _no_regressions(skill_text: str) -> tuple[bool, str]:
     return True, "No regression language detected in skill output"
 
 
-def run(workspace_root: Path, skill_outputs: dict[str, Any]) -> dict:
+def run(workspace_root: Path, skill_outputs: dict[str, Any]) -> dict[str, Any]:
     spec_path = workspace_root / ".dmx" / "spec.md"
     spec_content = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
     skill_text = _combined_skill_text(skill_outputs)
