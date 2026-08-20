@@ -61,7 +61,7 @@ Each loop config defines a goal state, optional `repeat_until` condition, valida
 
 Validators are plain Python functions at `validators/{name}.py` in the app repo (bundled fallbacks ship with dmx). The orchestrator invokes them via subprocess after all skills complete — the coding agent runs skills; validators run deterministically.
 
-**Status:** config, state persistence, MCP orchestration (`run_loop`, `loop_advance`, `loop_continue`), human-gate sequencing, validator execution, the policy engine, `repeat_until` iteration, `on_complete` auto-chaining, and loop-level memory hooks are implemented. End-to-end integration tests are in progress ([#5](https://github.com/deepmodel-ai/dmx/issues/5)).
+**Status:** M1 is complete ([#5](https://github.com/deepmodel-ai/dmx/issues/5)) — config, state persistence, MCP orchestration (`run_loop`, `loop_advance`, `loop_continue`), human-gate sequencing, validator execution, the policy engine, `repeat_until` iteration, `on_complete` auto-chaining, and loop-level memory hooks are all implemented and covered by an end-to-end integration test suite that runs the full `spec → plan → dev → validate → release` pipeline through the real MCP tools.
 
 Loop-level memory hooks: before the first skill runs, the runtime surfaces `activeContext.md`'s Open Learnings / Open Decisions to the agent; when a loop finishes (complete, paused for validator review, or iterating), it appends a one-line breadcrumb to Session Notes. This is a deterministic log entry, not judgment — promoting it into durable knowledge is still `/dmx/update-memory`'s job.
 
@@ -69,7 +69,7 @@ Loop-level memory hooks: before the first skill runs, the runtime surfaces `acti
 
 - [x] Full lifecycle workflow — spec, plan, build, validate, release
 - [x] `.dmx/` memory bank — shared project context committed to the repo
-- [ ] Loop runtime — end-to-end integration tests remaining ([#5](https://github.com/deepmodel-ai/dmx/issues/5))
+- [x] Loop runtime — background execution engine with validators, policy, `repeat_until`, and autonomous chaining ([#5](https://github.com/deepmodel-ai/dmx/issues/5))
 - [ ] Team server — hosted MCP endpoint, shared loops and rules across the team
 - [ ] Gateway — model governance, cost visibility, autonomous background execution
 
