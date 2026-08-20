@@ -20,8 +20,10 @@ Tool contracts
     - If more skills remain and ``human_gate: true``: pauses, returns pause msg.
     - If more skills remain and ``human_gate: false``: returns next instruction.
     - If all skills complete: runs validators, applies policy
-      (``failure_handling`` / ``on_optional_failure``), writes outcome,
-      returns completion message (and chains next loop if configured).
+      (``failure_handling`` / ``on_optional_failure``), writes outcome, and —
+      if ``on_complete`` declares a ``trigger_loop`` for that outcome —
+      starts the next loop automatically and returns its first-skill
+      instruction. Otherwise returns a terminal completion message.
 
 ``loop_continue()``
     - Reads ``.dmx/loop-state.json``.
@@ -38,6 +40,7 @@ from urllib.parse import unquote, urlparse
 
 from fastmcp import Context, FastMCP
 
+from dmx.loop_memory import append_session_note, read_memory_context
 from dmx.loop_schema import LoopConfig, load_loop, load_loops_dir
 from dmx.loop_state import (
     LoopOutcome,
@@ -174,13 +177,10 @@ def _complete_message(
     loop_name: str,
     job_id: str,
     outcome: str,
-    next_loop: str | None,
 ) -> str:
+    """Return the terminal message for a loop with no ``on_complete`` chain."""
     icon = {"success": "✓", "failure": "✗", "warning": "⚠"}.get(outcome, "?")
-    msg = f"**{loop_name} loop — complete {icon}**\n\nJob: `{job_id}` | Outcome: `{outcome}`"
-    if next_loop:
-        msg += f"\n\nChaining to: **{next_loop}** loop. Call `run_loop` with name=`{next_loop}`."
-    return msg
+    return f"**{loop_name} loop — complete {icon}**\n\nJob: `{job_id}` | Outcome: `{outcome}`"
 
 
 def _validator_failure_message(
@@ -216,6 +216,55 @@ def _iterating_message(
 
 
 # ---------------------------------------------------------------------------
+# Loop startup (shared by run_loop and automatic on_complete chaining)
+# ---------------------------------------------------------------------------
+
+
+def _start_loop(root: Path, name: str, description: str | None = None) -> str:
+    """Load a loop config, initialise its state, and return the first-skill instruction.
+
+    Shared by the ``run_loop`` tool and automatic ``on_complete`` chaining —
+    chaining starts the next loop directly rather than asking the agent to
+    make a second ``run_loop`` call.
+
+    Reads persistent context from ``.dmx/activeContext.md`` (Open Learnings /
+    Open Decisions) and surfaces it alongside the first-skill instruction —
+    the "reads persistent context before running" half of the loop's memory
+    property.
+    """
+    try:
+        config = _resolve_loop(name, root)
+    except FileNotFoundError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return f"Error loading loop config '{name}': {exc}"
+
+    job_id = resolve_job_id(root)
+    task_id = make_task_id()
+
+    write_initial_state(
+        workspace_root=root,
+        loop_name=name,
+        job_id=job_id,
+        task_id=task_id,
+        skills=config.skills,
+    )
+    write_state(root, job_id, name, task_id, {"status": LoopStatus.running.value})
+
+    logger.info("start_loop: name=%s job=%s task=%s", name, job_id, task_id)
+
+    first_skill = config.skills[0]
+    instruction = _skill_instruction(first_skill, name, 0, len(config.skills), description)
+
+    memory_context = read_memory_context(root)
+    if memory_context:
+        instruction = (
+            f"Memory context (from `.dmx/activeContext.md`):\n{memory_context}\n\n{instruction}"
+        )
+    return instruction
+
+
+# ---------------------------------------------------------------------------
 # Validator execution + policy decision
 # ---------------------------------------------------------------------------
 
@@ -240,8 +289,18 @@ def _finish_loop(
     yet met, the loop transitions to ``iterating`` and restarts from the
     first skill — this is not recorded as a failure. Once the condition is
     met, or when the loop has no ``repeat_until``, the active pointer is
-    cleared and the configured ``on_complete`` loop is surfaced.
+    cleared.
+
+    If ``on_complete`` declares a ``trigger_loop`` for this outcome
+    (success, failure, or warning), the next loop starts automatically —
+    no second ``run_loop`` call from the agent is required.
+
+    Every branch appends a one-line breadcrumb to ``.dmx/activeContext.md``
+    (Session Notes) — the "writes learnings back when it completes" half of
+    the loop's memory property. This is a deterministic log entry, not
+    judgment; promoting it to durable knowledge is still ``/dmx/update-memory``'s job.
     """
+    short_task = task_id[:8]
     loop_context = {
         "job_id": job_id,
         "task_id": task_id,
@@ -265,6 +324,11 @@ def _finish_loop(
         logger.info(
             "loop %s: validators failed, pausing for review — %s", loop_name, decision["message"]
         )
+        append_session_note(
+            root,
+            f"{loop_name} loop paused for validator review (job `{job_id}`, "
+            f"task `{short_task}`): {decision['message']}",
+        )
         return _validator_failure_message(loop_name, job_id, task_id, decision["message"])
 
     if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root):
@@ -280,6 +344,11 @@ def _finish_loop(
             "loop %s: repeat_until '%s' not met — iterating (round %d)",
             loop_name, config.repeat_until, iteration,
         )
+        append_session_note(
+            root,
+            f"{loop_name} loop iterating (round {iteration}) — repeat_until "
+            f"'{config.repeat_until}' not yet met (job `{job_id}`).",
+        )
         return _iterating_message(loop_name, job_id, task_id, iteration, config)
 
     clear_active_pointer(root)
@@ -293,7 +362,23 @@ def _finish_loop(
         next_loop = config.on_complete.on_warning.trigger_loop
 
     logger.info("loop %s complete — outcome=%s next_loop=%s", loop_name, outcome, next_loop)
-    return _complete_message(loop_name, job_id, outcome, next_loop)
+
+    if next_loop:
+        append_session_note(
+            root,
+            f"{loop_name} loop completed (outcome: {outcome}) — "
+            f"chained to {next_loop} (job `{job_id}`).",
+        )
+        chain_header = (
+            f"**{loop_name} loop — complete** (outcome: `{outcome}`)\n\n"
+            f"Chaining automatically to **{next_loop}** loop.\n\n"
+        )
+        return chain_header + _start_loop(root, next_loop)
+
+    append_session_note(
+        root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`)."
+    )
+    return _complete_message(loop_name, job_id, outcome)
 
 
 # ---------------------------------------------------------------------------
@@ -326,31 +411,7 @@ def register_loop_tools(app: FastMCP) -> None:
             Plain-English instruction for the agent.
         """
         root = await _resolve_workspace_root(ctx, workspace_root)
-
-        try:
-            config = _resolve_loop(name, root)
-        except FileNotFoundError as exc:
-            return f"Error: {exc}"
-        except Exception as exc:  # noqa: BLE001
-            return f"Error loading loop config '{name}': {exc}"
-
-        job_id = resolve_job_id(root)
-        task_id = make_task_id()
-
-        write_initial_state(
-            workspace_root=root,
-            loop_name=name,
-            job_id=job_id,
-            task_id=task_id,
-            skills=config.skills,
-        )
-
-        write_state(root, job_id, name, task_id, {"status": LoopStatus.running.value})
-
-        logger.info("run_loop: name=%s job=%s task=%s", name, job_id, task_id)
-
-        first_skill = config.skills[0]
-        return _skill_instruction(first_skill, name, 0, len(config.skills), description)
+        return _start_loop(root, name, description)
 
     @app.tool
     async def loop_advance(
