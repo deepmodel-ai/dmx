@@ -106,8 +106,7 @@ Plan saved: .dmx/tasks.md
 
 Open the file and press Cmd+Shift+V (Mac) / Ctrl+Shift+V (Windows) to preview.
 
-When ready, run /dmx/implement-next-phase to begin Phase 1,
-or /dmx/implement-next-task to step through tasks one at a time.
+Review the plan. Implementation begins once approved.
 ```
 
 ## Guards

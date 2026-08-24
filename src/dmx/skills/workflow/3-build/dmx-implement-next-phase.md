@@ -43,9 +43,8 @@ If all tasks across all phases are checked, stop and output:
 All phases complete.
 
 Next:
-  - Commit any remaining changes with /dmx/commit.
-  - Run /dmx/validate to run the pre-PR quality gate.
-  - Once validated, run /dmx/create-pr to open the pull request.
+  - Commit any remaining uncommitted changes.
+  - The loop will advance to the validation gate.
 ```
 
 Store the phase name and its full task list.
@@ -85,9 +84,7 @@ After all tasks in the phase are done, output:
 
 ---
 Next:
-  - Review the changes, then run /dmx/commit to save your progress.
-  - Run /dmx/implement-next-phase for the next phase.
-  - Run /dmx/implement-next-task for finer control over the next phase.
+  - Review the changes. The loop will commit and advance.
 ```
 
 ## Guards

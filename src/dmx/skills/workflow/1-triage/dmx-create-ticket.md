@@ -248,10 +248,9 @@ Spec:   .dmx/spec.md
 
 Then:
 ```
-Spec is pre-filled with project context. Review it, then:
+Spec is pre-filled with project context. Review it:
   1. Fill in the Technical Approach if left incomplete.
   2. Answer the Questions.
-  3. Run /dmx/plan to generate the phased task plan.
 ```
 
 ## Guards
