@@ -12,6 +12,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from dmx.catalog import SkillDefinition, load_rules, load_skills, substitute_args
+from dmx.loop_tools import register_loop_tools
 from dmx.tools import register_tools
 
 __all__ = ["create_app", "resolve_dirs", "watch_catalog"]
@@ -103,6 +104,7 @@ def create_app(
         _register_skill(app, skill)
 
     register_tools(app, rules)
+    register_loop_tools(app)
     return app
 
 

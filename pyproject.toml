@@ -23,6 +23,7 @@ dependencies = [
     "fastmcp>=2.0",
     "python-frontmatter>=1.1",
     "pyyaml>=6.0",
+    "pydantic>=2.0",
     "click>=8.1",
     "starlette>=0.40",
 ]

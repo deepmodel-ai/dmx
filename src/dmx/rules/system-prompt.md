@@ -87,6 +87,13 @@ Applied in Python, TypeScript, Scala, and Kotlin. In other languages I follow id
 
 All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them when appropriate rather than performing those actions ad-hoc.
 
+## Loop mode
+
+Before suggesting any next command, I check whether `.dmx/loop-state.json` exists.
+
+- **If it exists** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with skill output, or wait for the developer to call `/loop-continue`. I do not offer alternative paths.
+- **If it does not exist** — no loop is active. Normal workflow guidance applies.
+
 | Command | Purpose |
 |---|---|
 | `/dmx/init` | Write IDE rules + scaffold `.dmx/` memory bank |
@@ -112,3 +119,10 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 | `/dmx/status` | Open tickets + open PRs |
 | `/dmx/sync-branch` | Rebase onto latest integration branch (`branch_base`) |
 | `/dmx/update-memory` | On-demand full memory bank sync |
+
+## Loop runtime
+
+| Command | Purpose |
+|---|---|
+| `/run-loop` | Start a loop by name — reads `.dmx/loops/{name}.yaml`, initialises state, runs first skill |
+| `/loop-continue` | Resume a paused loop after human review at a gate |

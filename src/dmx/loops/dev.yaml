@@ -1,0 +1,25 @@
+name: dev
+skills:
+  - implement-next-phase
+  - commit
+trigger:
+  type: on_complete
+goal_state: "All phases implemented and committed, no unchecked tasks remaining"
+repeat_until: all_phases_complete
+validators:
+  - tool: run_tests
+    checks:
+      - name: tests_pass
+        required: true
+      - name: coverage_threshold
+        required: false
+on_optional_failure: warn
+failure_handling: pause
+human_gate: true
+on_complete:
+  on_success:
+    trigger_loop: validate
+  on_failure:
+    trigger_loop: null
+  on_warning:
+    trigger_loop: null

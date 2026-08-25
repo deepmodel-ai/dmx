@@ -206,8 +206,5 @@ Committed: {short SHA}
 {full commit message}
 
 Next:
-  - Push:                git push origin HEAD
-  - Continue building:   /dmx/implement-next-task or /dmx/implement-next-phase
-  - Validate:            /dmx/validate  (when all phases are complete)
-  - Open a PR:           /dmx/create-pr  (after validation passes)
+  - Push:    git push origin HEAD
 ```

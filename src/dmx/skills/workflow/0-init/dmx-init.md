@@ -368,9 +368,9 @@ Then, depending on workflow:
 **If `workflow` is `sdlc`:**
 ```
 Next steps:
-  - Run /dmx/create-ticket to start a new piece of work from a description.
+  - Run /dmx/run-loop spec <description> to start a new piece of work.
   - Run /dmx/derive-ticket if you already have uncommitted changes to formalise.
-  - Review .dmx/ — the memory bank was populated from your project. Correct anything that was inferred incorrectly.
+  - Review .dmx/ — confirm the memory bank was populated correctly.
 ```
 
 **If `workflow` is `freestyle`:**

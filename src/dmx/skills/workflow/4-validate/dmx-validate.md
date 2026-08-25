@@ -40,9 +40,12 @@ Run:
 ```
 git diff origin/{config.branch_base}..HEAD
 git diff origin/{config.branch_base}..HEAD --stat
+git rev-parse HEAD
 ```
 
 If the diff is empty, stop: "No changes found against {config.branch_base}. Nothing to validate."
+
+Keep the `git rev-parse HEAD` output — you'll need it in Step 9.
 
 ## Step 5 — Check 1: Ticket Completeness
 
@@ -61,6 +64,11 @@ If no `## Acceptance Criteria` section exists, fall back to evaluating the `## S
 
 **Scope:**
 Check whether the diff stays within the `## Scope` defined in spec.md. Flag anything in the diff that falls outside declared scope.
+
+For every scope item (or acceptance criterion), find the specific file(s)/line(s) or diff hunk that satisfy it. If you cannot find any evidence in the diff for an item, mark it `missing` — not `partial` — only when you are certain there is genuinely nothing there; use `partial` for anything ambiguous or incomplete. You'll record these verdicts in Step 9.
+
+**Regressions:**
+Check whether the diff breaks any previously-working behavior — removed functionality with no replacement, or changes that contradict an existing test's expectations. Base this only on what you find in the diff and test suite, never on words like "regression"/"broke" appearing in commit messages or descriptions — a description that accurately reports a *fixed* regression is not itself a regression.
 
 ## Step 6 — Check 2: Code Quality
 
@@ -169,9 +177,43 @@ Rate each finding: `Critical` | `High` | `Medium` | `Low`.
   Fix the issues above, then re-run /dmx/validate.
 ```
 
+## Step 9 — Write the structured validation report
+
+The report in Step 8 is for the developer to read. This step writes a machine-readable copy of your scope/regression/edge-case findings, so the `spec_adherence` validator grades your actual diff analysis instead of re-parsing prose.
+
+Determine `job_id`: use the value given in the loop runtime instruction that invoked this skill (the line reading `` Job: `{job_id}` ``). If you were invoked directly (not through the loop runtime), resolve it the same way the runtime does: the `ticket` field from `spec.md` frontmatter (Step 2), else the current branch name, else `unknown`.
+
+Write `.dmx/jobs/{job_id}/validation-report.json` (create the directory if it doesn't exist):
+
+```json
+{
+  "commit": "{full commit SHA from Step 4's `git rev-parse HEAD`}",
+  "scope_items": [
+    {"item": "{scope bullet or acceptance criterion text}", "verdict": "covered", "evidence": "{file:line}"}
+  ],
+  "scope_creep": [
+    {"description": "{out-of-scope change}", "evidence": "{file:line}"}
+  ],
+  "regressions": [
+    {"description": "{what broke}", "evidence": "{file:line}"}
+  ],
+  "edge_cases": [
+    {"description": "{edge case}", "addressed": true, "evidence": "{file:line}"}
+  ]
+}
+```
+
+Population rules:
+- `scope_items` — one entry per scope bullet / acceptance criterion from Step 5. `verdict` is `"covered"`, `"partial"`, or `"missing"` — use the verdicts you already determined in Step 5. Only `"missing"` blocks the loop, so reserve it for items with genuinely zero evidence in the diff.
+- `scope_creep` — only changes clearly outside declared scope, from Step 5. Empty array if none.
+- `regressions` — only your own findings from Step 5's regression check. Empty array if none. Never populate this from keyword matches on prose.
+- `edge_cases` — only cases you actually evaluated in Step 6. `addressed: false` only for a specific, clear gap.
+- Empty arrays (`[]`) are valid and expected when a section has no findings — do not omit the key.
+
 ## Guards
 
 - Omit sections with no findings (except "Looks good" in Code Quality — always include at least one).
 - Never open a PR. Never make code changes. Report only.
 - If there are unchecked tasks in tasks.md, the verdict is always NEEDS WORK regardless of other findings.
 - If there are Critical findings in Code Quality or Security, the verdict is always NEEDS WORK.
+- Always complete Step 9, even when the verdict is NEEDS WORK — the validator reads `validation-report.json`, not this chat response.

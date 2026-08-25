@@ -141,7 +141,7 @@ class TestCreateAppEnvVars:
         # Pass bundled dir explicitly — env var (empty_env) must be ignored.
         app = create_app(skills_dir=_bundled_skills_dir())
         prompts = asyncio.run(app.list_prompts())
-        assert len(prompts) == 23
+        assert len(prompts) == 25
 
 
 # ---------------------------------------------------------------------------

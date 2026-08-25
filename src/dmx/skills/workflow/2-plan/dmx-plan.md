@@ -54,6 +54,8 @@ Design a set of phases that group logically related work. Each phase should be c
 - Tests come last (or interleaved if TDD is preferred — use the spec to decide).
 - Each phase should produce working, committable code on its own.
 
+**Phase count:** Use the minimum number of phases that makes logical sense. If the entire feature can be implemented and tested in a single coherent change (typically fewer than 8 tasks), use one phase. Only split into multiple phases when a phase boundary represents a meaningful checkpoint — e.g. a schema migration that must be reviewed before service logic is built on top of it.
+
 **Phase naming:** Use the format `Phase N: {Descriptive Name}` (e.g. `Phase 1: Data Model`, `Phase 2: Service Layer`, `Phase 3: API Endpoints`, `Phase 4: Tests & Validation`).
 
 **Task format:** Each task is a single, concrete action — one file, one function, one migration. Avoid vague tasks like "implement the feature". Prefer: "Add `RateLimitEntry` model to `app/models/rate_limit.py`".
@@ -104,8 +106,7 @@ Plan saved: .dmx/tasks.md
 
 Open the file and press Cmd+Shift+V (Mac) / Ctrl+Shift+V (Windows) to preview.
 
-When ready, run /dmx/implement-next-phase to begin Phase 1,
-or /dmx/implement-next-task to step through tasks one at a time.
+Review the plan. Implementation begins once approved.
 ```
 
 ## Guards

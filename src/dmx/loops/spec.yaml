@@ -1,0 +1,27 @@
+name: spec
+skills:
+  - create-ticket
+trigger:
+  type: manual
+goal_state: "Ticket created, branch checked out, spec.md complete with all Q&A answered"
+validators:
+  - tool: check_spec_complete
+    checks:
+      - name: spec_exists
+        required: true
+      - name: qa_answered
+        required: true
+      - name: technical_approach_filled
+        required: true
+      - name: scope_defined
+        required: true
+on_optional_failure: warn
+failure_handling: pause
+human_gate: true
+on_complete:
+  on_success:
+    trigger_loop: plan
+  on_failure:
+    trigger_loop: null
+  on_warning:
+    trigger_loop: null

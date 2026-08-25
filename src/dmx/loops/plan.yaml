@@ -1,0 +1,25 @@
+name: plan
+skills:
+  - plan
+trigger:
+  type: on_complete
+goal_state: "tasks.md created with all phases and tasks defined, no ambiguity remaining"
+validators:
+  - tool: check_plan_complete
+    checks:
+      - name: tasks_file_exists
+        required: true
+      - name: phases_defined
+        required: true
+      - name: tasks_have_descriptions
+        required: true
+on_optional_failure: warn
+failure_handling: pause
+human_gate: true
+on_complete:
+  on_success:
+    trigger_loop: dev
+  on_failure:
+    trigger_loop: null
+  on_warning:
+    trigger_loop: null
