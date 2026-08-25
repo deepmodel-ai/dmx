@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-25
+
+### Added
+
+- **Loop runtime** — a declarative execution engine that runs an ordered sequence of skills autonomously with automated validators and policy-driven proceed/pause decisions, replacing manual skill-by-skill orchestration for trusted workflows.
+- **Loop config schema** — declarative YAML with `skills`, `trigger` (`manual` in this release; `notify_and_wait`/`auto` accepted by the schema for later milestones), `goal_state`, `repeat_until`, `validators`, `failure_handling`, `on_optional_failure`, `human_gate`, and `on_complete` auto-chaining. Bundled loops ship in `src/dmx/loops/` (`spec`, `plan`, `dev`, `validate`, `release`); teams override via `.dmx/loops/`.
+- **Validator runner** — validators are plain Python functions in `validators/{name}.py`, resolved deterministically and invoked via subprocess with a `{skill_outputs, goal_state, loop_context}` input contract and a `{pass, message, checks}` output contract.
+- **Bundled validators** — `check_spec_complete`, `check_plan_complete`, `check_pr_ready`, `run_tests`, and `spec_adherence`. `spec_adherence` grades a structured `validation-report.json` artifact (produced by the `validate` skill's diff-based analysis) rather than the agent's free-text self-report, checking scope coverage, scope creep, regressions, and edge cases against the real diff.
+- **State machine** — `running → paused → running → ... → complete/failed/iterating`, persisted to `.dmx/loop-state.json` (active pointer) and `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` (per-run state).
+- **`get_skill_definition` MCP tool** — fetches a skill's full instructions on demand at each loop skill boundary, so loop-driven execution doesn't depend on IDE-specific rule files already being present.
+- **`run_loop`, `loop_advance`, `loop_continue` MCP tools** — start a loop, advance past the human gate, and re-run validators after addressing a failure.
+- **Loop-level memory hooks** — loops read `activeContext.md` before running and write one-line session-note breadcrumbs after completion.
+- **`dmx-run-loop`, `dmx-loop-continue` skills** exposing the loop runtime to the agent as first-class workflow entry points.
+
+### Fixed
+
+- `check_spec_complete`'s `qa_answered` check now recognizes questions structurally (numbered-list or `Q:` markers) instead of requiring one exact answer label, so it doesn't silently fail against every spec.md the bundled `dmx-create-ticket` skill actually generates.
+
 ## [0.2.0] — 2026-06-05
 
 ### Changed — Breaking
@@ -63,6 +81,7 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/deepmodel-ai/dmx/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deepmodel-ai/dmx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepmodel-ai/dmx/releases/tag/v0.1.0
