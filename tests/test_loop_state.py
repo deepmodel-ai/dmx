@@ -43,22 +43,24 @@ def test_make_task_id_is_unique() -> None:
 
 
 class TestResolveJobId:
-    def test_reads_ticket_id_from_spec_md(self, tmp_path: Path) -> None:
+    def test_reads_ticket_from_spec_md(self, tmp_path: Path) -> None:
+        # spec.md frontmatter uses the key `ticket` (see dmx-create-ticket.md,
+        # dmx-derive-ticket.md, dmx-hotfix.md) — not `ticket_id`.
         dmx = tmp_path / ".dmx"
         dmx.mkdir()
         spec = dmx / "spec.md"
         spec.write_text(
-            "---\nticket_id: PAY-1234\ntitle: My ticket\n---\n\n# Spec",
+            "---\nticket: PAY-1234\ntitle: My ticket\n---\n\n# Spec",
             encoding="utf-8",
         )
         assert resolve_job_id(tmp_path) == "PAY-1234"
 
-    def test_quoted_ticket_id(self, tmp_path: Path) -> None:
+    def test_quoted_ticket(self, tmp_path: Path) -> None:
         dmx = tmp_path / ".dmx"
         dmx.mkdir()
         spec = dmx / "spec.md"
         spec.write_text(
-            '---\nticket_id: "GH-42"\n---\n',
+            '---\nticket: "GH-42"\n---\n',
             encoding="utf-8",
         )
         assert resolve_job_id(tmp_path) == "GH-42"

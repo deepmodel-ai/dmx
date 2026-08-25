@@ -113,7 +113,7 @@ def _strip_frontmatter(content: str) -> str:
     end = stripped.find("\n---", 3)
     if end == -1:
         return stripped
-    return stripped[end + 4:].lstrip("\n")
+    return stripped[end + 4 :].lstrip("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +183,17 @@ def _skill_instruction(
     loop_name: str,
     index: int,
     total: int,
+    job_id: str,
+    task_id: str,
     description: str | None = None,
 ) -> str:
-    """Return the agent instruction for running a single skill."""
+    """Return the agent instruction for running a single skill.
+
+    Always carries ``job_id``/``task_id`` — skills that persist ticket-scoped
+    artifacts (e.g. ``validate`` writing ``.dmx/jobs/{job_id}/validation-report.json``)
+    need this to know where to write without re-deriving it themselves.
+    """
+    short_task = task_id[:8]
     desc_block = (
         f"\nContext for this skill: {description.strip().splitlines()[0]}\n"
         if description and index == 0
@@ -193,7 +201,8 @@ def _skill_instruction(
     )
     return (
         f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
-        f"Next skill: `{skill_name}` (Loop: {loop_name} | Skill {index + 1}/{total}){desc_block}\n\n"
+        f"Next skill: `{skill_name}` (Loop: {loop_name} | Skill {index + 1}/{total}) | "
+        f"Job: `{job_id}` | Task: `{short_task}`{desc_block}\n\n"
         f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the skill "
         f"instructions, then execute them exactly as written.\n\n"
         f"REQUIRED: When the skill finishes, you MUST immediately call the "
@@ -242,7 +251,11 @@ def _validator_failure_message(
     return (
         f"**{loop_name} loop — paused (validation failed)** ⚠️\n\n"
         f"Job: `{job_id}` | Task: `{short_task}`\n\n"
-        f"{message}"
+        f"{message}\n\n"
+        f"Before calling `loop_continue`: if any failing check depends on an artifact a "
+        f"skill produced (e.g. `validate`'s report), re-run that skill via "
+        f"`get_skill_definition` first to regenerate it. Calling `loop_continue` without "
+        f"regenerating stale artifacts will re-grade the same output and fail again."
     )
 
 
@@ -260,7 +273,9 @@ def _iterating_message(
         f"Job: `{job_id}` | Task: `{short_task}` | "
         f"`repeat_until: {config.repeat_until}` not yet met — restarting the skill sequence.\n\n"
     )
-    return header + _skill_instruction(config.skills[0], loop_name, 0, len(config.skills))
+    return header + _skill_instruction(
+        config.skills[0], loop_name, 0, len(config.skills), job_id, task_id
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +317,9 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
     logger.info("start_loop: name=%s job=%s task=%s", name, job_id, task_id)
 
     first_skill = config.skills[0]
-    instruction = _skill_instruction(first_skill, name, 0, len(config.skills), description)
+    instruction = _skill_instruction(
+        first_skill, name, 0, len(config.skills), job_id, task_id, description
+    )
 
     memory_context = read_memory_context(root)
     if memory_context:
@@ -496,10 +513,7 @@ def register_loop_tools(app: FastMCP) -> None:
         root = await _resolve_workspace_root(ctx, workspace_root)
         raw = _resolve_skill(name, root)
         if raw is None:
-            return (
-                f"Skill '{name}' not found. "
-                "Check the skill name or add it to .dmx/skills/."
-            )
+            return f"Skill '{name}' not found. Check the skill name or add it to .dmx/skills/."
         return _strip_frontmatter(raw)
 
     @app.tool
@@ -579,7 +593,9 @@ def register_loop_tools(app: FastMCP) -> None:
             else:
                 # human_gate: false — return next skill instruction immediately.
                 next_skill = skills[next_idx]
-                return _skill_instruction(next_skill, loop_name, next_idx, len(skills))
+                return _skill_instruction(
+                    next_skill, loop_name, next_idx, len(skills), job_id, task_id
+                )
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
             # running validators and chaining. loop_continue triggers the final step.
@@ -670,4 +686,4 @@ def register_loop_tools(app: FastMCP) -> None:
         )
 
         next_skill = skills[idx]
-        return _skill_instruction(next_skill, loop_name, idx, len(skills))
+        return _skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id)

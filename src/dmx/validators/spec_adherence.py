@@ -1,16 +1,12 @@
 """Bundled validator: spec_adherence.
 
-The loop runtime design document notes that a ``spec_adherence`` validator
-typically "calls an LLM API directly to check whether the implementation
-matches the spec." This bundled default does **not** call an LLM — it has
-no configured API key or provider to call — and instead applies a
-deterministic textual-overlap heuristic between ``.dmx/spec.md``'s Scope
-section and the skills' combined output.
-
-This is a conservative baseline, not a real adherence check. Override
-``validators/spec_adherence.py`` in the app repo with an LLM-backed
-implementation for meaningful signal — the orchestrator does not care what
-happens inside a validator, only that it returns the standard contract.
+Grades the structured report the ``validate`` skill writes after reviewing
+the real diff against ``.dmx/spec.md`` — it does **not** grade free-text
+``skill_outputs`` narration. That was the original design (and its bug):
+scoring keyword overlap against the agent's self-report is both gameable
+(reword the sentence, no code change, check passes) and prone to false
+failures (accurate language about a fixed regression trips a "no
+regressions" keyword filter just as hard as an introduced one).
 
 Contract
 --------
@@ -22,15 +18,45 @@ stdin as JSON::
     {
       "skill_outputs": {...},
       "goal_state": "...",
-      "loop_context": {..., "workspace_root": "/path/to/repo"}
+      "loop_context": {
+        "job_id": "...", "task_id": "...", "loop_name": "...",
+        "branch": "...", "ticket_ref": "...", "workspace_root": "/path/to/repo"
+      }
     }
 
-Exits 0 on pass, 1 on failure.
-Writes JSON to stdout::
+Reads the structured artifact at
+``{workspace_root}/.dmx/jobs/{job_id}/validation-report.json``, written by
+the ``validate`` skill (see ``dmx-validate.md`` Step 9). Expected shape::
+
+    {
+      "commit": "<git rev-parse HEAD at the time the report was written>",
+      "scope_items": [
+        {"item": str, "verdict": "covered" | "partial" | "missing", "evidence": str}
+      ],
+      "scope_creep": [{"description": str, "evidence": str}],
+      "regressions": [{"description": str, "evidence": str}],
+      "edge_cases": [{"description": str, "addressed": bool, "evidence": str}]
+    }
+
+Grading policy — ambiguous verdicts warn, only clear-cut evidence blocks:
+- ``scope_matches_spec`` fails only if a scope item is ``missing`` (no
+  evidence at all) or ``scope_creep`` is non-empty. ``partial`` items pass
+  (ambiguous, not a hard block) but are surfaced in the message.
+- ``no_regressions`` fails only if ``regressions`` is non-empty.
+- ``edge_cases_addressed`` fails only if an edge case is explicitly flagged
+  ``addressed: false``.
+
+If the report is missing, malformed, or stale (its recorded ``commit``
+doesn't match the current ``HEAD`` — meaning the diff changed since the
+report was generated), every check fails with a message telling the agent
+to re-run the ``validate`` skill. Silently passing on missing/stale data
+would recreate the original bug in a new location.
+
+Exits 0 on pass, 1 on failure. Writes JSON to stdout::
 
     {
       "pass": true,
-      "message": "Spec adherence heuristic passed",
+      "message": "Spec adherence check passed",
       "checks": [
         {"name": "scope_matches_spec",   "pass": true},
         {"name": "edge_cases_addressed", "pass": true},
@@ -42,103 +68,134 @@ Writes JSON to stdout::
 from __future__ import annotations
 
 import json
-import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-_SCOPE_SECTION_RE = re.compile(
-    r"^#{1,4}\s+scope\b.*?\n(.*?)(?=^#{1,4}\s|\Z)",
-    re.MULTILINE | re.IGNORECASE | re.DOTALL,
-)
-_BULLET_RE = re.compile(r"^\s*[-*]\s+(.+)$", re.MULTILINE)
-_WORD_RE = re.compile(r"[a-zA-Z]{4,}")
+GIT_TIMEOUT_SECONDS = 15
 
-_SCOPE_COVERAGE_THRESHOLD = 0.6
-_EDGE_CASE_KEYWORDS = (
-    "edge case",
-    "boundary",
-    "error handling",
-    "exception",
-    "invalid input",
-    "empty input",
-)
-_REGRESSION_KEYWORDS = (
-    "regression",
-    "broke",
-    "broken test",
-    "test failure",
-    "tests failing",
-    "failing test",
-)
+_RERUN_HINT = "Re-run the `validate` skill to regenerate the report, then retry."
 
 
-def _combined_skill_text(skill_outputs: dict[str, str]) -> str:
-    return "\n".join(str(v) for v in skill_outputs.values())
+def _report_path(workspace_root: Path, job_id: str) -> Path:
+    return workspace_root / ".dmx" / "jobs" / job_id / "validation-report.json"
 
 
-def _extract_scope_bullets(spec_content: str) -> list[str]:
-    match = _SCOPE_SECTION_RE.search(spec_content)
-    if not match:
-        return []
-    return [b.strip() for b in _BULLET_RE.findall(match.group(1)) if b.strip()]
+def _current_head(workspace_root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=workspace_root,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
 
-def _scope_matches_spec(spec_content: str, skill_text: str) -> tuple[bool, str]:
-    bullets = _extract_scope_bullets(spec_content)
-    if not bullets:
-        return False, "No Scope section found in spec.md"
+def _load_report(workspace_root: Path, job_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Load and validate the report artifact.
 
-    skill_lower = skill_text.lower()
-    covered = 0
-    for bullet in bullets:
-        words = _WORD_RE.findall(bullet.lower())
-        if not words:
-            covered += 1
-            continue
-        hits = sum(1 for w in words if w in skill_lower)
-        if hits >= max(1, len(words) // 2):
-            covered += 1
+    Returns ``(report, None)`` on success, or ``(None, error_message)`` if
+    the report is missing, malformed, or stale relative to the current
+    commit.
+    """
+    path = _report_path(workspace_root, job_id)
+    if not path.exists():
+        return None, f"No validation report found at {path}. {_RERUN_HINT}"
 
-    ratio = covered / len(bullets)
-    passed = ratio >= _SCOPE_COVERAGE_THRESHOLD
-    return passed, f"{covered}/{len(bullets)} scope item(s) referenced in skill output"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"Validation report at {path} is not valid JSON ({exc}). {_RERUN_HINT}"
 
+    if not isinstance(report, dict):
+        return None, f"Validation report at {path} is not a JSON object. {_RERUN_HINT}"
 
-def _edge_cases_addressed(skill_text: str) -> tuple[bool, str]:
-    lower = skill_text.lower()
-    hits = [k for k in _EDGE_CASE_KEYWORDS if k in lower]
-    if hits:
-        return True, f"Edge-case handling referenced: {', '.join(hits)}"
-    return False, "No explicit mention of edge-case handling in skill output"
+    current_head = _current_head(workspace_root)
+    report_commit = report.get("commit")
+    if current_head and report_commit and report_commit != current_head:
+        return None, (
+            f"Validation report is stale — generated for commit {report_commit!r}, "
+            f"current HEAD is {current_head!r}. {_RERUN_HINT}"
+        )
 
-
-def _no_regressions(skill_text: str) -> tuple[bool, str]:
-    lower = skill_text.lower()
-    hits = [k for k in _REGRESSION_KEYWORDS if k in lower]
-    if hits:
-        return False, f"Potential regression language found: {', '.join(hits)}"
-    return True, "No regression language detected in skill output"
+    return report, None
 
 
-def run(workspace_root: Path, skill_outputs: dict[str, Any]) -> dict[str, Any]:
-    spec_path = workspace_root / ".dmx" / "spec.md"
-    spec_content = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
-    skill_text = _combined_skill_text(skill_outputs)
+def _scope_matches_spec(report: dict[str, Any]) -> tuple[bool, str]:
+    scope_items = report.get("scope_items") or []
+    scope_creep = report.get("scope_creep") or []
+
+    missing = [i for i in scope_items if i.get("verdict") == "missing"]
+    partial = [i for i in scope_items if i.get("verdict") == "partial"]
+
+    if not scope_items and not scope_creep:
+        return False, "Report contains no scope_items — cannot verify scope adherence."
+
+    if missing:
+        names = ", ".join(i.get("item", "?") for i in missing)
+        return False, f"Scope item(s) with no evidence in the diff: {names}"
+
+    if scope_creep:
+        names = ", ".join(c.get("description", "?") for c in scope_creep)
+        return False, f"Out-of-scope changes detected: {names}"
+
+    covered = len(scope_items) - len(partial)
+    if partial:
+        names = ", ".join(i.get("item", "?") for i in partial)
+        return True, f"{covered}/{len(scope_items)} scope items fully covered; ambiguous: {names}"
+    return True, f"All {len(scope_items)} scope item(s) covered in the diff"
+
+
+def _edge_cases_addressed(report: dict[str, Any]) -> tuple[bool, str]:
+    edge_cases = report.get("edge_cases") or []
+    if not edge_cases:
+        return True, "No edge cases flagged for review"
+
+    unaddressed = [e for e in edge_cases if e.get("addressed") is False]
+    if unaddressed:
+        names = ", ".join(e.get("description", "?") for e in unaddressed)
+        return False, f"Unaddressed edge case(s): {names}"
+    return True, f"All {len(edge_cases)} flagged edge case(s) addressed"
+
+
+def _no_regressions(report: dict[str, Any]) -> tuple[bool, str]:
+    regressions = report.get("regressions") or []
+    if regressions:
+        names = ", ".join(r.get("description", "?") for r in regressions)
+        return False, f"Regression(s) found in the diff: {names}"
+    return True, "No regressions found in the diff"
+
+
+def run(workspace_root: Path, job_id: str) -> dict[str, Any]:
+    report, error = _load_report(workspace_root, job_id)
+
+    check_names = ["scope_matches_spec", "edge_cases_addressed", "no_regressions"]
+
+    if report is None:
+        checks = [{"name": name, "pass": False, "message": error} for name in check_names]
+        return {"pass": False, "message": error, "checks": checks}
 
     checks_raw = [
-        ("scope_matches_spec", _scope_matches_spec(spec_content, skill_text)),
-        ("edge_cases_addressed", _edge_cases_addressed(skill_text)),
-        ("no_regressions", _no_regressions(skill_text)),
+        ("scope_matches_spec", _scope_matches_spec(report)),
+        ("edge_cases_addressed", _edge_cases_addressed(report)),
+        ("no_regressions", _no_regressions(report)),
     ]
 
     checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
 
     overall = all(c["pass"] for c in checks)
     summary_msg = (
-        "Spec adherence heuristic passed"
+        "Spec adherence check passed"
         if overall
-        else "Spec adherence heuristic failed — see checks for details"
+        else "Spec adherence check failed — see checks for details"
     )
 
     return {
@@ -150,7 +207,9 @@ def run(workspace_root: Path, skill_outputs: dict[str, Any]) -> dict[str, Any]:
 
 if __name__ == "__main__":
     contract = json.loads(sys.stdin.read() or "{}")
-    workspace_root = contract.get("loop_context", {}).get("workspace_root") or "."
-    result = run(Path(workspace_root), contract.get("skill_outputs", {}))
+    loop_context = contract.get("loop_context", {})
+    workspace_root = loop_context.get("workspace_root") or "."
+    job_id = loop_context.get("job_id") or "unknown"
+    result = run(Path(workspace_root), job_id)
     print(json.dumps(result))
     sys.exit(0 if result["pass"] else 1)

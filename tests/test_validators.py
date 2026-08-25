@@ -8,6 +8,7 @@ bundled scripts on disk.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from dmx.validator_runner import run_validator
@@ -21,6 +22,8 @@ from dmx.validators import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 # ---------------------------------------------------------------------------
 # check_spec_complete
@@ -105,42 +108,189 @@ class TestCheckPlanComplete:
 
 
 class TestSpecAdherence:
-    def _write_spec(self, tmp_path: Path, content: str) -> None:
-        dmx = tmp_path / ".dmx"
-        dmx.mkdir(parents=True, exist_ok=True)
-        (dmx / "spec.md").write_text(content, encoding="utf-8")
+    """Grades ``.dmx/jobs/{job_id}/validation-report.json``, not skill_outputs prose."""
 
-    def test_no_scope_section_fails(self, tmp_path: Path) -> None:
-        result = spec_adherence.run(tmp_path, {})
-        scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
-        assert scope_check["pass"] is False
+    def _write_report(self, tmp_path: Path, job_id: str, report: dict[str, object]) -> None:
+        job_dir = tmp_path / ".dmx" / "jobs" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / "validation-report.json").write_text(json.dumps(report), encoding="utf-8")
 
-    def test_scope_covered_by_skill_output_passes(self, tmp_path: Path) -> None:
-        self._write_spec(tmp_path, "## Scope\n- Add rate limiter middleware\n")
-        skill_outputs = {
-            "implement-next-phase": "Added rate limiter middleware to app/middleware.py",
+    def test_missing_report_fails_every_check(self, tmp_path: Path) -> None:
+        result = spec_adherence.run(tmp_path, "main")
+        assert result["pass"] is False
+        assert {c["name"] for c in result["checks"]} == {
+            "scope_matches_spec",
+            "edge_cases_addressed",
+            "no_regressions",
         }
-        result = spec_adherence.run(tmp_path, skill_outputs)
+        assert all(not c["pass"] for c in result["checks"])
+
+    def test_malformed_json_fails_every_check(self, tmp_path: Path) -> None:
+        job_dir = tmp_path / ".dmx" / "jobs" / "main"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / "validation-report.json").write_text("not json", encoding="utf-8")
+        result = spec_adherence.run(tmp_path, "main")
+        assert result["pass"] is False
+
+    def test_scope_items_covered_passes(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {
+                        "item": "Add rate limiter middleware",
+                        "verdict": "covered",
+                        "evidence": "app/middleware.py:12",
+                    }
+                ],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
         scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
         assert scope_check["pass"] is True
 
-    def test_edge_case_keyword_detected(self, tmp_path: Path) -> None:
-        self._write_spec(tmp_path, "## Scope\n- Add rate limiter middleware\n")
-        skill_outputs = {
-            "s": "Added rate limiter middleware and handled the edge case of a missing header"
-        }
-        result = spec_adherence.run(tmp_path, skill_outputs)
-        edge_check = next(c for c in result["checks"] if c["name"] == "edge_cases_addressed")
-        assert edge_check["pass"] is True
+    def test_missing_scope_item_fails(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {"item": "Add rate limiter middleware", "verdict": "missing", "evidence": ""}
+                ],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
+        assert scope_check["pass"] is False
 
-    def test_regression_language_fails_no_regressions_check(self, tmp_path: Path) -> None:
-        self._write_spec(tmp_path, "## Scope\n- Add rate limiter middleware\n")
-        skill_outputs = {
-            "s": "Added rate limiter middleware; one existing test is now failing (regression)"
-        }
-        result = spec_adherence.run(tmp_path, skill_outputs)
+    def test_partial_scope_item_passes_but_is_noted(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {
+                        "item": "Add rate limiter middleware",
+                        "verdict": "partial",
+                        "evidence": "app/middleware.py:12",
+                    }
+                ],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
+        assert scope_check["pass"] is True
+        assert "Add rate limiter middleware" in scope_check["message"]
+
+    def test_scope_creep_fails(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {
+                        "item": "Add rate limiter middleware",
+                        "verdict": "covered",
+                        "evidence": "app/middleware.py:12",
+                    }
+                ],
+                "scope_creep": [
+                    {"description": "Refactored unrelated auth module", "evidence": "app/auth.py:1"}
+                ],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
+        assert scope_check["pass"] is False
+
+    def test_regression_found_fails_no_regressions_check(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [],
+                "scope_creep": [],
+                "regressions": [
+                    {
+                        "description": "Removed input validation used elsewhere",
+                        "evidence": "app/api.py:40",
+                    }
+                ],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
         regression_check = next(c for c in result["checks"] if c["name"] == "no_regressions")
         assert regression_check["pass"] is False
+
+    def test_description_mentioning_regression_word_does_not_fail(self, tmp_path: Path) -> None:
+        """The whole point of the fix: prose mentioning 'regression' isn't graded at all."""
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {
+                        "item": "Fix login regression",
+                        "verdict": "covered",
+                        "evidence": "app/login.py:5",
+                    }
+                ],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        regression_check = next(c for c in result["checks"] if c["name"] == "no_regressions")
+        assert regression_check["pass"] is True
+
+    def test_unaddressed_edge_case_fails(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [{"description": "Empty input", "addressed": False, "evidence": ""}],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        edge_check = next(c for c in result["checks"] if c["name"] == "edge_cases_addressed")
+        assert edge_check["pass"] is False
+
+    def test_stale_report_fails_with_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(spec_adherence, "_current_head", lambda _root: "f" * 40)
+
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "commit": "0" * 40,
+                "scope_items": [],
+                "scope_creep": [],
+                "regressions": [],
+                "edge_cases": [],
+            },
+        )
+        result = spec_adherence.run(tmp_path, "main")
+        assert result["pass"] is False
+        assert "stale" in result["message"].lower()
 
 
 # ---------------------------------------------------------------------------

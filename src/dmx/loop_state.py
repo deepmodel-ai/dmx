@@ -68,7 +68,9 @@ def make_task_id() -> str:
 # ---------------------------------------------------------------------------
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-_TICKET_KEY_RE = re.compile(r"^ticket_id\s*:\s*(.+)$", re.MULTILINE)
+# spec.md frontmatter is written with the key `ticket` (see dmx-create-ticket.md,
+# dmx-derive-ticket.md, dmx-hotfix.md) — not `ticket_id`.
+_TICKET_KEY_RE = re.compile(r"^ticket\s*:\s*(.+)$", re.MULTILINE)
 
 
 def current_branch(workspace_root: Path) -> str | None:
@@ -93,7 +95,7 @@ def resolve_job_id(workspace_root: Path) -> str:
     """Resolve job ID for the current workspace.
 
     Resolution order:
-    1. ``ticket_id`` in ``.dmx/spec.md`` YAML frontmatter.
+    1. ``ticket`` in ``.dmx/spec.md`` YAML frontmatter.
     2. Current git branch name.
     3. ``unknown`` fallback.
 

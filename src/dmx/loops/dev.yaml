@@ -13,12 +13,6 @@ validators:
         required: true
       - name: coverage_threshold
         required: false
-  - tool: spec_adherence
-    checks:
-      - name: scope_matches_spec
-        required: true
-      - name: edge_cases_addressed
-        required: false
 on_optional_failure: warn
 failure_handling: pause
 human_gate: true
