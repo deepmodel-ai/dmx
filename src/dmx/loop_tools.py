@@ -170,7 +170,8 @@ def _pause_message(
         f"**{loop_name} loop — paused** ✋\n\n"
         f"Job: `{job_id}` | Task: `{short_task}` | "
         f"Progress: {completed}/{total} skills complete\n\n"
-        f"Review the output above. When ready, call `loop_continue` to proceed."
+        f"Loop paused at the human gate. **Stop here — do not call any more tools.**\n"
+        f"The developer must review the output above and manually run `/loop-continue` to proceed."
     )
 
 
