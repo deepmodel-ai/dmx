@@ -170,8 +170,9 @@ def _pause_message(
         f"**{loop_name} loop — paused** ✋\n\n"
         f"Job: `{job_id}` | Task: `{short_task}` | "
         f"Progress: {completed}/{total} skills complete\n\n"
-        f"Loop paused at the human gate. **Stop here — do not call any more tools.**\n"
-        f"The developer must review the output above and manually run `/loop-continue` to proceed."
+        f"HUMAN GATE — your turn is done. Do not call loop_continue or any other tool.\n"
+        f"Output this message to the developer and stop. "
+        f"The developer must review and manually run `/loop-continue` when ready."
     )
 
 
@@ -554,6 +555,11 @@ def register_loop_tools(app: FastMCP) -> None:
         state = read_state(root, job_id, loop_name, task_id)
 
         if state["status"] != LoopStatus.paused.value:
+            if state["status"] == LoopStatus.running.value:
+                return (
+                    f"The {loop_name} loop is currently running. "
+                    "Wait for the skill to finish before calling loop_continue."
+                )
             return (
                 f"Loop '{loop_name}' is not paused (status: {state['status']}). "
                 "Nothing to continue."
