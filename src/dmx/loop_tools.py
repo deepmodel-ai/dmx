@@ -1,4 +1,4 @@
-"""Loop runtime MCP tools: run_loop, loop_advance, loop_continue.
+"""Loop runtime MCP tools: run_loop, loop_advance, loop_continue, get_skill_definition.
 
 These three tools expose the dmx loop runtime through the existing MCP server.
 The agent is always the executor — dmx never runs skills directly.  Each tool
@@ -71,6 +71,49 @@ logger = logging.getLogger(__name__)
 
 def _bundled_loops_dir() -> Path:
     return Path(str(pkg.files("dmx") / "loops"))
+
+
+def _bundled_skills_dir() -> Path:
+    return Path(str(pkg.files("dmx") / "skills"))
+
+
+def _resolve_skill(name: str, workspace_root: Path) -> str | None:
+    """Find and return the raw content of a skill markdown file.
+
+    Search order:
+    1. ``{workspace_root}/.dmx/skills/{name}.md`` (project-specific, exact)
+    2. ``{workspace_root}/.dmx/skills/dmx-{name}.md`` (project-specific, prefixed)
+    3. Recursive glob in the bundled skills directory for ``{name}.md``
+    4. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
+
+    Returns ``None`` if the skill is not found in any location.
+    """
+    candidates = [name, f"dmx-{name}"]
+
+    project_skills = workspace_root / ".dmx" / "skills"
+    for candidate in candidates:
+        path = project_skills / f"{candidate}.md"
+        if path.exists():
+            return path.read_text()
+
+    bundled = _bundled_skills_dir()
+    for candidate in candidates:
+        matches = list(bundled.rglob(f"{candidate}.md"))
+        if matches:
+            return matches[0].read_text()
+
+    return None
+
+
+def _strip_frontmatter(content: str) -> str:
+    """Remove YAML frontmatter (the leading ``---`` block) from a skill file."""
+    stripped = content.strip()
+    if not stripped.startswith("---"):
+        return stripped
+    end = stripped.find("\n---", 3)
+    if end == -1:
+        return stripped
+    return stripped[end + 4:].lstrip("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +193,9 @@ def _skill_instruction(
     )
     return (
         f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
-        f"Run /{skill_name} now. (Loop: {loop_name} | Skill {index + 1}/{total}){desc_block}\n\n"
+        f"Next skill: `{skill_name}` (Loop: {loop_name} | Skill {index + 1}/{total}){desc_block}\n\n"
+        f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the skill "
+        f"instructions, then execute them exactly as written.\n\n"
         f"REQUIRED: When the skill finishes, you MUST immediately call the "
         f"`loop_advance` MCP tool with the skill's full output as the `output` argument. "
         f"Do not wait for user input. Do not suggest next steps. Call loop_advance."
@@ -427,6 +472,35 @@ def register_loop_tools(app: FastMCP) -> None:
         """
         root = await _resolve_workspace_root(ctx, workspace_root)
         return _start_loop(root, name, description)
+
+    @app.tool
+    async def get_skill_definition(
+        ctx: Context,
+        name: str,
+        workspace_root: str | None = None,
+    ) -> str:
+        """Fetch the full instruction set for a named dmx skill.
+
+        Call this before executing a skill the loop runtime has scheduled.
+        Returns the skill's complete step-by-step instructions with frontmatter
+        stripped, ready to execute directly.
+
+        Args:
+            name: Skill name as returned by ``run_loop`` or ``loop_continue``
+                  (e.g. ``create-ticket``, ``plan``, ``implement-next-phase``).
+            workspace_root: Repo root path override.  Auto-detected if omitted.
+
+        Returns:
+            Full skill instructions, or an error message if the skill is not found.
+        """
+        root = await _resolve_workspace_root(ctx, workspace_root)
+        raw = _resolve_skill(name, root)
+        if raw is None:
+            return (
+                f"Skill '{name}' not found. "
+                "Check the skill name or add it to .dmx/skills/."
+            )
+        return _strip_frontmatter(raw)
 
     @app.tool
     async def loop_advance(
