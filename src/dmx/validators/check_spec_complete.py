@@ -53,23 +53,51 @@ def _spec_exists(spec: Path) -> tuple[bool, str]:
     return False, "spec.md not found or empty"
 
 
+_QUESTION_LINE_RE = re.compile(r"^\s*(?:\d+\.\s+.+|Q:\s*.+)$", re.IGNORECASE)
+_HEADING_LINE_RE = re.compile(r"^#{1,4}\s")
+_ANSWER_LABEL_RE = re.compile(r"^\s*(?:A|Answer)\s*:\s*", re.IGNORECASE)
+_PLACEHOLDER_ANSWER_RE = re.compile(r"^(tbd|n/a|todo|\?+)?$", re.IGNORECASE)
+
+
 def _qa_answered(content: str) -> tuple[bool, str]:
-    """Check that Q&A section has non-empty answers.
+    """Check that each question has a substantive answer.
 
-    Looks for lines starting with 'Q:' followed by lines with 'A:' that
-    contain actual content (not just 'A: TBD' or blank).
+    Structural rather than label-based, to tolerate wording drift between
+    this validator and whatever skill scaffolds spec.md: a question is
+    recognized as either a numbered list item (``N. {question}`` — the
+    format ``dmx-create-ticket.md`` Step 8 actually writes) or a classic
+    ``Q:`` line. Everything following it, up to the next question or
+    heading, is its answer — whether labeled ``Answer:``/``A:`` or not. A
+    blank body or an explicit TBD/N/A placeholder counts as unanswered.
     """
-    qa_pattern = re.compile(r"^A:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
-    tbd_pattern = re.compile(r"^A:\s*(tbd|n/a|todo|\?+)\s*$", re.MULTILINE | re.IGNORECASE)
+    lines = content.splitlines()
+    questions = 0
+    answered = 0
+    i = 0
+    n = len(lines)
+    while i < n:
+        if not _QUESTION_LINE_RE.match(lines[i]):
+            i += 1
+            continue
 
-    answers = qa_pattern.findall(content)
-    tbd_count = len(tbd_pattern.findall(content))
+        questions += 1
+        i += 1
+        body_lines: list[str] = []
+        while (
+            i < n and not _QUESTION_LINE_RE.match(lines[i]) and not _HEADING_LINE_RE.match(lines[i])
+        ):
+            body_lines.append(lines[i])
+            i += 1
 
-    if not answers:
-        return False, "No Q&A answers found in spec.md"
-    if tbd_count == len(answers):
-        return False, "All Q&A answers are placeholders (TBD/N/A)"
-    return True, f"Q&A section has {len(answers) - tbd_count} answered question(s)"
+        body = _ANSWER_LABEL_RE.sub("", "\n".join(body_lines).strip(), count=1).strip()
+        if body and not _PLACEHOLDER_ANSWER_RE.match(body):
+            answered += 1
+
+    if questions == 0:
+        return False, "No Q&A questions found in spec.md"
+    if answered == 0:
+        return False, "All Q&A answers are placeholders or left blank"
+    return True, f"Q&A section has {answered}/{questions} answered question(s)"
 
 
 def _technical_approach_filled(content: str) -> tuple[bool, str]:

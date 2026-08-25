@@ -9,6 +9,8 @@ bundled scripts on disk.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dmx.validator_runner import run_validator
@@ -21,8 +23,6 @@ from dmx.validators import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,78 @@ class TestCheckSpecComplete:
         result = check_spec_complete.run(tmp_path)
         qa_check = next(c for c in result["checks"] if c["name"] == "qa_answered")
         assert qa_check["pass"] is False
+
+    def test_dmx_create_ticket_numbered_answer_template_passes(self, tmp_path: Path) -> None:
+        """The actual template dmx-create-ticket.md Step 8 writes — numbered
+        questions with an indented 'Answer:' line, not 'Q:'/'A:'."""
+        self._write_spec(
+            tmp_path,
+            "## Technical Approach\nUse a token bucket per API key, stored in Redis.\n\n"
+            "## Scope\n- Add rate limiter middleware\n\n"
+            "## Questions\n"
+            "1. Should limits be per-key or per-owner?\n"
+            "   Answer: Per-owner, matching how tiers are assigned.\n\n"
+            "2. What happens on a burst at the boundary?\n"
+            "   Answer: Reject with 429 and a Retry-After header.\n",
+        )
+        result = check_spec_complete.run(tmp_path)
+        qa_check = next(c for c in result["checks"] if c["name"] == "qa_answered")
+        assert qa_check["pass"] is True
+
+    def test_unfilled_answer_template_fails_qa_check(self, tmp_path: Path) -> None:
+        """A bare 'Answer:' with nothing after it — the un-filled-in
+        template state — must still count as unanswered."""
+        self._write_spec(
+            tmp_path,
+            "## Technical Approach\nUse a token bucket per API key, stored in Redis.\n\n"
+            "## Scope\n- Add rate limiter middleware\n\n"
+            "## Questions\n1. Should limits be per-key or per-owner?\n   Answer:\n",
+        )
+        result = check_spec_complete.run(tmp_path)
+        qa_check = next(c for c in result["checks"] if c["name"] == "qa_answered")
+        assert qa_check["pass"] is False
+
+    def test_qa_answered_matches_dmx_create_ticket_live_template(self) -> None:
+        """Drift guard, not a fixed-format test.
+
+        Extracts the real ``## Questions`` block straight from
+        dmx-create-ticket.md at test time, fills in its placeholders, and
+        runs it through the actual ``_qa_answered`` check. If a future edit
+        to that skill's template changes its answer format, this test
+        fails immediately — the same class of bug this file's other tests
+        were written to catch after it shipped silently once already.
+        """
+        skill_path = (
+            Path(__file__).parent.parent
+            / "src"
+            / "dmx"
+            / "skills"
+            / "workflow"
+            / "1-triage"
+            / "dmx-create-ticket.md"
+        )
+        skill_content = skill_path.read_text(encoding="utf-8")
+
+        match = re.search(
+            r"^## Questions\n(.*?)(?=^```)",
+            skill_content,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert match, "dmx-create-ticket.md '## Questions' template not found — did it move?"
+
+        template_block = match.group(1)
+        assert "Answer:" in template_block, (
+            "dmx-create-ticket.md no longer scaffolds an 'Answer:' line — "
+            "update this test and _qa_answered together"
+        )
+
+        filled_block = template_block.replace("{Question}", "Sample clarifying question?")
+        filled_block = re.sub(
+            r"Answer:\s*$", "Answer: Sample substantive answer.", filled_block, flags=re.MULTILINE
+        )
+
+        passed, message = check_spec_complete._qa_answered(filled_block)
+        assert passed is True, message
 
 
 # ---------------------------------------------------------------------------
