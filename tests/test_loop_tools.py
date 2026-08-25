@@ -222,7 +222,8 @@ class TestOnCompleteChaining:
         message = _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
         assert "chaining automatically" in message.lower()
-        assert "run /plan now" in message.lower()
+        assert "get_skill_definition" in message
+        assert "plan" in message
 
         pointer = read_active_pointer(tmp_path)
         assert pointer is not None
@@ -290,13 +291,15 @@ class TestLoopMemoryHooks:
 
         assert "Memory context" in message
         assert "validators must print JSON on stdout only" in message
-        assert "run /create-ticket now" in message.lower()
+        assert "get_skill_definition" in message
+        assert "create-ticket" in message
 
     def test_start_loop_without_memory_file_has_no_context_block(self, tmp_path: Path) -> None:
         message = _start_loop(tmp_path, "spec")
 
         assert "Memory context" not in message
-        assert "run /create-ticket now" in message.lower()
+        assert "get_skill_definition" in message
+        assert "create-ticket" in message
 
     def test_finish_loop_writes_session_note_on_completion(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(

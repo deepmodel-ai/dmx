@@ -103,14 +103,16 @@ class TestFullPipeline:
 
             # --- spec (1 skill) ---
             msg = await call("run_loop", name="spec")
-            assert "run /create-ticket now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "create-ticket" in msg
 
             msg = await call("loop_advance", output="created ticket, spec.md filled in")
             assert "paused" in msg.lower()
 
             msg = await call("loop_continue")
             assert "chaining automatically to **plan**" in msg.lower()
-            assert "run /plan now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "plan" in msg
 
             # --- plan (1 skill) ---
             msg = await call("loop_advance", output="tasks.md created with 2 phases")
@@ -118,32 +120,37 @@ class TestFullPipeline:
 
             msg = await call("loop_continue")
             assert "chaining automatically to **dev**" in msg.lower()
-            assert "run /implement-next-phase now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "implement-next-phase" in msg
 
             # --- dev (2 skills; no tasks.md -> repeat_until treated as met) ---
             msg = await call("loop_advance", output="implemented phase 1")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
-            assert "run /commit now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "commit" in msg
 
             msg = await call("loop_advance", output="committed")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "chaining automatically to **validate**" in msg.lower()
-            assert "run /validate now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "validate" in msg
 
             # --- validate (1 skill) ---
             msg = await call("loop_advance", output="all checks green")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "chaining automatically to **release**" in msg.lower()
-            assert "run /create-pr now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "create-pr" in msg
 
             # --- release (2 skills; on_complete has no trigger_loop) ---
             msg = await call("loop_advance", output="opened PR #42")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
-            assert "run /update-memory now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "update-memory" in msg
 
             msg = await call("loop_advance", output="memory bank synced")
             assert "paused" in msg.lower()
@@ -185,7 +192,8 @@ class TestRepeatUntilIntegration:
                 return await _call(client, tool, tmp_path, **kwargs)
 
             msg = await call("run_loop", name="dev")
-            assert "run /implement-next-phase now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "implement-next-phase" in msg
 
             await call("loop_advance", output="implemented phase 1 partially")
             await call("loop_continue")  # -> commit
@@ -193,7 +201,8 @@ class TestRepeatUntilIntegration:
             msg = await call("loop_continue")  # all skills done, repeat_until not met
 
             assert "iterating (round 1)" in msg.lower()
-            assert "run /implement-next-phase now" in msg.lower()
+            assert "get_skill_definition" in msg
+            assert "implement-next-phase" in msg
 
             pointer = read_active_pointer(tmp_path)
             assert pointer is not None

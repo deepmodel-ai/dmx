@@ -51,6 +51,7 @@ class TestCreateApp:
         names = {t.name for t in tools}
         assert "detect_invoking_ide" in names
         assert "setup_ide_rules" in names
+        assert "get_skill_definition" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"

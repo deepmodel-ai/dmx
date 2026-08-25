@@ -447,7 +447,7 @@ def _finish_loop(
 
 
 def register_loop_tools(app: FastMCP) -> None:
-    """Register run_loop, loop_advance, and loop_continue on *app*."""
+    """Register run_loop, get_skill_definition, loop_advance, and loop_continue on *app*."""
 
     @app.tool
     async def run_loop(
