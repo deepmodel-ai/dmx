@@ -73,52 +73,6 @@ def _bundled_loops_dir() -> Path:
     return Path(str(pkg.files("dmx") / "loops"))
 
 
-def _bundled_skills_dir() -> Path:
-    return Path(str(pkg.files("dmx") / "skills"))
-
-
-def _resolve_skill(name: str, workspace_root: Path) -> str | None:
-    """Find and return the raw content of a skill markdown file.
-
-    Search order:
-    1. ``{workspace_root}/.dmx/skills/{name}.md`` (project-specific, exact)
-    2. ``{workspace_root}/.dmx/skills/dmx-{name}.md`` (project-specific, prefixed)
-    3. Recursive glob in the bundled skills directory for ``{name}.md``
-    4. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
-
-    Returns ``None`` if the skill is not found in any location.
-    """
-    candidates = [name, f"dmx-{name}"]
-
-    # Project-specific skills take priority.
-    project_skills = workspace_root / ".dmx" / "skills"
-    for candidate in candidates:
-        path = project_skills / f"{candidate}.md"
-        if path.exists():
-            return path.read_text()
-
-    # Bundled skills — recursive search so subdirectory layout doesn't matter.
-    bundled = _bundled_skills_dir()
-    for candidate in candidates:
-        matches = list(bundled.rglob(f"{candidate}.md"))
-        if matches:
-            return matches[0].read_text()
-
-    return None
-
-
-def _strip_frontmatter(content: str) -> str:
-    """Remove YAML frontmatter (the leading ``---`` block) from a skill file."""
-    stripped = content.strip()
-    if not stripped.startswith("---"):
-        return stripped
-    # Find the closing --- after the opening one.
-    end = stripped.find("\n---", 3)
-    if end == -1:
-        return stripped
-    return stripped[end + 4:].lstrip("\n")
-
-
 # ---------------------------------------------------------------------------
 # Loop config resolution
 # ---------------------------------------------------------------------------
@@ -187,40 +141,19 @@ def _skill_instruction(
     index: int,
     total: int,
     description: str | None = None,
-    root: Path | None = None,
 ) -> str:
-    """Return the agent instruction for running a single skill.
-
-    When *root* is supplied the skill's markdown file is located and its
-    content is injected directly into the instruction so the agent has the
-    full step-by-step procedure rather than just a name reference.
-    """
+    """Return the agent instruction for running a single skill."""
     desc_block = (
         f"\nContext for this skill: {description.strip().splitlines()[0]}\n"
         if description and index == 0
         else ""
     )
-    suffix = (
-        f"\n\nREQUIRED: When the skill finishes, you MUST immediately call the "
+    return (
+        f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
+        f"Run /{skill_name} now. (Loop: {loop_name} | Skill {index + 1}/{total}){desc_block}\n\n"
+        f"REQUIRED: When the skill finishes, you MUST immediately call the "
         f"`loop_advance` MCP tool with the skill's full output as the `output` argument. "
         f"Do not wait for user input. Do not suggest next steps. Call loop_advance."
-    )
-    header = (
-        f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
-        f"(Loop: {loop_name} | Skill {index + 1}/{total}){desc_block}\n\n"
-    )
-
-    if root is not None:
-        raw = _resolve_skill(skill_name, root)
-        if raw is not None:
-            content = _strip_frontmatter(raw)
-            return header + content + suffix
-
-    # Fallback: skill file not found — reference by name only.
-    return (
-        header
-        + f"Run /{skill_name} now."
-        + suffix
     )
 
 
@@ -274,7 +207,6 @@ def _iterating_message(
     task_id: str,
     iteration: int,
     config: LoopConfig,
-    root: Path | None = None,
 ) -> str:
     """Return the message shown when repeat_until re-triggers the loop."""
     short_task = task_id[:8]
@@ -283,7 +215,7 @@ def _iterating_message(
         f"Job: `{job_id}` | Task: `{short_task}` | "
         f"`repeat_until: {config.repeat_until}` not yet met — restarting the skill sequence.\n\n"
     )
-    return header + _skill_instruction(config.skills[0], loop_name, 0, len(config.skills), root=root)
+    return header + _skill_instruction(config.skills[0], loop_name, 0, len(config.skills))
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +257,7 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
     logger.info("start_loop: name=%s job=%s task=%s", name, job_id, task_id)
 
     first_skill = config.skills[0]
-    instruction = _skill_instruction(first_skill, name, 0, len(config.skills), description, root=root)
+    instruction = _skill_instruction(first_skill, name, 0, len(config.skills), description)
 
     memory_context = read_memory_context(root)
     if memory_context:
@@ -434,7 +366,7 @@ def _finish_loop(
             f"{loop_name} loop iterating (round {iteration}) — repeat_until "
             f"'{config.repeat_until}' not yet met (job `{job_id}`).",
         )
-        return _iterating_message(loop_name, job_id, task_id, iteration, config, root=root)
+        return _iterating_message(loop_name, job_id, task_id, iteration, config)
 
     clear_active_pointer(root)
 
@@ -573,7 +505,7 @@ def register_loop_tools(app: FastMCP) -> None:
             else:
                 # human_gate: false — return next skill instruction immediately.
                 next_skill = skills[next_idx]
-                return _skill_instruction(next_skill, loop_name, next_idx, len(skills), root=root)
+                return _skill_instruction(next_skill, loop_name, next_idx, len(skills))
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
             # running validators and chaining. loop_continue triggers the final step.
@@ -664,4 +596,4 @@ def register_loop_tools(app: FastMCP) -> None:
         )
 
         next_skill = skills[idx]
-        return _skill_instruction(next_skill, loop_name, idx, len(skills), root=root)
+        return _skill_instruction(next_skill, loop_name, idx, len(skills))
