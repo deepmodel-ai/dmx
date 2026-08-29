@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-28
+
+### Fixed
+
+- `workspace_root` resolution no longer silently falls back to the filesystem root, `$HOME`, or an unrelated directory when an MCP client doesn't report roots (or the server process has an unrelated cwd). Auto-detected roots must now contain a `.git` or `.dmx` marker, or resolution fails loudly instead of guessing — previously this could cause loop state files to be written outside the intended project, with job folder names sometimes wrong or incomplete (e.g. `main` instead of the actual ticket/branch).
+- `setup_ide_rules` (the `/dmx-init` bootstrap call) still succeeds on brand-new, marker-less projects — the marker check above is skipped for this pre-`.git`/`.dmx` call specifically.
+- Explicit `workspace_root` arguments must now be an absolute path (`~` is expanded); relative values are rejected instead of being silently resolved against the server process's cwd.
+
 ## [0.3.0] — 2026-08-25
 
 ### Added
@@ -81,7 +89,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/deepmodel-ai/dmx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/deepmodel-ai/dmx/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deepmodel-ai/dmx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepmodel-ai/dmx/releases/tag/v0.1.0
