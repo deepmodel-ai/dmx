@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -97,80 +95,6 @@ class TestExtractIdeHeader:
         ctx = MagicMock()
         ctx.request_context = meta
         assert _extract_ide_header(ctx) is None  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Helpers: _resolve_workspace_root
-# ---------------------------------------------------------------------------
-
-
-class TestResolveWorkspaceRoot:
-    """Unit tests for the private _resolve_workspace_root helper."""
-
-    @pytest.mark.asyncio
-    async def test_returns_explicit_path(self) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        ctx = MagicMock()
-        result = await _resolve_workspace_root(ctx, "/home/user/project")  # type: ignore[arg-type]
-        assert result == Path("/home/user/project")
-
-    @pytest.mark.asyncio
-    async def test_uses_mcp_root_file_uri(self) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        root = MagicMock()
-        root.uri = "file:///home/user/myproject"
-        ctx = MagicMock()
-        ctx.list_roots = AsyncMock(return_value=[root])
-
-        result = await _resolve_workspace_root(ctx, None)  # type: ignore[arg-type]
-        assert result == Path("/home/user/myproject")
-
-    @pytest.mark.asyncio
-    async def test_decodes_percent_encoded_uri(self) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        root = MagicMock()
-        root.uri = "file:///home/user/my%20project"
-        ctx = MagicMock()
-        ctx.list_roots = AsyncMock(return_value=[root])
-
-        result = await _resolve_workspace_root(ctx, None)  # type: ignore[arg-type]
-        assert result == Path("/home/user/my project")
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_cwd_when_no_roots(self, tmp_path: Path) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        ctx = MagicMock()
-        ctx.list_roots = AsyncMock(return_value=[])
-
-        result = await _resolve_workspace_root(ctx, None)  # type: ignore[arg-type]
-        assert result == Path(os.getcwd())
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_cwd_when_list_roots_raises(self) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        ctx = MagicMock()
-        ctx.list_roots = AsyncMock(side_effect=RuntimeError("not supported"))
-
-        result = await _resolve_workspace_root(ctx, None)  # type: ignore[arg-type]
-        assert result == Path(os.getcwd())
-
-    @pytest.mark.asyncio
-    async def test_explicit_takes_precedence_over_roots(self) -> None:
-        from dmx.tools import _resolve_workspace_root  # noqa: PLC0415
-
-        root = MagicMock()
-        root.uri = "file:///from/roots"
-        ctx = MagicMock()
-        ctx.list_roots = AsyncMock(return_value=[root])
-
-        result = await _resolve_workspace_root(ctx, "/explicit/path")  # type: ignore[arg-type]
-        assert result == Path("/explicit/path")
-        ctx.list_roots.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +207,26 @@ class TestSetupIdeRules:
             result = await client.call_tool("setup_ide_rules", {})
         assert result.data["files"] == []
         assert result.data["resolved_ides"] == []
+
+    @pytest.mark.asyncio
+    async def test_succeeds_without_workspace_root_when_no_markers_present(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression check: `/dmx-init` calls setup_ide_rules with no
+        # `workspace_root` and may run before the project has `.git`/`.dmx`
+        # (an in-process Client has no MCP roots support, so this exercises
+        # the cwd fallback). Must not be rejected by the workspace-root
+        # validation added for the original bug fix.
+        from fastmcp import Client  # noqa: PLC0415
+
+        from dmx.server import create_app  # noqa: PLC0415
+
+        monkeypatch.chdir(tmp_path)
+        app = create_app()
+        async with Client(app) as client:
+            result = await client.call_tool("setup_ide_rules", {"ides": "cursor"})
+        assert result.data["workspace_root"] == str(tmp_path)
+        assert result.data["files"] != []
 
     @pytest.mark.asyncio
     async def test_cursor_returns_mdc_and_agents_md(self) -> None:

@@ -36,13 +36,13 @@ from __future__ import annotations
 import importlib.resources as pkg
 import logging
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 from fastmcp import (
     Context,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
+from dmx.exceptions import WorkspaceRootInvalid
 from dmx.loop_memory import append_session_note, read_memory_context
 from dmx.loop_schema import LoopConfig, load_loop, load_loops_dir
 from dmx.loop_state import (
@@ -59,6 +59,7 @@ from dmx.loop_state import (
 )
 from dmx.repeat_until import evaluate_repeat_until
 from dmx.validator_runner import evaluate_validator_results, run_validators
+from dmx.workspace import resolve_workspace_root
 
 __all__ = ["register_loop_tools"]
 
@@ -147,30 +148,6 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
     bundled_loops = load_loops_dir(_bundled_loops_dir())
     available = sorted(set(app_loops) | set(bundled_loops))
     raise FileNotFoundError(f"Loop '{name}' not found. Available loops: {available or ['(none)']}")
-
-
-# ---------------------------------------------------------------------------
-# Workspace root resolution (mirrors tools.py)
-# ---------------------------------------------------------------------------
-
-
-async def _resolve_workspace_root(ctx: Context, explicit: str | None) -> Path:
-    if explicit:
-        return Path(explicit)
-    try:
-        roots = await ctx.list_roots()
-        if roots:
-            first_root = roots[0]
-            uri = getattr(first_root, "uri", None) or str(first_root)
-            parsed = urlparse(uri)
-            if parsed.scheme == "file":
-                return Path(unquote(parsed.path))
-            return Path(unquote(uri))
-    except Exception:  # noqa: BLE001
-        pass
-    import os
-
-    return Path(os.getcwd())
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +464,10 @@ def register_loop_tools(app: FastMCP) -> None:
         Returns:
             Plain-English instruction for the agent.
         """
-        root = await _resolve_workspace_root(ctx, workspace_root)
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
         return _start_loop(root, name, description)
 
     @app.tool
@@ -510,7 +490,10 @@ def register_loop_tools(app: FastMCP) -> None:
         Returns:
             Full skill instructions, or an error message if the skill is not found.
         """
-        root = await _resolve_workspace_root(ctx, workspace_root)
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
         raw = _resolve_skill(name, root)
         if raw is None:
             return f"Skill '{name}' not found. Check the skill name or add it to .dmx/skills/."
@@ -535,7 +518,10 @@ def register_loop_tools(app: FastMCP) -> None:
         Returns:
             Plain-English instruction or status message for the agent.
         """
-        root = await _resolve_workspace_root(ctx, workspace_root)
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
 
         pointer = read_active_pointer(root)
         if not pointer:
@@ -629,7 +615,10 @@ def register_loop_tools(app: FastMCP) -> None:
         Returns:
             Plain-English instruction for the agent.
         """
-        root = await _resolve_workspace_root(ctx, workspace_root)
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
 
         pointer = read_active_pointer(root)
         if not pointer:

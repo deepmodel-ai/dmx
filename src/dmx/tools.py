@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
-from pathlib import Path  # noqa: TCH003 — used at runtime in Path() calls
-from urllib.parse import unquote, urlparse
 
 from fastmcp import (
     Context,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
@@ -17,9 +14,10 @@ from dmx._workflow_version import WORKFLOW_VERSION
 from dmx.catalog import (
     RuleDefinition,  # noqa: TCH001 — needed at runtime for FastMCP annotation resolution
 )
-from dmx.exceptions import EmitterError
+from dmx.exceptions import EmitterError, WorkspaceRootInvalid
 from dmx.ide.detect import resolve_ide_targets
 from dmx.ide.emitters import DMX_MARKER_END, DMX_MARKER_START, emit_ide_rule_files
+from dmx.workspace import resolve_workspace_root
 
 __all__ = ["register_tools"]
 
@@ -116,7 +114,18 @@ def register_tools(app: FastMCP, rules: tuple[RuleDefinition, ...]) -> None:
         )
 
         # Resolve workspace root: explicit → MCP roots → cwd (with warning).
-        root = await _resolve_workspace_root(ctx, workspace_root)
+        # require_markers=False — this is the pre-`.dmx`/`.git` bootstrap
+        # call (`/dmx-init` may run before the project is even a git repo).
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root, require_markers=False)
+        except WorkspaceRootInvalid as exc:
+            return {
+                "resolved_ides": [],
+                "ides_source": ides_source,
+                "workspace_root": None,
+                "files": [],
+                "notes": f"Could not resolve a valid workspace root: {exc}",
+            }
 
         if not resolved_ides:
             return {
@@ -204,41 +213,3 @@ def _extract_ide_header(ctx: Context) -> str | None:
         if meta and hasattr(meta, "headers"):
             return meta.headers.get("x-dmx-ide")  # type: ignore[no-any-return]
     return None
-
-
-async def _resolve_workspace_root(ctx: Context, explicit: str | None) -> Path:
-    """Resolve workspace root with fallback chain.
-
-    1. Explicit ``workspace_root`` argument.
-    2. First MCP root from the protocol handshake (``await ctx.list_roots()``).
-    3. Current working directory (logged as warning).
-
-    Args:
-        ctx: FastMCP request context.
-        explicit: Explicit workspace root path, or ``None``.
-
-    Returns:
-        Resolved :class:`Path`.
-    """
-    if explicit:
-        return Path(explicit)
-
-    try:
-        roots = await ctx.list_roots()
-        if roots:
-            first_root = roots[0]
-            uri = getattr(first_root, "uri", None) or str(first_root)
-            # MCP roots URIs are file:// URIs or percent-encoded plain paths.
-            parsed = urlparse(uri)
-            if parsed.scheme == "file":
-                return Path(unquote(parsed.path))
-            return Path(unquote(uri))
-    except Exception:  # noqa: BLE001
-        pass
-
-    cwd = Path(os.getcwd())
-    logger.warning(
-        "workspace_root not provided and MCP roots unavailable; falling back to cwd: %s",
-        cwd,
-    )
-    return cwd

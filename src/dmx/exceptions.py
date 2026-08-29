@@ -8,6 +8,7 @@ __all__ = [
     "RuleLoadError",
     "EmitterError",
     "IdeDetectionError",
+    "WorkspaceRootInvalid",
 ]
 
 
@@ -53,3 +54,17 @@ class EmitterError(DmxError):
 
 class IdeDetectionError(DmxError):
     """Raised when IDE detection produces an unresolvable state."""
+
+
+class WorkspaceRootInvalid(DmxError):
+    """Raised when a resolved workspace root fails validation.
+
+    Attributes:
+        path: The resolved (but rejected) path.
+        reason: Human-readable explanation for why it was rejected.
+    """
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"'{path}': {reason}")
+        self.path = path
+        self.reason = reason
