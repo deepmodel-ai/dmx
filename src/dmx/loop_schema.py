@@ -48,6 +48,20 @@ class OnOptionalFailure(StrEnum):
     ignore = "ignore"
 
 
+class RequireBranch(StrEnum):
+    """A loop-config concern, not hardcoded by loop name.
+
+    ``base`` means this loop must be started from ``branch_base`` (the
+    configured integration branch) — used by loops that establish a *new*
+    ticket/branch identity (e.g. ``spec``), where any pre-existing spec.md
+    or current branch would be stale by definition. Loops that operate on
+    an already-identified ticket (``plan``, ``dev``, ``validate``,
+    ``release``) leave this unset.
+    """
+
+    base = "base"
+
+
 # ---------------------------------------------------------------------------
 # Sub-models
 # ---------------------------------------------------------------------------
@@ -114,6 +128,7 @@ class LoopConfig(BaseModel):
     failure_handling: FailureHandling = FailureHandling.pause
     human_gate: bool = True
     on_complete: OnCompleteConfig = Field(default_factory=OnCompleteConfig)
+    require_branch: RequireBranch | None = None
 
     @field_validator("name")
     @classmethod

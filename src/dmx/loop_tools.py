@@ -9,13 +9,17 @@ Tool contracts
 
 ``run_loop(name)``
     - Reads ``.dmx/loops/{name}.yaml`` (app repo first, bundled fallback).
-    - Generates job_id (ticket ID or branch) and task_id (UUID4).
+    - If the loop declares ``require_branch: base``, rejects starting it
+      from any branch other than the configured integration branch, and
+      generates a temporary job id instead of resolving one — see
+      ``_start_loop`` for why.
+    - Otherwise generates job_id (ticket ID or branch) and task_id (UUID4).
     - Writes initial state to ``.dmx/jobs/{job_id}/{name}-{task_id}.json``.
-    - Updates ``.dmx/loop-state.json`` active pointer.
     - Returns: instruction to run the first skill, then call ``loop_advance``.
 
 ``loop_advance(output)``
-    - Reads active state from ``.dmx/loop-state.json``.
+    - Finds the active run by scanning ``.dmx/jobs/`` (no separate pointer
+      file — see ``dmx.loop_state`` module docstring).
     - Persists the skill output.
     - If more skills remain and ``human_gate: true``: pauses, returns pause msg.
     - If more skills remain and ``human_gate: false``: returns next instruction.
@@ -26,7 +30,7 @@ Tool contracts
       instruction. Otherwise returns a terminal completion message.
 
 ``loop_continue()``
-    - Reads ``.dmx/loop-state.json``.
+    - Finds the active run the same way as ``loop_advance``.
     - Advances ``current_skill_index`` past the last completed skill.
     - Returns the next skill instruction.
 """
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import importlib.resources as pkg
 import logging
+import re
 from pathlib import Path
 
 from fastmcp import (
@@ -42,17 +47,20 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
-from dmx.exceptions import WorkspaceRootInvalid
+from dmx.exceptions import AmbiguousActiveRun, WorkspaceRootInvalid
 from dmx.loop_memory import append_session_note, read_memory_context
-from dmx.loop_schema import LoopConfig, load_loop, load_loops_dir
+from dmx.loop_schema import LoopConfig, RequireBranch, load_loop, load_loops_dir
 from dmx.loop_state import (
     LoopOutcome,
     LoopStatus,
-    clear_active_pointer,
     current_branch,
+    find_active_run,
+    find_pending_run,
+    is_pending_job_id,
+    make_pending_job_id,
     make_task_id,
-    read_active_pointer,
     read_state,
+    rename_job,
     resolve_job_id,
     write_initial_state,
     write_state,
@@ -115,6 +123,115 @@ def _strip_frontmatter(content: str) -> str:
     if end == -1:
         return stripped
     return stripped[end + 4 :].lstrip("\n")
+
+
+# ---------------------------------------------------------------------------
+# Branch guard (require_branch: base)
+# ---------------------------------------------------------------------------
+
+_BRANCH_BASE_RE = re.compile(r"^branch_base\s*:\s*([^\s#]+)", re.MULTILINE)
+
+
+def _read_branch_base(workspace_root: Path) -> str | None:
+    """Read ``branch_base`` from ``.dmx/config.md``, or None if unavailable.
+
+    Mirrors the "fall back to reading .dmx/config.md" convention every
+    skill uses when project config isn't injected into agent context —
+    this runs in the deterministic MCP tool layer, which never has agent
+    context, so config.md is the only source available here.
+    """
+    config_path = workspace_root / ".dmx" / "config.md"
+    if not config_path.exists():
+        return None
+    match = _BRANCH_BASE_RE.search(config_path.read_text(encoding="utf-8"))
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value if value and value != "{REQUIRED}" else None
+
+
+def _branch_guard_error(root: Path, config: LoopConfig) -> str | None:
+    """Return an error message if *config* declares ``require_branch`` and
+    the current branch doesn't satisfy it, else None."""
+    if config.require_branch != RequireBranch.base:
+        return None
+
+    branch_base = _read_branch_base(root)
+    if branch_base is None:
+        return (
+            f"Cannot start the `{config.name}` loop: could not determine the integration "
+            "branch (`branch_base`) from `.dmx/config.md`. Run `/dmx/init` to configure "
+            "this project."
+        )
+
+    branch = current_branch(root)
+    if branch is None:
+        return (
+            f"Cannot start the `{config.name}` loop: could not determine the current git "
+            f"branch. Make sure you're in a git repository checked out to `{branch_base}`."
+        )
+    if branch != branch_base:
+        return (
+            f"Cannot start the `{config.name}` loop from `{branch}` — it must be started "
+            f"from `{branch_base}` (the configured integration branch), since this loop "
+            "establishes a new ticket and branch. Switch back with "
+            f"`git checkout {branch_base}` and run `run_loop` again."
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Active-run lookup (no separate pointer file — see dmx.loop_state)
+# ---------------------------------------------------------------------------
+
+
+def _find_active(root: Path) -> tuple[str, str, str] | None:
+    """Find the currently active (non-terminal) loop run for this workspace.
+
+    Resolves job_id from the current branch/spec.md as normal and looks for
+    a non-terminal state file there. Falls back to scanning temp/pending
+    job folders if none is found — covers the window where a loop that
+    establishes a new ticket identity (``require_branch``) has started but
+    hasn't yet completed the skill that makes its real job_id resolvable.
+
+    Returns:
+        ``(job_id, loop_name, task_id)``, or ``None`` if nothing is active.
+    """
+    job_id = resolve_job_id(root)
+    active = find_active_run(root, job_id)
+    if active is not None:
+        loop_name, task_id = active
+        return job_id, loop_name, task_id
+    return find_pending_run(root)
+
+
+def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
+    """Rename a temp/pending job folder to its real id once resolvable.
+
+    Called right after a skill completes (``loop_advance``) or a paused
+    loop resumes (``loop_continue``) — the natural points where an
+    identity-creating skill (e.g. ``create-ticket``) may have just made the
+    real ticket/branch resolvable. A no-op once the job is already real, or
+    if the real identity still isn't resolvable yet.
+
+    ``resolve_job_id``'s own fallbacks are deliberately *not* treated as a
+    real identity here: ``"unknown"`` is a catch-all that unrelated pending
+    jobs could collide under, and ``branch_base`` means ``create-ticket``
+    hasn't actually switched to the new feature branch yet.
+    """
+    if not is_pending_job_id(job_id):
+        return job_id
+    real_job_id = resolve_job_id(root)
+    if (
+        real_job_id == job_id
+        or is_pending_job_id(real_job_id)
+        or real_job_id == "unknown"
+        or real_job_id == _read_branch_base(root)
+    ):
+        return job_id
+    rename_job(root, job_id, real_job_id)
+    logger.info("promoted pending job %s -> %s", job_id, real_job_id)
+    return real_job_id
 
 
 # ---------------------------------------------------------------------------
@@ -279,8 +396,19 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
     except Exception as exc:  # noqa: BLE001
         return f"Error loading loop config '{name}': {exc}"
 
-    job_id = resolve_job_id(root)
+    guard_error = _branch_guard_error(root, config)
+    if guard_error:
+        return guard_error
+
     task_id = make_task_id()
+    if config.require_branch is not None:
+        # This loop establishes a brand new ticket identity — never trust
+        # resolve_job_id() here. A pre-existing spec.md or branch name is
+        # either the previous ticket's leftover state or not ticket-scoped
+        # at all (see dmx.loop_state module docstring).
+        job_id = make_pending_job_id(task_id)
+    else:
+        job_id = resolve_job_id(root)
 
     write_initial_state(
         workspace_root=root,
@@ -323,15 +451,13 @@ def _finish_loop(
 
     Called once all skills in the loop have completed. Required check
     failures apply ``failure_handling``; optional check failures apply
-    ``on_optional_failure``. On pause, the active pointer is left in place —
+    ``on_optional_failure``. On pause, the state file is left ``paused`` —
     the next ``loop_continue`` call re-runs validators (acting as a retry).
 
     If validators pass (success or warning) and the loop declares
     ``repeat_until``, the condition is evaluated before finishing. If not
     yet met, the loop transitions to ``iterating`` and restarts from the
-    first skill — this is not recorded as a failure. Once the condition is
-    met, or when the loop has no ``repeat_until``, the active pointer is
-    cleared.
+    first skill — this is not recorded as a failure.
 
     If ``on_complete`` declares a ``trigger_loop`` for this outcome
     (success, failure, or warning), the next loop starts automatically —
@@ -406,8 +532,6 @@ def _finish_loop(
             f"'{config.repeat_until}' not yet met (job `{job_id}`).",
         )
         return _iterating_message(loop_name, job_id, task_id, iteration, config)
-
-    clear_active_pointer(root)
 
     next_loop: str | None = None
     if outcome == LoopOutcome.success.value:
@@ -523,13 +647,14 @@ def register_loop_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
 
-        pointer = read_active_pointer(root)
-        if not pointer:
+        try:
+            found = _find_active(root)
+        except AmbiguousActiveRun as exc:
+            return f"Error: {exc}"
+        if not found:
             return "No active loop run found. Start a loop with `run_loop` first."
-
-        job_id = pointer["active_job_id"]
-        task_id = pointer["active_task_id"]
-        loop_name = pointer["active_loop_name"]
+        job_id, loop_name, task_id = found
+        job_id = _maybe_promote_pending_job(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
         skills: list[str] = state["skills"]
@@ -606,8 +731,8 @@ def register_loop_tools(app: FastMCP) -> None:
     ) -> str:
         """Resume a paused loop.
 
-        Reads the active run pointer and returns the next skill instruction.
-        Call this after reviewing output at a human gate.
+        Finds the active run and returns the next skill instruction. Call
+        this after reviewing output at a human gate.
 
         Args:
             workspace_root: Repo root path override.  Auto-detected if omitted.
@@ -620,16 +745,17 @@ def register_loop_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
 
-        pointer = read_active_pointer(root)
-        if not pointer:
+        try:
+            found = _find_active(root)
+        except AmbiguousActiveRun as exc:
+            return f"Error: {exc}"
+        if not found:
             return (
                 "No active loop run found. "
                 "Start a loop with `run_loop` or check if the previous loop completed."
             )
-
-        job_id = pointer["active_job_id"]
-        task_id = pointer["active_task_id"]
-        loop_name = pointer["active_loop_name"]
+        job_id, loop_name, task_id = found
+        job_id = _maybe_promote_pending_job(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
 

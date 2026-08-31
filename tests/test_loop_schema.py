@@ -12,6 +12,7 @@ from dmx.loop_schema import (
     FailureHandling,
     LoopConfig,
     OnOptionalFailure,
+    RequireBranch,
     TriggerType,
     load_loop,
     load_loops_dir,
@@ -135,6 +136,18 @@ class TestLoopConfigValidation:
         cfg = LoopConfig.model_validate(MINIMAL_LOOP)
         assert cfg.repeat_until is None
 
+    def test_require_branch_defaults_none(self) -> None:
+        cfg = LoopConfig.model_validate(MINIMAL_LOOP)
+        assert cfg.require_branch is None
+
+    def test_require_branch_base(self) -> None:
+        cfg = LoopConfig.model_validate({**MINIMAL_LOOP, "require_branch": "base"})
+        assert cfg.require_branch == RequireBranch.base
+
+    def test_require_branch_unknown_value_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            LoopConfig.model_validate({**MINIMAL_LOOP, "require_branch": "production"})
+
 
 # ---------------------------------------------------------------------------
 # load_loop
@@ -166,6 +179,19 @@ class TestLoadLoop:
 # ---------------------------------------------------------------------------
 # load_loops_dir
 # ---------------------------------------------------------------------------
+
+
+class TestBundledSpecLoopRequiresBaseBranch:
+    """Regression guard for GH-9: the bundled spec loop must declare
+    require_branch — it's the loop that establishes a brand new ticket
+    identity, so it must never start from a stale/wrong branch context."""
+
+    def test_bundled_spec_yaml_requires_base_branch(self) -> None:
+        from pathlib import Path
+
+        spec_path = Path(__file__).parent.parent / "src" / "dmx" / "loops" / "spec.yaml"
+        cfg = load_loop(spec_path)
+        assert cfg.require_branch == RequireBranch.base
 
 
 class TestLoadLoopsDir:

@@ -3,13 +3,30 @@
 State layout::
 
     .dmx/
-      loop-state.json          — active run pointer (single active loop)
       jobs/
         {job_id}/
           {loop_name}-{task_id}.json   — full state for each loop run
 
 Job ID  = ticket ID from ``.dmx/spec.md`` frontmatter, or branch name fallback.
 Task ID = UUID4 generated at ``run_loop`` invocation.
+
+There is no separate "active run pointer" file. Which run is active is
+derived by scanning a job's state files for the one with a non-terminal
+status (``pending``/``running``/``paused``/``iterating``) — see
+:func:`find_active_run`. This ties resumption directly to the current git
+branch (via :func:`resolve_job_id`) instead of a single mutable file that
+every ``run_loop`` call anywhere would overwrite regardless of branch —
+see GH-9 for the corruption this caused when pausing work on one branch
+and running a loop on another.
+
+A loop that establishes a *brand new* ticket identity (``spec``, via
+``require_branch``) can't use ``resolve_job_id`` for its own starting job
+id — there's no ticket yet, and any pre-existing ``spec.md``/branch signal
+would be stale by definition (e.g. left over from the last ticket merged
+into ``main``). Such loops start under a temporary id (see
+:func:`make_pending_job_id`) and get renamed to their real job id once the
+identity-creating skill completes — see :func:`rename_job` and
+:func:`find_pending_run` for resuming one before that rename happens.
 
 State merges to ``main`` with the PR via ``create-pr`` Step 5, which commits
 all ``.dmx/`` changes.  Each ticket has its own subdirectory, so merge
@@ -18,6 +35,7 @@ conflicts are practically impossible.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -25,6 +43,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+from dmx.exceptions import AmbiguousActiveRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,6 +69,13 @@ class LoopOutcome(StrEnum):
     warning = "warning"
 
 
+_TERMINAL_STATUSES = frozenset({LoopStatus.complete.value, LoopStatus.failed.value})
+
+# Job folders under this prefix hold state for a loop that hasn't yet
+# established its real ticket identity — see module docstring.
+PENDING_JOB_PREFIX = "_pending-"
+
+
 # ---------------------------------------------------------------------------
 # State file structure
 # ---------------------------------------------------------------------------
@@ -61,6 +88,16 @@ def _now_iso() -> str:
 def make_task_id() -> str:
     """Generate a UUID4 task ID."""
     return str(uuid4())
+
+
+def make_pending_job_id(task_id: str) -> str:
+    """Build a temporary job id for a loop that hasn't established a real
+    ticket identity yet (see module docstring)."""
+    return f"{PENDING_JOB_PREFIX}{task_id[:8]}"
+
+
+def is_pending_job_id(job_id: str) -> bool:
+    return job_id.startswith(PENDING_JOB_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +170,8 @@ def state_path(workspace_root: Path, job_id: str, loop_name: str, task_id: str) 
     return workspace_root / ".dmx" / "jobs" / job_id / f"{loop_name}-{task_id}.json"
 
 
-def active_pointer_path(workspace_root: Path) -> Path:
-    """Return the path for the active run pointer file."""
-    return workspace_root / ".dmx" / "loop-state.json"
+def _job_dir(workspace_root: Path, job_id: str) -> Path:
+    return workspace_root / ".dmx" / "jobs" / job_id
 
 
 def write_initial_state(
@@ -147,13 +183,14 @@ def write_initial_state(
 ) -> Path:
     """Write the initial state file for a new loop run.
 
-    Creates ``.dmx/jobs/{job_id}/{loop_name}-{task_id}.json`` and updates
-    ``.dmx/loop-state.json`` to point to this run.
+    Creates ``.dmx/jobs/{job_id}/{loop_name}-{task_id}.json``. There is no
+    separate active-run pointer to update — see module docstring.
 
     Args:
         workspace_root: Absolute path to the repo root.
         loop_name: Name of the loop being run.
-        job_id: Job ID (ticket ID or branch name).
+        job_id: Job ID (ticket ID, branch name, or a pending/temp id — see
+            :func:`make_pending_job_id`).
         task_id: UUID4 task ID for this run.
         skills: Ordered list of skill names for this loop.
 
@@ -179,15 +216,6 @@ def write_initial_state(
     path = state_path(workspace_root, job_id, loop_name, task_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-
-    # Update active pointer.
-    pointer: dict[str, str] = {
-        "active_job_id": job_id,
-        "active_task_id": task_id,
-        "active_loop_name": loop_name,
-    }
-    active_pointer_path(workspace_root).write_text(json.dumps(pointer, indent=2), encoding="utf-8")
-
     return path
 
 
@@ -229,16 +257,117 @@ def write_state(
     return state
 
 
-def read_active_pointer(workspace_root: Path) -> dict[str, str] | None:
-    """Read the active run pointer, or return None if no active run."""
-    p = active_pointer_path(workspace_root)
-    if not p.exists():
+# ---------------------------------------------------------------------------
+# Active-run lookup (no separate pointer file — see module docstring)
+# ---------------------------------------------------------------------------
+
+
+def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None:
+    """Find the one non-terminal loop run under *job_id*, if any.
+
+    Returns:
+        ``(loop_name, task_id)`` for the run currently
+        ``pending``/``running``/``paused``/``iterating``, or ``None`` if
+        every run under this job has reached a terminal status (or the job
+        has no runs at all).
+
+    Raises:
+        AmbiguousActiveRun: If more than one non-terminal run is found.
+            Loops chain sequentially — completing or pausing one before the
+            next starts — so this should never happen in normal operation.
+            Rather than guess which one is "active", this fails loudly so
+            it can be investigated.
+    """
+    job_dir = _job_dir(workspace_root, job_id)
+    if not job_dir.exists():
         return None
-    return dict(json.loads(p.read_text(encoding="utf-8")))
+
+    candidates: list[tuple[str, str]] = []
+    for path in sorted(job_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if data.get("status") in _TERMINAL_STATUSES:
+            continue
+        candidates.append((data.get("loop_name", ""), data.get("task_id", "")))
+
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        names = ", ".join(f"{loop}-{task[:8]}" for loop, task in candidates)
+        raise AmbiguousActiveRun(
+            f"job '{job_id}' has {len(candidates)} non-terminal loop runs ({names}) — "
+            f"expected at most one. Resolve manually under .dmx/jobs/{job_id}/."
+        )
+    return candidates[0]
 
 
-def clear_active_pointer(workspace_root: Path) -> None:
-    """Remove the active run pointer (loop has reached a terminal state)."""
-    p = active_pointer_path(workspace_root)
-    if p.exists():
-        p.unlink()
+def find_pending_run(workspace_root: Path) -> tuple[str, str, str] | None:
+    """Find a non-terminal run under a temp/pending job id, if any.
+
+    Covers the window where a loop that establishes a new ticket identity
+    (e.g. ``spec``) has started but not yet completed the skill that makes
+    its real job id resolvable — branch-derived lookup can't find a ticket
+    that doesn't exist yet.
+
+    Returns:
+        ``(job_id, loop_name, task_id)``, or ``None`` if there's no pending
+        run.
+
+    Raises:
+        AmbiguousActiveRun: If more than one pending job has a non-terminal
+            run — at most one legitimately exists at a time per working
+            directory (you can only be on one branch, i.e. mid-creation of
+            one ticket, at once).
+    """
+    jobs_dir = workspace_root / ".dmx" / "jobs"
+    if not jobs_dir.exists():
+        return None
+
+    found: list[tuple[str, str, str]] = []
+    for job_dir in sorted(jobs_dir.glob(f"{PENDING_JOB_PREFIX}*")):
+        if not job_dir.is_dir():
+            continue
+        active = find_active_run(workspace_root, job_dir.name)
+        if active is not None:
+            found.append((job_dir.name, active[0], active[1]))
+
+    if not found:
+        return None
+    if len(found) > 1:
+        names = ", ".join(job_id for job_id, _, _ in found)
+        raise AmbiguousActiveRun(
+            f"found {len(found)} pending loop runs ({names}) — expected at most one. "
+            "Resolve manually under .dmx/jobs/."
+        )
+    return found[0]
+
+
+def rename_job(workspace_root: Path, old_job_id: str, new_job_id: str) -> None:
+    """Rename a job folder once its real identity is known.
+
+    Moves every state file from ``.dmx/jobs/{old_job_id}/`` to
+    ``.dmx/jobs/{new_job_id}/``, rewriting each file's own ``job_id`` field
+    to match. If the destination already has files (e.g. a prior run for
+    the same ticket), the moved files are added alongside them rather than
+    overwriting anything unexpected.
+
+    A no-op if *old_job_id* has no folder.
+    """
+    old_dir = _job_dir(workspace_root, old_job_id)
+    if not old_dir.exists():
+        return
+
+    new_dir = _job_dir(workspace_root, new_job_id)
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    for path in old_dir.glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["job_id"] = new_job_id
+        (new_dir / path.name).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        path.unlink()
+
+    # Non-empty (unexpected leftover file) — leave it for inspection.
+    with contextlib.suppress(OSError):
+        old_dir.rmdir()

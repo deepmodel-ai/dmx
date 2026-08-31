@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "AmbiguousActiveRun",
     "DmxError",
     "SkillLoadError",
     "RuleLoadError",
@@ -54,6 +55,12 @@ class EmitterError(DmxError):
 
 class IdeDetectionError(DmxError):
     """Raised when IDE detection produces an unresolvable state."""
+
+
+class AmbiguousActiveRun(DmxError):
+    """Raised when more than one non-terminal loop run is found where at
+    most one was expected — a scan-based active-run lookup should never
+    have to guess which one is "the" active run."""
 
 
 class WorkspaceRootInvalid(DmxError):
