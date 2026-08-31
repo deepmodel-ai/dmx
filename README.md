@@ -57,7 +57,7 @@ Bundled loops for the SDLC pipeline:
 | `validate` | validate | `release` |
 | `release` | create-pr, update-memory | — |
 
-Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/loop-state.json` (active run) and `.dmx/jobs/{job_id}/` (per-run history).
+Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` — there's no separate active-run pointer; the active run is derived by scanning a job's state files for the one non-terminal (`pending`/`running`/`paused`/`iterating`) entry, keyed off the current branch/ticket. This keeps loop state isolated per branch: pausing work on one branch and running a loop on another can't corrupt or lose either one's state.
 
 Validators are plain Python functions at `validators/{name}.py` in the app repo (bundled fallbacks ship with dmx). The orchestrator invokes them via subprocess after all skills complete — the coding agent runs skills; validators run deterministically.
 
@@ -247,10 +247,9 @@ The `.dmx/` directory is the project's shared memory — committed to the repo s
 | `spec.md` | What is being built and why — YAML frontmatter + scope + Q&A | Branch-scoped — created by `create-ticket`, committed with the PR |
 | `tasks.md` | Phased implementation plan | Branch-scoped — created by `plan`, committed with the PR |
 | `loops/` | Loop config overrides (YAML) | Optional — overrides bundled defaults from dmx |
-| `loop-state.json` | Active loop run pointer | Ephemeral — written during a loop run |
-| `jobs/` | Per-run loop state (skill progress, validator results) | Branch-scoped — committed with the PR when present |
+| `jobs/` | Per-run loop state (skill progress, validator results); also doubles as the active-run pointer — no separate pointer file exists | Branch-scoped — committed with the PR when present |
 
-**Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch. When a PR merges, they go with it; the next branch starts fresh.
+**Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch. When a PR merges, they go with it — but `close-ticket` doesn't delete them, so `main` (and any branch cut from it afterward) keeps the last-merged ticket's `spec.md`/`tasks.md` as a stale leftover rather than truly starting fresh. The `spec` loop guards against this explicitly: it only starts from the configured integration branch and never trusts a pre-existing `spec.md` for its own job identity, so a leftover file can't get a new ticket's state written into the previous ticket's job folder.
 
 **Three-tier memory sync**: learnings accumulate in `activeContext.md` during implementation. `/dmx/commit` promotes qualifying items (light sync), `/dmx/create-pr` promotes all remaining items (full sync), and `/dmx/update-memory` does a deep reconciliation on demand.
 

@@ -13,6 +13,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Loop state is now isolated per branch/ticket instead of tracked through a single global `.dmx/loop-state.json` pointer, which was silently overwritten by any `run_loop` call regardless of branch — pausing work on one branch and running a loop on another could lose or corrupt the paused run's state. The active run is now derived by scanning `.dmx/jobs/{job_id}/` for the one non-terminal state file, keyed off the current branch/ticket; `.dmx/loop-state.json` no longer exists.
 - The `spec` loop (which creates a brand new ticket and branch) can now only be started from the configured integration branch (`branch_base`) — declared via the new `require_branch: base` loop-config field — and always starts under a temporary job id rather than resolving one from a stale `spec.md`/branch left over from the previous ticket. This prevented a new ticket's spec state from being written into the previous ticket's job folder.
+- Starting a `require_branch` loop (e.g. `spec`) while a previous run of it is still pending under an unresolved job id is now rejected up front with a clear message, instead of silently creating a second pending job folder that would only surface later as an opaque "ambiguous active run" error.
+- `on_complete` chaining into a loop the branch guard blocks (e.g. a custom config chaining into `spec` from off its base branch) no longer reports "chaining automatically" and then immediately contradicts it with a rejection — the finished loop's own outcome is now reported plainly alongside the blocked-chain reason.
 
 ## [0.3.1] — 2026-08-28
 

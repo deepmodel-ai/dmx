@@ -298,6 +298,36 @@ class TestOnCompleteChaining:
         assert "error" in message.lower()
         assert "does-not-exist" in message
 
+    def test_chaining_into_a_require_branch_loop_that_guard_blocks_reports_it_plainly(
+        self, tmp_path: Path
+    ) -> None:
+        """If a (custom) on_complete config chains into a require_branch loop
+        while still off its base branch, the message must not claim
+        "chaining automatically" and then immediately contradict it with a
+        rejection — report the finished loop's own success plainly instead."""
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "spec"}},
+            }
+        )
+        _write_validator(tmp_path, "v", PASSING_VALIDATOR)
+        _setup(tmp_path, config)
+        # No .dmx/config.md — the spec loop's require_branch guard can't
+        # resolve branch_base, so it should block rather than start.
+
+        message = _finish_loop(tmp_path, "J", "dev", "T", config, {})
+
+        assert "complete" in message.lower()
+        assert "chaining automatically" not in message.lower()
+        assert "couldn't start" in message.lower()
+        assert "cannot start" in message.lower()
+        # The finished (dev) loop's own job must not be left dangling —
+        # nothing spurious got created for "spec".
+        assert find_active_run(tmp_path, "J") is None
+
 
 class TestLoopMemoryHooks:
     """Loop-level memory hooks: read Open Learnings/Decisions before running,
@@ -461,6 +491,28 @@ class TestBranchGuard:
         job_names = {p.name for p in jobs_dir.iterdir()}
         assert "OLD-999" not in job_names
         assert any(name.startswith("_pending-") for name in job_names)
+
+    def test_second_start_while_a_pending_job_is_already_in_progress_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Starting `spec` twice in a row (e.g. an accidental retry) before
+        the first run's identity resolves must not silently create a second
+        _pending-* folder — that would only surface later as an opaque
+        AmbiguousActiveRun on the next loop_advance/loop_continue call."""
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+
+        first_message = _start_loop(tmp_path, "spec")
+        assert "get_skill_definition" in first_message
+
+        second_message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in second_message.lower()
+        assert "already in progress" in second_message.lower()
+        assert "loop_continue" in second_message
+
+        jobs_dir = tmp_path / ".dmx" / "jobs"
+        pending_dirs = [p for p in jobs_dir.iterdir() if p.name.startswith("_pending-")]
+        assert len(pending_dirs) == 1
 
 
 class TestFindActiveAndPendingPromotion:

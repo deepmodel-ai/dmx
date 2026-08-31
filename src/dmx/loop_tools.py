@@ -406,6 +406,18 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
         # resolve_job_id() here. A pre-existing spec.md or branch name is
         # either the previous ticket's leftover state or not ticket-scoped
         # at all (see dmx.loop_state module docstring).
+        try:
+            existing_pending = find_pending_run(root)
+        except AmbiguousActiveRun:
+            existing_pending = None  # already ambiguous; let it surface below
+        if existing_pending is not None:
+            pending_job_id, pending_loop_name, pending_task_id = existing_pending
+            return (
+                f"Cannot start a new `{name}` loop: a `{pending_loop_name}` run is already "
+                f"in progress under a not-yet-identified job (`{pending_job_id}`, task "
+                f"`{pending_task_id[:8]}`). Finish or resume it first with `loop_continue`, "
+                "or remove its folder under `.dmx/jobs/` if it's a stale leftover."
+            )
         job_id = make_pending_job_id(task_id)
     else:
         job_id = resolve_job_id(root)
@@ -544,6 +556,27 @@ def _finish_loop(
     logger.info("loop %s complete — outcome=%s next_loop=%s", loop_name, outcome, next_loop)
 
     if next_loop:
+        try:
+            chain_guard_error = _branch_guard_error(root, _resolve_loop(next_loop, root))
+        except Exception as exc:  # noqa: BLE001
+            chain_guard_error = f"Error loading loop config '{next_loop}': {exc}"
+
+        if chain_guard_error:
+            # Don't claim we're chaining when the next loop can't actually
+            # start (e.g. it require_branch's an integration branch this
+            # loop is still running away from) — report the finished loop's
+            # own outcome plainly instead of a misleading "chaining" message.
+            append_session_note(
+                root,
+                f"{loop_name} loop completed (outcome: {outcome}) — chaining to "
+                f"{next_loop} was configured but blocked: {chain_guard_error}",
+            )
+            return (
+                f"{_complete_message(loop_name, job_id, outcome)}\n\n"
+                f"Configured to chain to **{next_loop}**, but it couldn't start: "
+                f"{chain_guard_error}"
+            )
+
         append_session_note(
             root,
             f"{loop_name} loop completed (outcome: {outcome}) — "
