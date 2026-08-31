@@ -9,11 +9,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dmx.loop_schema import LoopConfig
-from dmx.loop_state import LoopStatus, read_active_pointer, read_state, write_initial_state
-from dmx.loop_tools import _finish_loop, _start_loop
+from dmx.loop_state import (
+    LoopStatus,
+    find_active_run,
+    make_pending_job_id,
+    read_state,
+    write_initial_state,
+)
+from dmx.loop_tools import _find_active, _finish_loop, _maybe_promote_pending_job, _start_loop
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 PASSING_VALIDATOR = """\
 import json, sys
@@ -40,8 +48,18 @@ def _setup(tmp_path: Path, config: LoopConfig, job_id: str = "J", task_id: str =
     return tmp_path
 
 
+def _allow_spec_loop_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str = "main"
+) -> None:
+    """Satisfy the spec loop's require_branch guard for tests that call
+    _start_loop directly (no real git repo / .dmx/config.md in tmp_path)."""
+    (tmp_path / ".dmx").mkdir(exist_ok=True)
+    (tmp_path / ".dmx" / "config.md").write_text(f"branch_base: {branch}\n", encoding="utf-8")
+    monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: branch)
+
+
 class TestFinishLoopWithoutRepeatUntil:
-    def test_all_checks_pass_completes_and_clears_pointer(self, tmp_path: Path) -> None:
+    def test_all_checks_pass_completes_and_chains(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(
             {
                 "name": "spec",
@@ -61,13 +79,14 @@ class TestFinishLoopWithoutRepeatUntil:
         assert state["status"] == LoopStatus.complete.value
         assert state["outcome"] == "success"
 
-        # on_complete chains automatically — the active pointer now points to
-        # the freshly-started "plan" loop rather than being cleared.
-        pointer = read_active_pointer(tmp_path)
-        assert pointer is not None
-        assert pointer["active_loop_name"] == "plan"
+        # on_complete chains automatically — a freshly-started "plan" run is
+        # now the active one (job id re-resolves to "unknown": no spec.md
+        # or git repo in this bare tmp_path).
+        active = find_active_run(tmp_path, "unknown")
+        assert active is not None
+        assert active[0] == "plan"
 
-    def test_required_failure_with_fail_policy_clears_pointer(self, tmp_path: Path) -> None:
+    def test_required_failure_with_fail_policy_has_no_active_run(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(
             {
                 "name": "spec",
@@ -82,11 +101,11 @@ class TestFinishLoopWithoutRepeatUntil:
         message = _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
         assert "paused" not in message.lower()
-        assert read_active_pointer(tmp_path) is None
+        assert find_active_run(tmp_path, "J") is None
         state = read_state(tmp_path, "J", "spec", "T")
         assert state["status"] == LoopStatus.failed.value
 
-    def test_required_failure_with_pause_policy_keeps_pointer(self, tmp_path: Path) -> None:
+    def test_required_failure_with_pause_policy_stays_active(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(
             {
                 "name": "spec",
@@ -101,7 +120,7 @@ class TestFinishLoopWithoutRepeatUntil:
         message = _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
         assert "paused" in message.lower()
-        assert read_active_pointer(tmp_path) is not None
+        assert find_active_run(tmp_path, "J") is not None
         state = read_state(tmp_path, "J", "spec", "T")
         assert state["status"] == LoopStatus.paused.value
 
@@ -143,7 +162,7 @@ class TestFinishLoopWithRepeatUntil:
 
         assert "iterating" in message.lower()
         assert "implement-next-phase" in message
-        assert read_active_pointer(tmp_path) is not None
+        assert find_active_run(tmp_path, "J") is not None
         state = read_state(tmp_path, "J", "dev", "T")
         assert state["status"] == LoopStatus.iterating.value
         assert state["iteration_count"] == 1
@@ -165,10 +184,11 @@ class TestFinishLoopWithRepeatUntil:
         state = read_state(tmp_path, "J", "dev", "T")
         assert state["status"] == LoopStatus.complete.value
 
-        # on_complete chains automatically to the "validate" loop.
-        pointer = read_active_pointer(tmp_path)
-        assert pointer is not None
-        assert pointer["active_loop_name"] == "validate"
+        # on_complete chains automatically to the "validate" loop (job id
+        # re-resolves to "unknown": no spec.md or git repo in this bare tmp_path).
+        active = find_active_run(tmp_path, "unknown")
+        assert active is not None
+        assert active[0] == "validate"
 
     def test_repeated_iteration_increments_count(self, tmp_path: Path) -> None:
         config = self._dev_config()
@@ -189,7 +209,7 @@ class TestOnCompleteChaining:
     """on_complete.trigger_loop starts the next loop directly — no second
     run_loop round-trip required from the agent."""
 
-    def test_no_trigger_loop_returns_terminal_message_and_clears_pointer(
+    def test_no_trigger_loop_returns_terminal_message_and_has_no_active_run(
         self, tmp_path: Path
     ) -> None:
         config = LoopConfig.model_validate(
@@ -205,7 +225,7 @@ class TestOnCompleteChaining:
         message = _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
         assert "complete" in message.lower()
-        assert read_active_pointer(tmp_path) is None
+        assert find_active_run(tmp_path, "J") is None
 
     def test_trigger_loop_starts_next_loop_with_fresh_task_id(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(
@@ -225,25 +245,30 @@ class TestOnCompleteChaining:
         assert "get_skill_definition" in message
         assert "plan" in message
 
-        pointer = read_active_pointer(tmp_path)
-        assert pointer is not None
-        assert pointer["active_loop_name"] == "plan"
-        assert pointer["active_task_id"] != "T"
+        # Chained "plan" loop job id re-resolves to "unknown": no spec.md or
+        # git repo in this bare tmp_path.
+        active = find_active_run(tmp_path, "unknown")
+        assert active is not None
+        loop_name, task_id = active
+        assert loop_name == "plan"
+        assert task_id != "T"
 
-        next_state = read_state(
-            tmp_path, pointer["active_job_id"], "plan", pointer["active_task_id"]
-        )
+        next_state = read_state(tmp_path, "unknown", "plan", task_id)
         assert next_state["status"] == LoopStatus.running.value
         assert next_state["current_skill_index"] == 0
 
     def test_trigger_loop_applies_to_failure_outcome(self, tmp_path: Path) -> None:
+        # trigger_loop targets "validate" rather than "spec": spec declares
+        # require_branch, which would reject this chain — that guard is
+        # covered separately (see TestBranchGuard), this test is purely
+        # about chaining-on-failure mechanics.
         config = LoopConfig.model_validate(
             {
                 "name": "dev",
                 "skills": ["implement-next-phase"],
                 "failure_handling": "fail",
                 "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
-                "on_complete": {"on_failure": {"trigger_loop": "spec"}},
+                "on_complete": {"on_failure": {"trigger_loop": "validate"}},
             }
         )
         _write_validator(tmp_path, "v", FAILING_VALIDATOR)
@@ -252,9 +277,9 @@ class TestOnCompleteChaining:
         message = _finish_loop(tmp_path, "J", "dev", "T", config, {})
 
         assert "chaining automatically" in message.lower()
-        pointer = read_active_pointer(tmp_path)
-        assert pointer is not None
-        assert pointer["active_loop_name"] == "spec"
+        active = find_active_run(tmp_path, "unknown")
+        assert active is not None
+        assert active[0] == "validate"
 
     def test_unknown_trigger_loop_surfaces_error_without_crashing(self, tmp_path: Path) -> None:
         config = LoopConfig.model_validate(
@@ -273,14 +298,46 @@ class TestOnCompleteChaining:
         assert "error" in message.lower()
         assert "does-not-exist" in message
 
+    def test_chaining_into_a_require_branch_loop_that_guard_blocks_reports_it_plainly(
+        self, tmp_path: Path
+    ) -> None:
+        """If a (custom) on_complete config chains into a require_branch loop
+        while still off its base branch, the message must not claim
+        "chaining automatically" and then immediately contradict it with a
+        rejection — report the finished loop's own success plainly instead."""
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "spec"}},
+            }
+        )
+        _write_validator(tmp_path, "v", PASSING_VALIDATOR)
+        _setup(tmp_path, config)
+        # No .dmx/config.md — the spec loop's require_branch guard can't
+        # resolve branch_base, so it should block rather than start.
+
+        message = _finish_loop(tmp_path, "J", "dev", "T", config, {})
+
+        assert "complete" in message.lower()
+        assert "chaining automatically" not in message.lower()
+        assert "couldn't start" in message.lower()
+        assert "cannot start" in message.lower()
+        # The finished (dev) loop's own job must not be left dangling —
+        # nothing spurious got created for "spec".
+        assert find_active_run(tmp_path, "J") is None
+
 
 class TestLoopMemoryHooks:
     """Loop-level memory hooks: read Open Learnings/Decisions before running,
     write a Session Notes breadcrumb when finishing."""
 
-    def test_start_loop_surfaces_open_learnings(self, tmp_path: Path) -> None:
+    def test_start_loop_surfaces_open_learnings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _allow_spec_loop_start(tmp_path, monkeypatch)
         active_context = tmp_path / ".dmx" / "activeContext.md"
-        active_context.parent.mkdir(parents=True)
         active_context.write_text(
             "## Open Learnings\n- validators must print JSON on stdout only\n\n"
             "## Open Decisions\n\n## Session Notes\n",
@@ -294,7 +351,10 @@ class TestLoopMemoryHooks:
         assert "get_skill_definition" in message
         assert "create-ticket" in message
 
-    def test_start_loop_without_memory_file_has_no_context_block(self, tmp_path: Path) -> None:
+    def test_start_loop_without_memory_file_has_no_context_block(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _allow_spec_loop_start(tmp_path, monkeypatch)
         message = _start_loop(tmp_path, "spec")
 
         assert "Memory context" not in message
@@ -357,3 +417,160 @@ class TestLoopMemoryHooks:
 
         content = (tmp_path / ".dmx" / "activeContext.md").read_text(encoding="utf-8")
         assert "iterating (round 1)" in content
+
+
+class TestBranchGuard:
+    """GH-9: the spec loop declares require_branch: base — _start_loop must
+    reject starting it anywhere else, and must never resolve a real job id
+    up front (any pre-existing spec.md/branch is a stale leftover by
+    definition for a loop that's about to create a brand new ticket)."""
+
+    def test_blocks_start_from_wrong_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature/gh-1-old-work")
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in message.lower()
+        assert "main" in message
+        assert "feature/gh-1-old-work" in message
+        assert "get_skill_definition" not in message
+
+    def test_blocks_start_when_branch_base_not_configured(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in message.lower()
+        assert "/dmx/init" in message
+
+    def test_blocks_start_when_branch_unresolvable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: None)
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in message.lower()
+
+    def test_allows_start_from_configured_base_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "get_skill_definition" in message
+        assert "create-ticket" in message
+
+    def test_loops_without_require_branch_are_unaffected(self, tmp_path: Path) -> None:
+        # No .dmx/config.md, no branch mocking — "dev" has no require_branch
+        # so the guard must not even run.
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        message = _start_loop(tmp_path, "dev")
+        assert "cannot start" not in message.lower()
+        assert "get_skill_definition" in message
+
+    def test_spec_loop_starts_under_a_pending_job_id_not_resolve_job_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even if a stale spec.md from a previous ticket is still sitting in
+        .dmx/ (e.g. main hasn't been cleaned up yet), starting a fresh spec
+        loop must not adopt its ticket id — see GH-9."""
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: OLD-999\n---\n# Stale spec", encoding="utf-8"
+        )
+
+        _start_loop(tmp_path, "spec")
+
+        jobs_dir = tmp_path / ".dmx" / "jobs"
+        job_names = {p.name for p in jobs_dir.iterdir()}
+        assert "OLD-999" not in job_names
+        assert any(name.startswith("_pending-") for name in job_names)
+
+    def test_second_start_while_a_pending_job_is_already_in_progress_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Starting `spec` twice in a row (e.g. an accidental retry) before
+        the first run's identity resolves must not silently create a second
+        _pending-* folder — that would only surface later as an opaque
+        AmbiguousActiveRun on the next loop_advance/loop_continue call."""
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+
+        first_message = _start_loop(tmp_path, "spec")
+        assert "get_skill_definition" in first_message
+
+        second_message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in second_message.lower()
+        assert "already in progress" in second_message.lower()
+        assert "loop_continue" in second_message
+
+        jobs_dir = tmp_path / ".dmx" / "jobs"
+        pending_dirs = [p for p in jobs_dir.iterdir() if p.name.startswith("_pending-")]
+        assert len(pending_dirs) == 1
+
+
+class TestFindActiveAndPendingPromotion:
+    """_find_active / _maybe_promote_pending_job wiring used by loop_advance
+    and loop_continue (see dmx.loop_state for the underlying scan logic)."""
+
+    def test_find_active_falls_back_to_pending_job(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+
+        found = _find_active(tmp_path)
+
+        assert found == (pending_id, "spec", "task-1")
+
+    def test_find_active_prefers_resolved_job_over_pending(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: GH-7\n---\n# Spec", encoding="utf-8"
+        )
+        write_initial_state(tmp_path, "plan", "GH-7", "task-real", ["plan"])
+        write_initial_state(
+            tmp_path, "spec", make_pending_job_id("task-old"), "task-old", ["create-ticket"]
+        )
+
+        found = _find_active(tmp_path)
+
+        assert found == ("GH-7", "plan", "task-real")
+
+    def test_find_active_returns_none_when_nothing_active(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        assert _find_active(tmp_path) is None
+
+    def test_promote_renames_once_real_identity_resolvable(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: GH-9\n---\n# Spec", encoding="utf-8"
+        )
+
+        real_job_id = _maybe_promote_pending_job(tmp_path, pending_id)
+
+        assert real_job_id == "GH-9"
+        assert not (tmp_path / ".dmx" / "jobs" / pending_id).exists()
+        state = read_state(tmp_path, "GH-9", "spec", "task-1")
+        assert state["job_id"] == "GH-9"
+
+    def test_promote_is_noop_when_identity_still_unresolvable(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+
+        result = _maybe_promote_pending_job(tmp_path, pending_id)
+
+        assert result == pending_id
+        assert (tmp_path / ".dmx" / "jobs" / pending_id).exists()
+
+    def test_promote_is_noop_for_non_pending_job_id(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        assert _maybe_promote_pending_job(tmp_path, "GH-9") == "GH-9"

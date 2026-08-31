@@ -89,10 +89,10 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 
 ## Loop mode
 
-Before suggesting any next command, I check whether `.dmx/loop-state.json` exists.
+Before suggesting any next command, I check whether a loop is active: search `.dmx/jobs/**/*.json` for a state file whose `status` is `running`, `paused`, or `iterating` (e.g. `grep -l '"status": "\(running\|paused\|iterating\)"' .dmx/jobs/**/*.json`). Most files under `.dmx/jobs/` are historical records of completed tickets — only a non-terminal `status` means a loop is currently active.
 
-- **If it exists** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with skill output, or wait for the developer to call `/loop-continue`. I do not offer alternative paths.
-- **If it does not exist** — no loop is active. Normal workflow guidance applies.
+- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with skill output, or wait for the developer to call `/loop-continue`. I do not offer alternative paths.
+- **If none is found** — no loop is active. Normal workflow guidance applies.
 
 | Command | Purpose |
 |---|---|

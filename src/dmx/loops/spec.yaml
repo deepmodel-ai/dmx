@@ -3,6 +3,7 @@ skills:
   - create-ticket
 trigger:
   type: manual
+require_branch: base
 goal_state: "Ticket created, branch checked out, spec.md complete with all Q&A answered"
 validators:
   - tool: check_spec_complete

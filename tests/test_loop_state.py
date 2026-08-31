@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
+from dmx.exceptions import AmbiguousActiveRun
 from dmx.loop_state import (
     LoopStatus,
-    active_pointer_path,
-    clear_active_pointer,
+    find_active_run,
+    find_pending_run,
+    is_pending_job_id,
+    make_pending_job_id,
     make_task_id,
-    read_active_pointer,
     read_state,
+    rename_job,
     resolve_job_id,
     state_path,
     write_initial_state,
@@ -107,15 +112,6 @@ class TestStateIO:
         assert state["validator_results"] == []
         assert state["outcome"] is None
 
-    def test_active_pointer_written(self, tmp_path: Path) -> None:
-        root = self._workspace(tmp_path)
-        write_initial_state(root, "spec", "PAY-1", "task-uuid", ["skill-a"])
-        pointer = read_active_pointer(root)
-        assert pointer is not None
-        assert pointer["active_job_id"] == "PAY-1"
-        assert pointer["active_task_id"] == "task-uuid"
-        assert pointer["active_loop_name"] == "spec"
-
     def test_state_path_structure(self, tmp_path: Path) -> None:
         root = self._workspace(tmp_path)
         p = state_path(root, "PAY-1", "spec", "abc")
@@ -139,19 +135,6 @@ class TestStateIO:
         # Ensure other fields preserved.
         assert updated["loop_name"] == "spec"
 
-    def test_clear_active_pointer(self, tmp_path: Path) -> None:
-        root = self._workspace(tmp_path)
-        write_initial_state(root, "spec", "J", "T", ["s"])
-        assert active_pointer_path(root).exists()
-        clear_active_pointer(root)
-        assert not active_pointer_path(root).exists()
-        # Idempotent.
-        clear_active_pointer(root)
-
-    def test_no_active_pointer_returns_none(self, tmp_path: Path) -> None:
-        root = self._workspace(tmp_path)
-        assert read_active_pointer(root) is None
-
     def test_multiple_runs_same_job(self, tmp_path: Path) -> None:
         root = self._workspace(tmp_path)
         write_initial_state(root, "spec", "PAY-1", "task-1", ["s"])
@@ -163,3 +146,169 @@ class TestStateIO:
         names = {f.stem for f in files}
         assert "spec-task-1" in names
         assert "dev-task-2" in names
+
+
+# ---------------------------------------------------------------------------
+# make_pending_job_id / is_pending_job_id
+# ---------------------------------------------------------------------------
+
+
+class TestPendingJobId:
+    def test_make_pending_job_id_uses_short_task_id(self) -> None:
+        job_id = make_pending_job_id("abcd1234-5678-90ab-cdef-1234567890ab")
+        assert job_id == "_pending-abcd1234"
+
+    def test_is_pending_job_id(self) -> None:
+        assert is_pending_job_id("_pending-abcd1234") is True
+        assert is_pending_job_id("PAY-1234") is False
+        assert is_pending_job_id("main") is False
+
+
+# ---------------------------------------------------------------------------
+# find_active_run — scan-based lookup, replaces the old active-pointer file
+# (see GH-9: a single mutable pointer file doesn't survive branch switches)
+# ---------------------------------------------------------------------------
+
+
+class TestFindActiveRun:
+    def _workspace(self, tmp_path: Path) -> Path:
+        (tmp_path / ".dmx").mkdir()
+        return tmp_path
+
+    def test_no_job_dir_returns_none(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        assert find_active_run(root, "PAY-1") is None
+
+    def test_finds_running_run(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "dev", "task-1", {"status": LoopStatus.running.value})
+        assert find_active_run(root, "PAY-1") == ("dev", "task-1")
+
+    def test_finds_paused_run(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "dev", "task-1", {"status": LoopStatus.paused.value})
+        assert find_active_run(root, "PAY-1") == ("dev", "task-1")
+
+    def test_finds_iterating_run(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "dev", "task-1", {"status": LoopStatus.iterating.value})
+        assert find_active_run(root, "PAY-1") == ("dev", "task-1")
+
+    def test_ignores_complete_run(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "dev", "task-1", {"status": LoopStatus.complete.value})
+        assert find_active_run(root, "PAY-1") is None
+
+    def test_ignores_failed_run(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "dev", "task-1", {"status": LoopStatus.failed.value})
+        assert find_active_run(root, "PAY-1") is None
+
+    def test_finds_the_one_active_run_among_completed_history(self, tmp_path: Path) -> None:
+        """A job accumulates one completed file per loop across a ticket's
+        lifecycle (spec -> plan -> dev -> validate -> release) — only the
+        current one should be non-terminal at any given time."""
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "spec", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "spec", "task-1", {"status": LoopStatus.complete.value})
+        write_initial_state(root, "plan", "PAY-1", "task-2", ["s"])
+        write_state(root, "PAY-1", "plan", "task-2", {"status": LoopStatus.paused.value})
+        assert find_active_run(root, "PAY-1") == ("plan", "task-2")
+
+    def test_multiple_non_terminal_runs_raises_ambiguous(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "spec", "PAY-1", "task-1", ["s"])
+        write_initial_state(root, "plan", "PAY-1", "task-2", ["s"])
+        with pytest.raises(AmbiguousActiveRun, match="PAY-1"):
+            find_active_run(root, "PAY-1")
+
+    def test_ignores_malformed_state_file(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        job_dir = root / ".dmx" / "jobs" / "PAY-1"
+        job_dir.mkdir(parents=True)
+        (job_dir / "dev-broken.json").write_text("not json", encoding="utf-8")
+        assert find_active_run(root, "PAY-1") is None
+
+
+# ---------------------------------------------------------------------------
+# find_pending_run — resuming a loop before its real job id is resolvable
+# ---------------------------------------------------------------------------
+
+
+class TestFindPendingRun:
+    def _workspace(self, tmp_path: Path) -> Path:
+        (tmp_path / ".dmx").mkdir()
+        return tmp_path
+
+    def test_no_jobs_dir_returns_none(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        assert find_pending_run(root) is None
+
+    def test_no_pending_jobs_returns_none(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "dev", "PAY-1", "task-1", ["s"])
+        assert find_pending_run(root) is None
+
+    def test_finds_pending_job(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(root, "spec", pending_id, "task-1", ["s"])
+        assert find_pending_run(root) == (pending_id, "spec", "task-1")
+
+    def test_ignores_completed_pending_job(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(root, "spec", pending_id, "task-1", ["s"])
+        write_state(root, pending_id, "spec", "task-1", {"status": LoopStatus.complete.value})
+        assert find_pending_run(root) is None
+
+    def test_multiple_pending_jobs_raises_ambiguous(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "spec", make_pending_job_id("task-1"), "task-1", ["s"])
+        write_initial_state(root, "spec", make_pending_job_id("task-2"), "task-2", ["s"])
+        with pytest.raises(AmbiguousActiveRun, match="pending"):
+            find_pending_run(root)
+
+
+# ---------------------------------------------------------------------------
+# rename_job — promoting a pending job once its real identity is known
+# ---------------------------------------------------------------------------
+
+
+class TestRenameJob:
+    def _workspace(self, tmp_path: Path) -> Path:
+        (tmp_path / ".dmx").mkdir()
+        return tmp_path
+
+    def test_moves_state_files_and_rewrites_job_id(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(root, "spec", pending_id, "task-1", ["s"])
+
+        rename_job(root, pending_id, "gh-42")
+
+        assert not (root / ".dmx" / "jobs" / pending_id).exists()
+        state = read_state(root, "gh-42", "spec", "task-1")
+        assert state["job_id"] == "gh-42"
+
+    def test_noop_when_old_dir_missing(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        rename_job(root, "_pending-doesnotexist", "gh-42")
+        assert not (root / ".dmx" / "jobs" / "gh-42").exists()
+
+    def test_merges_into_existing_destination(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "plan", "gh-42", "task-existing", ["s"])
+        pending_id = make_pending_job_id("task-new")
+        write_initial_state(root, "spec", pending_id, "task-new", ["s"])
+
+        rename_job(root, pending_id, "gh-42")
+
+        job_dir = root / ".dmx" / "jobs" / "gh-42"
+        names = {f.stem for f in job_dir.glob("*.json")}
+        assert names == {"plan-task-existing", "spec-task-new"}
