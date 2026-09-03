@@ -7,6 +7,12 @@ so this bundled default reports it as passing with a note recommending
 manual confirmation — override ``validators/check_pr_ready.py`` in the app
 repo for a real ticketing-API-backed check.
 
+``memory_updated`` fails if ``.dmx/`` has *any* uncommitted changes (staged
+or not) — a skill that edits the memory bank without committing (see GH-15)
+would otherwise leave dangling working-tree state that's silently excluded
+from the PR. Only once the tree is clean does it fall back to checking
+whether the latest commit touched ``.dmx/*.md``.
+
 Contract
 --------
 Called by the orchestrator via subprocess. The input contract is written to
@@ -83,7 +89,36 @@ def _ticket_transitioned(loop_context: dict[str, Any]) -> tuple[bool, str]:
     )
 
 
+def _dirty_dmx_files(workspace_root: Path) -> list[str]:
+    """Return paths under .dmx/ with uncommitted changes (staged or not)."""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--short", "--", ".dmx/"],
+            cwd=workspace_root,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    if proc.returncode != 0:
+        return []
+    # Each line is "XY path" — strip the two-char status + separating space.
+    return [line[3:].strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
 def _memory_updated(workspace_root: Path) -> tuple[bool, str]:
+    dirty = _dirty_dmx_files(workspace_root)
+    if dirty:
+        # A skill (e.g. update-memory) edited .dmx/ without committing —
+        # this loop's memory sync isn't actually reflected in the PR.
+        return False, (
+            f"Uncommitted changes under .dmx/ ({', '.join(dirty)}) — "
+            "memory bank edits must be committed, not left dangling in the "
+            "working tree. Run `/dmx/commit` (or re-run the skill that made "
+            "these edits so it commits them) before continuing."
+        )
+
     try:
         proc = subprocess.run(
             ["git", "diff", "--name-only", "HEAD~1", "HEAD"],

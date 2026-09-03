@@ -200,14 +200,12 @@ class TestFullPipeline:
             assert "get_skill_definition" in msg
             assert "create-pr" in msg
 
-            # --- release (2 skills; on_complete has no trigger_loop) ---
-            msg = await call("loop_advance", output="opened PR #42")
-            assert "paused" in msg.lower()
-            msg = await call("loop_continue")
-            assert "get_skill_definition" in msg
-            assert "update-memory" in msg
-
-            msg = await call("loop_advance", output="memory bank synced")
+            # --- release (1 skill; on_complete has no trigger_loop) ---
+            # create-pr does its own memory-bank sync + commit (Steps 4-5) —
+            # update-memory is intentionally NOT chained after it, since that
+            # left dangling uncommitted .dmx/ changes after the PR was
+            # already opened (see GH-15).
+            msg = await call("loop_advance", output="opened PR #42, memory bank synced")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "release loop — complete" in msg.lower()

@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- The bundled `release` loop no longer runs `update-memory` after `create-pr` has already opened the PR — `create-pr` already performs its own memory-bank sync and commit (Steps 4-5), so chaining `update-memory` immediately after left its edits (further inbox promotions, `activeContext.md` rewrites) as dangling uncommitted changes never included in the PR, and silently discarded later by `close-ticket`'s branch deletion. `release.yaml` now runs `create-pr` only.
+- `update-memory` now commits its own changes at the end of its instructions, so it can never leave dangling uncommitted `.dmx/` state regardless of when or how it's invoked in the future.
+- `check_pr_ready`'s `memory_updated` check now fails if `.dmx/` has any uncommitted changes (staged or not), instead of only checking the latest commit or the mere existence of `activeContext.md` — a loop-config ordering mistake now surfaces loudly instead of silently passing. (GH-15)
+
 ## [0.3.2] — 2026-08-31
 
 ### Fixed
