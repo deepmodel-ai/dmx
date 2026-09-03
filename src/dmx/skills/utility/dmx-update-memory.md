@@ -85,7 +85,27 @@ After promoting inbox items, rewrite `activeContext.md` to the learning-inbox st
 
 Do not add an `## Active Ticket` section. Branch identity lives in `spec.md`, not here.
 
-## Step 6 — Return the result
+## Step 6 — Commit memory changes
+
+Run:
+```
+git status --short .dmx/
+```
+
+If any files under `.dmx/` were modified in Steps 4–5:
+```
+git add .dmx/
+git commit -m "chore: sync memory bank"
+```
+
+If nothing changed, continue without committing.
+
+This skill must never leave uncommitted `.dmx/` changes in the working tree —
+regardless of when or how it's invoked (standalone, chained after another
+skill, or as part of a loop), it is responsible for committing its own edits.
+Do not skip this step even if you expect the caller to commit afterward.
+
+## Step 7 — Return the result
 
 Output:
 ```
@@ -101,6 +121,8 @@ activeContext inbox:
   Promoted: {N} items
   Remaining: {M} items
 
+{if committed in Step 6} Committed: chore: sync memory bank
+
 Next:
   - Run /dmx/create-ticket to start the next piece of work.
   - Run /dmx/derive-ticket if you have uncommitted changes to formalise.
@@ -112,3 +134,4 @@ Next:
 - Never store ticket-specific implementation details (function names, line numbers, single-branch decisions) in core files. Those belong in `spec.md` or `tasks.md`.
 - If `tasks.md` shows unchecked tasks remaining, note in output: "Note: tasks.md has unchecked tasks — memory updated with progress so far, not a completed state."
 - After Step 5, `activeContext.md` must not contain an `## Active Ticket` section.
+- Never leave `.dmx/` changes uncommitted — Step 6 is mandatory whenever files were modified.

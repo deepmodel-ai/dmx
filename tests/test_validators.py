@@ -443,6 +443,75 @@ class TestCheckPrReady:
         memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
         assert memory_check["pass"] is True
 
+    def test_uncommitted_dmx_changes_fail_memory_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GH-15: a skill that edits .dmx/ without committing (e.g.
+        update-memory chained after create-pr already opened the PR) must
+        not be reported as "memory updated" — the edits aren't actually in
+        the PR until they're committed."""
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir(parents=True, exist_ok=True)
+        (dmx / "activeContext.md").write_text("# Active Context\n", encoding="utf-8")
+        monkeypatch.setattr(check_pr_ready, "_dirty_dmx_files", lambda _root: ["activeContext.md"])
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is False
+        assert "uncommitted" in memory_check["message"].lower()
+        assert "activeContext.md" in memory_check["message"]
+
+    def test_clean_tree_does_not_trigger_dirty_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir(parents=True, exist_ok=True)
+        (dmx / "activeContext.md").write_text("# Active Context\n", encoding="utf-8")
+        monkeypatch.setattr(check_pr_ready, "_dirty_dmx_files", lambda _root: [])
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is True
+
+    def test_dirty_dmx_files_returns_empty_outside_a_git_repo(self, tmp_path: Path) -> None:
+        """The real (non-monkeypatched) implementation must not raise or
+        misreport when run outside a git repo — same fail-open behavior as
+        the pre-existing HEAD~1 diff check."""
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == []
+
+    def _run_git(self, tmp_path: Path, *args: str) -> None:
+        import subprocess
+
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    def test_dirty_dmx_files_detects_real_uncommitted_changes(self, tmp_path: Path) -> None:
+        """End-to-end against a real git repo — an uncommitted .dmx/ edit is
+        detected regardless of whether it's staged."""
+        self._run_git(tmp_path, "init", "-q")
+        self._run_git(tmp_path, "config", "user.email", "test@example.com")
+        self._run_git(tmp_path, "config", "user.name", "Test")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "activeContext.md").write_text("initial\n", encoding="utf-8")
+        self._run_git(tmp_path, "add", ".")
+        self._run_git(tmp_path, "commit", "-q", "-m", "initial commit")
+
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == []
+
+        # Unstaged edit.
+        (dmx / "activeContext.md").write_text("edited without committing\n", encoding="utf-8")
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == [".dmx/activeContext.md"]
+
+        # Staged edit.
+        self._run_git(tmp_path, "add", ".")
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == [".dmx/activeContext.md"]
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is False
+
 
 # ---------------------------------------------------------------------------
 # End-to-end subprocess contract (bundled scripts on disk)
