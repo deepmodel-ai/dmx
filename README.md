@@ -55,7 +55,7 @@ Bundled loops for the SDLC pipeline:
 | `plan` | plan | `dev` |
 | `dev` | implement-next-phase, commit | `validate` |
 | `validate` | validate | `release` |
-| `release` | create-pr, update-memory | — |
+| `release` | create-pr | — |
 
 Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` — there's no separate active-run pointer; the active run is derived by scanning a job's state files for the one non-terminal (`pending`/`running`/`paused`/`iterating`) entry, keyed off the current branch/ticket. This keeps loop state isolated per branch: pausing work on one branch and running a loop on another can't corrupt or lose either one's state.
 
