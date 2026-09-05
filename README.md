@@ -86,11 +86,110 @@ Loop-level memory hooks: before the first skill runs, the runtime surfaces `acti
 }
 ```
 
-Add to your IDE config ([Claude Code, Copilot, Antigravity ↓](#step-1--add-the-mcp-server)). Run `/dmx/init` once per project. Then:
+Add to your IDE config ([Claude Code, Copilot, Antigravity ↓](#step-1--add-the-mcp-server)). Then follow [Your first project](#your-first-project) to initialize and run the full loop on a new repo.
+
+## Your first project
+
+A brand-new repo, from `/dmx/init` through the first merged PR. You review at every gate; `/dmx/loop-continue` is how you move forward.
+
+### Before you start
+
+- A GitHub repo cloned locally with an `origin` remote. The spec loop creates the feature branch on GitHub from `origin/{branch_base}` (usually `main` or `master`), even if you track work in Jira or use no ticketing system.
+- The dmx MCP server added to your IDE ([install guide](#step-1--add-the-mcp-server)).
+- The GitHub MCP server (`user-github`) authenticated. `/dmx/init` probes it before writing any files.
+- The Atlassian MCP server only if you will choose Jira at init.
+
+### 1. Initialize
+
+On the integration branch (`main` or `master`):
 
 ```
-/dmx/create-ticket
+/dmx/init
 ```
+
+Choose a workflow — **sdlc** (this walkthrough) or **freestyle** (no process enforced) — and a ticketing system: `none`, `github-issues`, or `jira`. Re-run `/dmx/init` at any time to switch workflow or ticketing; existing memory bank files with content are left intact.
+
+Init writes `.dmx/config.md` and the memory bank (`projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`, `activeContext.md`). Open a **new chat** so the IDE rules take effect.
+
+If you already have a `docs/` folder, init reads it when populating the memory bank. Writing the requirement first is slightly better; either order works.
+
+### 2. Write the product requirement
+
+Create `docs/requirements.md` at the repo root and put the product or feature description there. You can paste the requirement into chat later instead, but a file is easier to review and reuse.
+
+`docs/requirements.md` is a convention, not a dmx artifact. The spec loop uses whatever you point it at.
+
+### 3. Commit and push
+
+The spec loop must start from the configured integration branch, and it creates the remote feature branch from whatever is already on origin. Commit `.dmx/`, `docs/`, and any files init wrote, then push:
+
+```
+git add .
+git commit -m "chore: initialize dmx and capture product requirements"
+git push -u origin HEAD
+```
+
+Stay on `main` or `master`.
+
+### 4. Start the spec loop
+
+In the same message as the command, point at the requirement file or paste it:
+
+```
+/dmx/run-loop spec
+
+See docs/requirements.md
+```
+
+This creates a GitHub issue or Jira ticket (if you configured one), cuts a feature branch from `origin/{branch_base}`, checks it out, and writes `.dmx/spec.md`. Then it pauses.
+
+### 5. Answer the spec
+
+Open `.dmx/spec.md`. Fill in Technical Approach if it is incomplete, and answer every question. Empty answers or placeholders (`TBD`, `TODO`) fail the spec validator.
+
+```
+/dmx/loop-continue
+```
+
+On success the runtime auto-chains to the `plan` loop.
+
+### 6. Review the plan
+
+`plan` writes `.dmx/tasks.md` with phases and tasks, then pauses. Edit freely — this is the implementation contract.
+
+```
+/dmx/loop-continue
+```
+
+That starts the `dev` loop.
+
+### 7. Build phase by phase
+
+Each `dev` cycle:
+
+1. Implements the next unchecked phase in `tasks.md`, then pauses.
+2. Review the diff.
+3. `/dmx/loop-continue` runs **commit only**. It does not push.
+4. Review the commit.
+5. `/dmx/loop-continue` again — validators run, then either the next phase starts or the loop chains to `validate`.
+
+Repeat until every phase is checked off.
+
+### 8. Validate and open the PR
+
+After the last phase, `validate` runs the quality gate and pauses. Review the report, then `/dmx/loop-continue`. On success the `release` loop runs `create-pr`: it pushes the feature branch and opens the pull request.
+
+### 9. Merge and close
+
+Review the PR and merge it. Then:
+
+```
+/dmx/close-ticket
+```
+
+That closes the ticket, comments the PR link, and deletes the feature branch locally and on origin. `/dmx/loop-continue` after merge is not a close path — the release loop ends when the PR exists.
+
+You can run the same steps by hand (`/dmx/create-ticket`, `/dmx/plan`, `/dmx/implement-next-phase`, …) instead of loops. See the skill catalog below.
 
 ## Learn more
 
@@ -172,6 +271,10 @@ Open any chat and run `/dmx/init`. It will:
 Safe to re-run. Updates config without overwriting memory bank files that already have content.
 
 ### Step 3 — Start your first ticket
+
+On a new repo, follow [Your first project](#your-first-project) (`/dmx/run-loop spec` through `/dmx/close-ticket`).
+
+To start a ticket by hand instead:
 
 ```
 /dmx/create-ticket
