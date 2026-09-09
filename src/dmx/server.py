@@ -13,6 +13,7 @@ from fastmcp import FastMCP
 
 from dmx.catalog import SkillDefinition, load_rules, load_skills, substitute_args
 from dmx.loop_tools import register_loop_tools
+from dmx.sync_tools import register_sync_tools
 from dmx.tools import register_tools
 
 __all__ = ["create_app", "resolve_dirs", "watch_catalog"]
@@ -105,6 +106,7 @@ def create_app(
 
     register_tools(app, rules)
     register_loop_tools(app)
+    register_sync_tools(app)
     return app
 
 

@@ -319,6 +319,7 @@ Describe what you want to build. dmx scaffolds the spec, asks clarifying questio
 |---|---|
 | `/dmx/status` | Snapshot of in-progress tickets and open PRs |
 | `/dmx/sync-branch` | Rebase/merge integration branch onto current branch |
+| `/dmx/sync` | Vendor org-wide shared loops/skills/validators into `.dmx/vendor/` |
 | `/dmx/update-memory` | Deep sync: promote inbox learnings, reconcile contradictions |
 | `/dmx/review` | Code review: clarity, correctness, maintainability |
 | `/dmx/test` | Write tests that enable change |
