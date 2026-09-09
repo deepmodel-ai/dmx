@@ -63,7 +63,7 @@ class TestCheckSpecComplete:
         assert qa_check["pass"] is False
 
     def test_dmx_create_ticket_numbered_answer_template_passes(self, tmp_path: Path) -> None:
-        """The actual template dmx-create-ticket.md Step 8 writes — numbered
+        """The actual template dmx-create-ticket.md Step 9 writes — numbered
         questions with an indented 'Answer:' line, not 'Q:'/'A:'."""
         self._write_spec(
             tmp_path,
