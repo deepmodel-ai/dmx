@@ -65,7 +65,7 @@ def _qa_answered(content: str) -> tuple[bool, str]:
     Structural rather than label-based, to tolerate wording drift between
     this validator and whatever skill scaffolds spec.md: a question is
     recognized as either a numbered list item (``N. {question}`` — the
-    format ``dmx-create-ticket.md`` Step 8 actually writes) or a classic
+    format ``dmx-create-ticket.md`` Step 9 actually writes) or a classic
     ``Q:`` line. Everything following it, up to the next question or
     heading, is its answer — whether labeled ``Answer:``/``A:`` or not. A
     blank body or an explicit TBD/N/A placeholder counts as unanswered.

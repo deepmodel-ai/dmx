@@ -28,7 +28,29 @@ The project configuration is injected into your context as a rule. Extract:
 
 If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
-## Step 2 — Read project context
+## Step 2 — Verify the repo has at least one commit
+
+Run:
+```
+git rev-parse --verify --quiet HEAD
+```
+
+If this fails (non-zero exit, no output — an unborn `HEAD`, meaning zero commits exist yet), stop before creating anything:
+```
+This repository has no commits yet. Creating a ticket branches from `{config.branch_base}`
+on GitHub, which requires at least one commit to exist first.
+
+Commit something first, e.g. the files /dmx/init just wrote:
+  git add .
+  git commit -m "chore: initialize project"
+  git push -u origin HEAD
+
+Then run /dmx/create-ticket again.
+```
+
+Do not proceed to Step 3 in this case, even if `{{task}}` was provided.
+
+## Step 3 — Read project context
 
 Read the following memory bank files:
 - `.dmx/projectbrief.md` — project goals and scope
@@ -39,7 +61,7 @@ If `.dmx/` does not exist, stop: "Memory bank not found. Run /dmx/init to set up
 
 Store this context. It will inform the ticket content, technical approach, and spec questions.
 
-## Step 3 — Infer type
+## Step 4 — Infer type
 
 If `{{type}}` was provided, use it. Accepted values: `feature`, `bug`, `chore`.
 
@@ -53,9 +75,9 @@ Store as `branch_type` (`feature` | `bug` | `chore`).
 For Jira `issueTypeName` mapping: `feature` → `Story`, `bug` → `Bug`, `chore` → `Task`.
 For GitHub Issues label: use `branch_type` as-is.
 
-## Step 4 — Draft ticket content
+## Step 5 — Draft ticket content
 
-Using `{{task}}` and the project context from Step 2, generate a `summary` and `description`.
+Using `{{task}}` and the project context from Step 3, generate a `summary` and `description`.
 
 ### Summary
 Single sentence, max 80 characters, imperative present tense, capital first letter, no trailing period. Specific enough that scope is clear without reading the description.
@@ -86,7 +108,7 @@ Examples:
 
 Rules: write for the implementer. For bugs, lead with observed vs expected behaviour. Acceptance criteria must be independently verifiable.
 
-## Step 5 — Create the ticket
+## Step 6 — Create the ticket
 
 **If `ticketing` is `jira`:**
 
@@ -96,7 +118,7 @@ Call `createJiraIssue` on `user-atlassian`:
 ```
 cloudId:              {config.cloud_id}
 projectKey:           {config.project_key}
-issueTypeName:        {Jira type from Step 3}
+issueTypeName:        {Jira type from Step 4}
 summary:              {summary}
 description:          {description}
 assignee_account_id:  {account_id}
@@ -129,7 +151,7 @@ Store `ticket_url` = `{html_url}`.
 
 No ticket is created. `ticket_ref` = `none`. `ticket_url` = none.
 
-## Step 6 — Construct the branch name
+## Step 7 — Construct the branch name
 
 Slugify the summary:
 - Lowercase, hyphens for spaces, remove special characters, collapse consecutive hyphens, truncate to 60 chars
@@ -140,7 +162,7 @@ Slugify the summary:
 | `github-issues` | `{branch_type}-gh-{number}-{slug}` | `feature-gh-123-add-rate-limiting` |
 | `none` | `{branch_type}-{slug}` | `feature-add-rate-limiting` |
 
-## Step 7 — Create the remote branch and check out locally
+## Step 8 — Create the remote branch and check out locally
 
 Call `create_branch` on `user-github`:
 ```
@@ -158,7 +180,7 @@ git fetch origin
 git checkout {branch_name}
 ```
 
-## Step 8 — Scaffold spec.md
+## Step 9 — Scaffold spec.md
 
 Write `.dmx/spec.md`:
 
@@ -179,7 +201,7 @@ ticketing: {ticketing}
 ---
 
 ## Context
-{From ticket description Step 4 — why this work is needed in this project}
+{From ticket description Step 5 — why this work is needed in this project}
 
 ## Scope
 {Bullet list of what is included. Use project patterns to name specific layers, services, or files.}
@@ -221,7 +243,7 @@ ticketing: {ticketing}
 
 When `ticketing` is `none`, omit `ticket` from frontmatter.
 
-## Step 9 — Transition to In Progress
+## Step 10 — Transition to In Progress
 
 **If `ticketing` is `jira`:**
 Call `getTransitionsForJiraIssue` on `user-atlassian`. Find `In Progress`. Call `transitionJiraIssue`.
@@ -237,7 +259,7 @@ labels:       ["in-progress"]
 
 **If `ticketing` is `none`:** Skip.
 
-## Step 10 — Return the result
+## Step 11 — Return the result
 
 ```
 {if ticketing ≠ none} Ticket: {ticket_ref} — {summary}
