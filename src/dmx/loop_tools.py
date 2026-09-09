@@ -40,6 +40,7 @@ from __future__ import annotations
 import importlib.resources as pkg
 import logging
 import re
+import subprocess
 from pathlib import Path
 
 from fastmcp import (
@@ -150,6 +151,41 @@ def _read_branch_base(workspace_root: Path) -> str | None:
     return value if value and value != "{REQUIRED}" else None
 
 
+def _repo_has_no_commits(root: Path) -> bool:
+    """True if *root* is a git repo with an unborn HEAD (zero commits).
+
+    ``git rev-parse --abbrev-ref HEAD`` — what :func:`current_branch` uses —
+    fails on a freshly ``git init``'d repo before its first commit, even
+    though the branch name (e.g. ``main``/``master``) is perfectly
+    resolvable via ``git symbolic-ref``. This distinguishes that specific,
+    fixable case (make a commit) from other reasons ``current_branch``
+    might return ``None`` (not a git repo at all, detached HEAD, etc.),
+    which don't have an actionable one-line fix.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    if result.returncode != 0 or result.stdout.strip() != "true":
+        return False  # not a git repo at all — a different problem
+
+    try:
+        verify = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return verify.returncode != 0
+
+
 def _branch_guard_error(root: Path, config: LoopConfig) -> str | None:
     """Return an error message if *config* declares ``require_branch`` and
     the current branch doesn't satisfy it, else None."""
@@ -166,6 +202,13 @@ def _branch_guard_error(root: Path, config: LoopConfig) -> str | None:
 
     branch = current_branch(root)
     if branch is None:
+        if _repo_has_no_commits(root):
+            return (
+                f"Cannot start the `{config.name}` loop: this repository has no commits yet. "
+                f"`{config.name}` creates a new branch from `{branch_base}` on GitHub, which "
+                "requires at least one commit to exist first. Commit something (e.g. the "
+                "`.dmx/` files `/dmx/init` just wrote) and push to origin, then try again."
+            )
         return (
             f"Cannot start the `{config.name}` loop: could not determine the current git "
             f"branch. Make sure you're in a git repository checked out to `{branch_base}`."

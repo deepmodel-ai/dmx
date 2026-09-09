@@ -6,6 +6,7 @@ can be exercised directly without mocking the MCP server plumbing.
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from dmx.loop_schema import LoopConfig
@@ -455,6 +456,54 @@ class TestBranchGuard:
         message = _start_loop(tmp_path, "spec")
 
         assert "cannot start" in message.lower()
+        assert "no commits yet" not in message.lower()
+
+    def test_blocks_start_with_specific_message_on_a_zero_commit_repo(
+        self, tmp_path: Path
+    ) -> None:
+        """A freshly `git init`'d repo (no commits yet) makes
+        `git rev-parse --abbrev-ref HEAD` fail (unborn HEAD), even though the
+        branch name is perfectly real and resolvable via `git symbolic-ref`.
+        This must surface a specific, actionable message rather than the
+        generic "could not determine branch" one."""
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in message.lower()
+        assert "no commits yet" in message.lower()
+        assert "commit something" in message.lower()
+        assert "get_skill_definition" not in message
+
+    def test_zero_commit_guard_does_not_fire_outside_a_git_repo(self, tmp_path: Path) -> None:
+        """A plain non-git directory must still get the generic message, not
+        be misreported as a zero-commit git repo."""
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "cannot start" in message.lower()
+        assert "no commits yet" not in message.lower()
+
+    def test_zero_commit_guard_does_not_fire_once_a_commit_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+        (tmp_path / "README.md").write_text("hi\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
+        _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
+
+        message = _start_loop(tmp_path, "spec")
+
+        assert "get_skill_definition" in message
 
     def test_allows_start_from_configured_base_branch(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
