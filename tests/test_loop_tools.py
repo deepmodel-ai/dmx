@@ -17,7 +17,13 @@ from dmx.loop_state import (
     read_state,
     write_initial_state,
 )
-from dmx.loop_tools import _find_active, _finish_loop, _maybe_promote_pending_job, _start_loop
+from dmx.loop_tools import (
+    _commit_dmx_state,
+    _find_active,
+    _finish_loop,
+    _maybe_promote_pending_job,
+    _start_loop,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -621,3 +627,95 @@ class TestFindActiveAndPendingPromotion:
     def test_promote_is_noop_for_non_pending_job_id(self, tmp_path: Path) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         assert _maybe_promote_pending_job(tmp_path, "GH-9") == "GH-9"
+
+
+def _init_real_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "README.md").write_text("hi\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+
+def _dmx_dirty(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "status", "--short", "--", ".dmx/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def _commit_count(root: Path) -> int:
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return int(result.stdout.strip())
+
+
+class TestCommitDmxState:
+    """GH-23: .dmx/jobs/*.json (and other .dmx/ writes made by _finish_loop,
+    e.g. the activeContext.md session note) must not be left as an
+    uncommitted, local-only change once a loop run has genuinely finished —
+    otherwise a terminal loop like `release`, with nothing downstream to
+    commit on its behalf, permanently loses that final state the moment
+    close-ticket force-deletes the branch."""
+
+    def test_commits_dirty_dmx_changes(self, tmp_path: Path) -> None:
+        _init_real_git_repo(tmp_path)
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+        before = _commit_count(tmp_path)
+
+        _commit_dmx_state(tmp_path, "chore: sync loop state")
+
+        assert _dmx_dirty(tmp_path) == ""
+        assert _commit_count(tmp_path) == before + 1
+
+    def test_noop_when_nothing_dirty(self, tmp_path: Path) -> None:
+        _init_real_git_repo(tmp_path)
+        before = _commit_count(tmp_path)
+
+        _commit_dmx_state(tmp_path, "chore: sync loop state")
+
+        assert _commit_count(tmp_path) == before
+
+    def test_noop_outside_a_git_repo(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+
+        _commit_dmx_state(tmp_path, "chore: sync loop state")  # must not raise
+
+        assert not (tmp_path / ".git").exists()
+
+    def test_release_style_loop_with_no_chain_target_commits_final_state(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end: a terminal loop (on_complete -> null, matching the
+        bundled `release` loop) leaves .dmx/ clean after _finish_loop
+        returns, instead of stranding the job state JSON + session note as
+        an uncommitted change nothing downstream will ever pick up."""
+        _init_real_git_repo(tmp_path)
+        config = LoopConfig.model_validate(
+            {
+                "name": "release",
+                "skills": ["create-pr"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
+        _write_validator(tmp_path, "v", PASSING_VALIDATOR)
+        _setup(tmp_path, config, job_id="GH-1", task_id="T")
+        before = _commit_count(tmp_path)
+
+        message = _finish_loop(tmp_path, "GH-1", "release", "T", config, {})
+
+        assert "complete" in message.lower()
+        assert _dmx_dirty(tmp_path) == ""
+        assert _commit_count(tmp_path) == before + 1
