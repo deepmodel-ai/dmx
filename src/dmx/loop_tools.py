@@ -494,7 +494,10 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _commit_dmx_state(root: Path, message: str) -> None:
+_COMMIT_DMX_STATE_TIMEOUT_SECONDS = 15
+
+
+def _commit_dmx_state(root: Path, message: str) -> str | None:
     """Best-effort commit of any uncommitted ``.dmx/`` changes.
 
     Called once a loop run has genuinely finished (a terminal outcome —
@@ -508,10 +511,22 @@ def _commit_dmx_state(root: Path, message: str) -> None:
     force-deleting the branch, so an uncommitted final state here would be
     silently and permanently lost — see GH-23.
 
-    Silently does nothing if *root* isn't a git repo, there's nothing to
-    commit, or git isn't available — this is a best-effort durability
-    improvement (matching the README's "committed with the PR" claim for
-    ``.dmx/jobs/``), not something that should ever break a loop response.
+    Silently does nothing if *root* isn't a git repo or there's nothing to
+    commit — this is a best-effort durability improvement (matching the
+    README's "committed with the PR" claim for ``.dmx/jobs/``), not
+    something that should ever break a loop response.
+
+    Every subprocess call is timeout-bounded so a hung ``git`` invocation
+    (e.g. a pre-commit hook prompting for input, or GPG signing waiting on
+    a passphrase) can't hang the whole MCP tool call indefinitely.
+
+    Returns:
+        ``None`` if there was nothing to commit or the commit succeeded.
+        A short, user-facing warning string if a commit was *attempted*
+        but failed (e.g. a pre-commit hook rejected it) — silently
+        swallowing that would defeat the entire point of this call, so
+        callers should surface it in the loop's response rather than only
+        logging it server-side.
     """
     try:
         status = subprocess.run(
@@ -519,21 +534,37 @@ def _commit_dmx_state(root: Path, message: str) -> None:
             capture_output=True,
             text=True,
             cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
         )
     except Exception:  # noqa: BLE001
-        return
+        return None
     if status.returncode != 0 or not status.stdout.strip():
-        return  # not a git repo, or nothing under .dmx/ to commit
+        return None  # not a git repo, or nothing under .dmx/ to commit
 
     try:
         subprocess.run(
-            ["git", "add", ".dmx/"], capture_output=True, text=True, cwd=root, check=True
+            ["git", "add", ".dmx/"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=True,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
         )
         subprocess.run(
-            ["git", "commit", "-m", message], capture_output=True, text=True, cwd=root, check=True
+            ["git", "commit", "-m", message],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=True,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
         )
-    except Exception:  # noqa: BLE001
-        logger.warning("could not auto-commit .dmx/ state (%s)", message)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not auto-commit .dmx/ state (%s): %s", message, exc)
+        return (
+            "⚠️ Could not auto-commit the loop's final `.dmx/` state (see server logs for "
+            "details) — run `git status .dmx/` and commit manually if needed."
+        )
+    return None
 
 
 def _finish_loop(
@@ -656,28 +687,42 @@ def _finish_loop(
                 f"{loop_name} loop completed (outcome: {outcome}) — chaining to "
                 f"{next_loop} was configured but blocked: {chain_guard_error}",
             )
-            _commit_dmx_state(root, f"chore: sync loop state for {loop_name} (job {job_id})")
-            return (
+            commit_warning = _commit_dmx_state(
+                root, f"chore: sync loop state for {loop_name} (job {job_id})"
+            )
+            message = (
                 f"{_complete_message(loop_name, job_id, outcome)}\n\n"
                 f"Configured to chain to **{next_loop}**, but it couldn't start: "
                 f"{chain_guard_error}"
             )
+            if commit_warning:
+                message += f"\n\n{commit_warning}"
+            return message
 
         append_session_note(
             root,
             f"{loop_name} loop completed (outcome: {outcome}) — "
             f"chained to {next_loop} (job `{job_id}`).",
         )
-        _commit_dmx_state(root, f"chore: sync loop state for {loop_name} (job {job_id})")
+        commit_warning = _commit_dmx_state(
+            root, f"chore: sync loop state for {loop_name} (job {job_id})"
+        )
         chain_header = (
             f"**{loop_name} loop — complete** (outcome: `{outcome}`)\n\n"
             f"Chaining automatically to **{next_loop}** loop.\n\n"
         )
+        if commit_warning:
+            chain_header += f"{commit_warning}\n\n"
         return chain_header + _start_loop(root, next_loop)
 
     append_session_note(root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`).")
-    _commit_dmx_state(root, f"chore: sync loop state for {loop_name} (job {job_id})")
-    return _complete_message(loop_name, job_id, outcome)
+    commit_warning = _commit_dmx_state(
+        root, f"chore: sync loop state for {loop_name} (job {job_id})"
+    )
+    message = _complete_message(loop_name, job_id, outcome)
+    if commit_warning:
+        message += f"\n\n{commit_warning}"
+    return message
 
 
 # ---------------------------------------------------------------------------

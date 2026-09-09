@@ -649,6 +649,17 @@ def _dmx_dirty(root: Path) -> str:
     return result.stdout
 
 
+def _install_rejecting_pre_commit_hook(root: Path) -> None:
+    """Install a pre-commit hook that always rejects the commit, so
+    `git commit` fails deterministically regardless of the host's git
+    identity configuration."""
+    hooks_dir = root / ".git" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "pre-commit"
+    hook_path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook_path.chmod(0o755)
+
+
 def _commit_count(root: Path) -> int:
     result = subprocess.run(
         ["git", "rev-list", "--count", "HEAD"],
@@ -674,8 +685,9 @@ class TestCommitDmxState:
         (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
         before = _commit_count(tmp_path)
 
-        _commit_dmx_state(tmp_path, "chore: sync loop state")
+        result = _commit_dmx_state(tmp_path, "chore: sync loop state")
 
+        assert result is None
         assert _dmx_dirty(tmp_path) == ""
         assert _commit_count(tmp_path) == before + 1
 
@@ -683,17 +695,44 @@ class TestCommitDmxState:
         _init_real_git_repo(tmp_path)
         before = _commit_count(tmp_path)
 
-        _commit_dmx_state(tmp_path, "chore: sync loop state")
+        result = _commit_dmx_state(tmp_path, "chore: sync loop state")
 
+        assert result is None
         assert _commit_count(tmp_path) == before
 
     def test_noop_outside_a_git_repo(self, tmp_path: Path) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
 
-        _commit_dmx_state(tmp_path, "chore: sync loop state")  # must not raise
+        result = _commit_dmx_state(tmp_path, "chore: sync loop state")  # must not raise
 
+        assert result is None
         assert not (tmp_path / ".git").exists()
+
+    def test_returns_a_warning_string_when_commit_is_attempted_but_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """A commit can be attempted and still fail (rejected by a
+        pre-commit hook, GPG signing failure, disk full, etc.) — that must
+        never be swallowed silently, since silent failure here defeats the
+        entire point of this function (durability of the loop's final
+        state). Forced here via an always-failing pre-commit hook, which
+        reliably fails `git commit` regardless of the host's git identity
+        configuration (unlike unsetting user.name/email, which a global
+        config can silently paper over)."""
+        _init_real_git_repo(tmp_path)
+        _install_rejecting_pre_commit_hook(tmp_path)
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+
+        result = _commit_dmx_state(tmp_path, "chore: sync loop state")
+
+        assert result is not None
+        assert "could not auto-commit" in result.lower()
+        # The failed commit must leave the change sitting uncommitted, not
+        # silently discarded — an operator following the warning's advice
+        # to inspect/commit manually still has something to find.
+        assert "activeContext.md" in _dmx_dirty(tmp_path)
 
     def test_release_style_loop_with_no_chain_target_commits_final_state(
         self, tmp_path: Path
@@ -719,3 +758,26 @@ class TestCommitDmxState:
         assert "complete" in message.lower()
         assert _dmx_dirty(tmp_path) == ""
         assert _commit_count(tmp_path) == before + 1
+
+    def test_release_style_loop_surfaces_a_warning_when_the_commit_attempt_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """A failed auto-commit must be visible in the loop's own response,
+        not just a server-side log line an operator has no reason to go
+        looking for."""
+        _init_real_git_repo(tmp_path)
+        _install_rejecting_pre_commit_hook(tmp_path)
+        config = LoopConfig.model_validate(
+            {
+                "name": "release",
+                "skills": ["create-pr"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
+        _write_validator(tmp_path, "v", PASSING_VALIDATOR)
+        _setup(tmp_path, config, job_id="GH-1", task_id="T")
+
+        message = _finish_loop(tmp_path, "GH-1", "release", "T", config, {})
+
+        assert "complete" in message.lower()
+        assert "could not auto-commit" in message.lower()
