@@ -458,9 +458,7 @@ class TestBranchGuard:
         assert "cannot start" in message.lower()
         assert "no commits yet" not in message.lower()
 
-    def test_blocks_start_with_specific_message_on_a_zero_commit_repo(
-        self, tmp_path: Path
-    ) -> None:
+    def test_blocks_start_with_specific_message_on_a_zero_commit_repo(self, tmp_path: Path) -> None:
         """A freshly `git init`'d repo (no commits yet) makes
         `git rev-parse --abbrev-ref HEAD` fail (unborn HEAD), even though the
         branch name is perfectly real and resolvable via `git symbolic-ref`.
