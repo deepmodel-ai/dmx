@@ -205,13 +205,34 @@ Create `.dmx/releases/` if it does not exist.
 
 Write the assembled release notes to `.dmx/releases/{{version}}.md`.
 
-## Step 11 — Return the result
+## Step 11 — Commit and push the release notes
+
+`/dmx/release-merge` opens a real GitHub pull request from `{config.branch_base}` — which only
+reflects what's actually pushed to origin. Leaving this file uncommitted means it silently
+never makes it into that PR's diff.
+
+Run:
+```
+git add .dmx/releases/{{version}}.md
+git commit -m "docs: draft release notes for {{version}}"
+git push
+```
+
+This skill must never leave `.dmx/releases/{{version}}.md` uncommitted — do not skip this
+step even if you expect a later command to commit it.
+
+## Step 12 — Return the result
 
 Output:
 ```
 Release notes drafted: .dmx/releases/{{version}}.md
 {N} changes across {categories list}.
+Committed and pushed to {config.branch_base}.
 
 Review and edit the file, then:
   - Run /dmx/release-merge version:{{version}} to open the {config.branch_base} → {config.production_branch} PR.
 ```
+
+## Guards
+
+- Never leave `.dmx/releases/{{version}}.md` uncommitted — Step 11 is mandatory whenever the file was created or changed.
