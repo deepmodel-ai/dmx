@@ -35,7 +35,7 @@ If `.dmx/shared-sources.yaml` does not exist, stop: "No `.dmx/shared-sources.yam
 
 ## Step 3 — Sync
 
-Call `sync_shared_sources` on `user-dmx`. It reads `.dmx/shared-sources.yaml`, clones each declared source at its pinned `ref`, and vendors it into `.dmx/vendor/{name}/` along with a `.lock.json` recording the resolved commit SHA. It does not commit anything — that is your job in the next step.
+Call `sync_shared_sources` on `user-dmx`. It reads `.dmx/shared-sources.yaml`, clones each declared source at its pinned `ref`, and vendors it into `.dmx/vendor/{name}/` along with a `.lock.json` recording the resolved commit SHA. It also checks for same-name collisions across the app repo's own `.dmx/loops/`/`.dmx/skills/`/`validators/` and every declared source, in precedence order. It does not commit anything — that is your job in the next step.
 
 ## Step 4 — Handle the result
 
@@ -44,6 +44,8 @@ Call `sync_shared_sources` on `user-dmx`. It reads `.dmx/shared-sources.yaml`, c
 **If some sources failed:** show the user exactly which ones and why, using the tool's own per-source messages (auth failure, missing ref, or a wrong-shaped source are the three distinguishable causes it reports). Ask whether to proceed and commit the sources that *did* succeed, or stop entirely and fix the failing entry in `.dmx/shared-sources.yaml` first. Do not silently commit a partial sync without asking.
 
 **If every source failed:** stop. There is nothing to commit.
+
+**If the response includes a "Collisions detected" section:** show every warning to the user verbatim — each one already names the filename, the locations involved, and which one wins. These are not errors; the sync still proceeds and commits normally. Do not silently drop this section from what you show the user.
 
 ## Step 5 — Commit and push
 
@@ -71,14 +73,14 @@ git push -u origin HEAD
 Synced {N} shared source(s):
 {per-source summary from Step 3/4 — success with resolved SHA, or failure reason}
 
+{if any collisions were reported:}
+Collisions detected — review before merging:
+{each collision warning, verbatim}
+
 Committed and pushed: {short SHA}
 
 Next:
   - Open a PR against {config.branch_base} for review, same as any other dependency bump.
-  - If a source's files collide with something already in this repo (an app-repo override,
-    or another shared source), that's not detected yet — collision detection lands in a
-    follow-up. Check `.dmx/loops/`, `.dmx/skills/`, `validators/`, and the other entries in
-    `.dmx/vendor/` by hand for now if you suspect an overlap.
 ```
 
 ## Guards

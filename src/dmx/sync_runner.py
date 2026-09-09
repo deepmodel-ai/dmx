@@ -35,9 +35,15 @@ from pathlib import Path
 
 from dmx.loop_state import current_branch
 from dmx.loop_tools import _read_branch_base  # noqa: PLC2701 — same package, no public API split
-from dmx.shared_sources import SharedSource, vendor_dir, vendor_lock_path
+from dmx.shared_sources import SharedSource, source_root, vendor_dir, vendor_lock_path
 
-__all__ = ["SyncError", "SyncResult", "require_non_base_branch_error", "sync_source"]
+__all__ = [
+    "SyncError",
+    "SyncResult",
+    "detect_collisions",
+    "require_non_base_branch_error",
+    "sync_source",
+]
 
 # Network-bound (unlike the local-only git calls elsewhere in dmx), so a more
 # generous budget than e.g. _COMMIT_DMX_STATE_TIMEOUT_SECONDS in loop_tools.py —
@@ -48,6 +54,26 @@ _SYNC_TIMEOUT_SECONDS = 120
 # The category directories a shared source is expected to contain at least
 # one of. See "Directory structure a shared source must follow" in GH-27.
 _EXPECTED_CATEGORIES = ("loops", "skills", "validators")
+
+# Where the app repo itself keeps each category, and the flat-file glob used
+# to enumerate filenames within it — mirrors the resolvers in loop_tools.py/
+# validator_runner.py. Deliberately excludes the bundled fallback: GH-27's
+# collision-handling section only widens the check to app-repo-vs-shared, not
+# bundled-vs-anything — the bundled tier is dmx's own content, not something
+# an app repo or shared source could accidentally shadow in a way that
+# warrants a warning.
+_APP_CATEGORY_DIRS = {
+    "loops": Path(".dmx/loops"),
+    "skills": Path(".dmx/skills"),
+    "validators": Path("validators"),
+}
+_CATEGORY_GLOB = {"loops": "*.yaml", "skills": "*.md", "validators": "*.py"}
+
+# Sentinel used as the "owner" name for the app repo's own tier in
+# detect_collisions — never a valid shared_sources `name` (parse_source_address
+# only ever produces filesystem paths, not this literal token), so it can't
+# collide with a real source name.
+_APP_REPO_OWNER = "<app repo>"
 
 
 def require_non_base_branch_error(root: Path) -> str | None:
@@ -219,3 +245,71 @@ def sync_source(source: SharedSource, workspace_root: Path) -> SyncResult:
         return SyncResult(
             name=source.name, source=source.source, resolved_sha=resolved_sha, warning=None
         )
+
+
+def _filenames(directory: Path, glob: str) -> set[str]:
+    if not directory.is_dir():
+        return set()
+    return {p.name for p in directory.glob(glob)}
+
+
+def _format_others(names: list[str]) -> str:
+    quoted = [f"`{n}`" for n in names]
+    if len(quoted) == 1:
+        return quoted[0]
+    return ", ".join(quoted[:-1]) + f" and {quoted[-1]}"
+
+
+def detect_collisions(sources: list[SharedSource], workspace_root: Path) -> list[str]:
+    """Find same-name files across the app repo and already-vendored shared sources.
+
+    Only meaningful *after* :func:`sync_source` has run for each source —
+    this reads directly from ``.dmx/vendor/{name}/``, the same on-disk state
+    the resolvers in ``loop_tools.py``/``validator_runner.py`` read from, so
+    a warning here reflects exactly what those resolvers will actually do.
+
+    Per category (``loops``, ``skills``, ``validators``), builds the
+    filename set for the app repo's own directory and each declared source
+    (in declared order), then reports every filename that appears in more
+    than one of those locations — the "app repo always wins, then
+    ``shared_sources`` order, then bundled" precedence means the *first*
+    location in that list is always the actual winner, and every other
+    location listing the same filename is silently shadowed. The bundled
+    fallback is intentionally excluded — see the module-level comment on
+    ``_APP_CATEGORY_DIRS``.
+
+    Returns:
+        A sorted list of human-readable warning strings (empty if no
+        collisions). Never raises — a collision is a warning, not a
+        failure; ``/dmx/sync`` still vendors and commits regardless.
+    """
+    warnings: list[str] = []
+    for category, app_rel_dir in _APP_CATEGORY_DIRS.items():
+        glob = _CATEGORY_GLOB[category]
+        owners_by_file: dict[str, list[str]] = {}
+
+        for filename in _filenames(workspace_root / app_rel_dir, glob):
+            owners_by_file.setdefault(filename, []).append(_APP_REPO_OWNER)
+        for source in sources:
+            source_dir = source_root(workspace_root, source) / category
+            for filename in _filenames(source_dir, glob):
+                owners_by_file.setdefault(filename, []).append(source.name)
+
+        for filename, owners in sorted(owners_by_file.items()):
+            if len(owners) < 2:
+                continue
+            winner, *shadowed = owners
+            if winner == _APP_REPO_OWNER:
+                warnings.append(
+                    f"`{filename}` exists both locally (`{app_rel_dir}/`) and in "
+                    f"{_format_others(shadowed)} — the local copy wins and "
+                    f"{'it is' if len(shadowed) == 1 else 'they are'} fully shadowed. If "
+                    "this local file isn't meant to be a deliberate override, remove it."
+                )
+            else:
+                warnings.append(
+                    f"`{filename}` is defined in both `{winner}` and "
+                    f"{_format_others(shadowed)} — `{winner}` wins per shared_sources "
+                    "order. If unintended, rename one or reorder shared_sources."
+                )
+    return warnings
