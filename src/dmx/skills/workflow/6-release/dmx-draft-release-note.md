@@ -213,13 +213,22 @@ never makes it into that PR's diff.
 
 Run:
 ```
+git status --short .dmx/releases/{{version}}.md
+```
+
+If this reports a change:
+```
 git add .dmx/releases/{{version}}.md
 git commit -m "docs: draft release notes for {{version}}"
 git push
 ```
 
-This skill must never leave `.dmx/releases/{{version}}.md` uncommitted — do not skip this
-step even if you expect a later command to commit it.
+If it reports nothing (e.g. re-running against identical content — a bare `git commit` here
+would fail with "nothing to commit"), skip straight to Step 12; the file is already committed
+and pushed from a previous run.
+
+This skill must never leave `.dmx/releases/{{version}}.md` uncommitted when it was actually
+changed — do not skip the commit above just because you expect a later command to commit it.
 
 ## Step 12 — Return the result
 
@@ -227,7 +236,8 @@ Output:
 ```
 Release notes drafted: .dmx/releases/{{version}}.md
 {N} changes across {categories list}.
-Committed and pushed to {config.branch_base}.
+{if committed in Step 11} Committed and pushed to {config.branch_base}.
+{else} Already committed from a previous run — nothing new to push.
 
 Review and edit the file, then:
   - Run /dmx/release-merge version:{{version}} to open the {config.branch_base} → {config.production_branch} PR.
