@@ -67,13 +67,15 @@ head:   {config.owner}:{close_branch}
 
 Filter to PRs where `merged_at` is not null. Store `html_url` and `base.ref`.
 
-If no merged PR is found, warn: "No merged PR found for `{close_branch}`. Proceeding with branch deletion only — ticket will not be updated."
+If no merged PR is found, warn: "No merged PR found for `{close_branch}`. Proceeding with branch deletion only — ticket will not be updated." Then **skip Steps 5 and 6 entirely** — do not transition or comment on a ticket whose work hasn't actually merged yet.
 
 ## Step 5 — Transition ticket to Done
 
+Only run this step if Step 4 found a merged PR. Otherwise skip to Step 7.
+
 **If `ticketing` is `jira`:**
 1. Call `getTransitionsForJiraIssue` on `user-atlassian` with `{config.cloud_id}` and ticket ID.
-2. Find transition named `Done`. Call `transitionJiraIssue`.
+2. If no transition named `Done` is available (e.g. the ticket is already in a terminal state — possibly auto-transitioned by a GitHub↔Jira integration when the PR merged), treat this as already-done and continue; do not fail. Otherwise call `transitionJiraIssue`.
 
 **If `ticketing` is `github-issues`:**
 Call `update_issue` on `user-github`:
@@ -83,6 +85,7 @@ repo:         {config.repo}
 issue_number: {ticket number}
 state:        closed
 ```
+This is idempotent — if the issue was already auto-closed by a `Closes #N` reference in the PR body, this call succeeds as a no-op. Do not treat an already-closed issue as an error.
 
 **If `ticketing` is `none`:** Skip.
 
@@ -167,4 +170,5 @@ Next:
 
 - Never close a protected branch.
 - If the PR is not confirmed merged, warn before deleting the branch. Do not assume the work is done.
+- Never transition or comment on a ticket unless Step 4 found a merged PR — a ticket must not jump to Done while its PR is still open.
 - Make no changes to any `.dmx/` files — this skill is external-cleanup only. Memory learnings were already synced by `/dmx/create-pr`.
