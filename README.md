@@ -65,11 +65,46 @@ Validators are plain Python functions at `validators/{name}.py` in the app repo 
 
 Loop-level memory hooks: before the first skill runs, the runtime surfaces `activeContext.md`'s Open Learnings / Open Decisions to the agent; when a loop finishes (complete, paused for validator review, or iterating), it appends a one-line breadcrumb to Session Notes. This is a deterministic log entry, not judgment — promoting it into durable knowledge is still `/dmx/update-memory`'s job.
 
+## Shared sources
+
+An organization can define loops, skills, and validators once in a dedicated git repo and have every app repo in the org pull from them, instead of copy-pasting the same files into each one and letting them drift. This adds a third resolution tier, in between the app repo and dmx's own bundled defaults:
+
+```
+app repo (.dmx/loops/, .dmx/skills/, validators/)         ← highest precedence
+        ↓
+.dmx/vendor/{name}/{loops,skills,validators}/               ← declared shared sources,
+        ↓                                                      checked in declared order
+.dmx/vendor/{name-2}/{loops,skills,validators}/
+        ↓
+bundled with dmx (src/dmx/{loops,skills,validators}/)      ← lowest precedence
+```
+
+Declare one or more sources in `.dmx/shared-sources.yaml`, pinned to a tag, branch, or commit SHA (same `git::<url>//<subdir>?ref=<ref>` addressing Terraform uses for module sources):
+
+```yaml
+shared_sources:
+  - name: org-wide
+    source: "git::https://github.com/acme/dmx-shared.git//?ref=v1.4.0"
+  - name: team-frontend
+    source: "git::https://github.com/acme/dmx-frontend-skills.git//?ref=v2.1.0"
+```
+
+Then run `/dmx/sync` to clone each source at its pinned ref and vendor it into `.dmx/vendor/{name}/`, committed to the repo like any other `.dmx/` state. Re-run it whenever a source's ref changes. `/dmx/sync`:
+
+- Is blocked on `branch_base` — like every other write path in dmx, it produces a commit that belongs on a reviewed branch, not straight on `main`.
+- Fails clearly (not silently) if a source can't be cloned, its ref doesn't exist, or the resolved directory doesn't look like a dmx shared source (no `loops/`, `skills/`, or `validators/` at the resolved path).
+- Warns — without failing the sync — about same-name collisions across the app repo and every declared source, e.g. two sources both defining `spec.yaml`, so an unintended shadow never goes unnoticed.
+
+Skills support two shapes inside a shared source's `skills/` directory: dmx's own flat `{name}.md`, or the [agentskills.io](https://agentskills.io) / Claude Code / Cursor convention of a `{name}/SKILL.md` folder with optional `scripts/`, `references/`, and `assets/` — so a shared source can point straight at an org's existing standards-shaped skills repo with zero dmx-specific restructuring. When a folder-shaped skill resolves, dmx tells the agent its on-disk root path so it can resolve those `scripts/`/`references/`/`assets/` paths directly, and surfaces any `dependencies:` declared in its frontmatter as an explicit note (dmx has no auto-install step of its own).
+
+Because everything is vendored and committed rather than fetched live at resolve time, network and git credentials are only needed at `/dmx/sync` time — infrequent and human-reviewed — not on every loop run. `/dmx/sync` shells out to plain `git`, so it inherits whatever credentials the invoking environment's git already has (SSH agent, `gh auth`, a CI deploy key or machine-user PAT) — nothing dmx-specific to configure, and it works the same way against GitHub, GitHub Enterprise, GitLab, or any other git host. See [#27](https://github.com/deepmodel-ai/dmx/issues/27) for the full design.
+
 ## Roadmap
 
 - [x] Full lifecycle workflow — spec, plan, build, validate, release
 - [x] `.dmx/` memory bank — shared project context committed to the repo
 - [x] Loop runtime — background execution engine with validators, policy, `repeat_until`, and autonomous chaining ([#5](https://github.com/deepmodel-ai/dmx/issues/5))
+- [x] Org-wide shared sources — vendor shared loops/skills/validators from a central git repo ([#27](https://github.com/deepmodel-ai/dmx/issues/27))
 - [ ] Team server — hosted MCP endpoint, shared loops and rules across the team
 - [ ] Gateway — model governance, cost visibility, autonomous background execution
 
