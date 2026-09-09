@@ -51,6 +51,7 @@ from typing import Any
 
 from dmx.loop_schema import FailureHandling, LoopConfig, OnOptionalFailure
 from dmx.loop_state import LoopOutcome, LoopStatus
+from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 
 __all__ = [
     "ValidatorRunError",
@@ -76,21 +77,35 @@ def _bundled_validators_dir() -> Path:
 def resolve_validator_path(name: str, workspace_root: Path) -> Path:
     """Resolve a validator name to a script path.
 
-    App repo ``validators/{name}.py`` takes precedence over the bundled
-    fallback shipped with dmx.
+    App repo ``validators/{name}.py`` takes precedence, then declared
+    ``shared_sources`` in order (``.dmx/vendor/{source}/validators/{name}.py``
+    — see GH-27), then the bundled fallback shipped with dmx.
 
     Raises:
-        ValidatorRunError: If the validator is not found in either location.
+        ValidatorRunError: If the validator is not found in any location.
     """
     app_path = workspace_root / "validators" / f"{name}.py"
     if app_path.exists():
         return app_path
 
+    checked = [app_path]
+    try:
+        shared_sources = read_shared_sources(workspace_root)
+    except SharedSourceError as exc:
+        raise ValidatorRunError(f"Error reading .dmx/shared-sources.yaml: {exc}") from exc
+    for source in shared_sources:
+        source_path = source_root(workspace_root, source) / "validators" / f"{name}.py"
+        checked.append(source_path)
+        if source_path.exists():
+            return source_path
+
     bundled_path = _bundled_validators_dir() / f"{name}.py"
+    checked.append(bundled_path)
     if bundled_path.exists():
         return bundled_path
 
-    raise ValidatorRunError(f"Validator '{name}' not found at {app_path} or {bundled_path}")
+    locations = " or ".join(str(p) for p in checked)
+    raise ValidatorRunError(f"Validator '{name}' not found at {locations}")
 
 
 def run_validator(

@@ -22,8 +22,11 @@ from dmx.loop_tools import (
     _find_active,
     _finish_loop,
     _maybe_promote_pending_job,
+    _resolve_loop,
+    _resolve_skill,
     _start_loop,
 )
+from dmx.shared_sources import SharedSourceError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -781,3 +784,122 @@ class TestCommitDmxState:
 
         assert "complete" in message.lower()
         assert "could not auto-commit" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# _resolve_loop / _resolve_skill — GH-27 phase 1 shared_sources tier
+# ---------------------------------------------------------------------------
+
+
+def _write_shared_sources_config(root: Path, sources: list[tuple[str, str]]) -> None:
+    """Write ``.dmx/shared-sources.yaml`` declaring *sources* as ``(name, source)`` pairs."""
+    config_path = root / ".dmx" / "shared-sources.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["shared_sources:"]
+    for name, source in sources:
+        lines.append(f"  - name: {name}")
+        lines.append(f'    source: "{source}"')
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_loop_yaml(root: Path, subdir: Path, loop_name: str) -> Path:
+    path = subdir / f"{loop_name}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'name: {loop_name}\nskills: ["dmx-commit"]\n', encoding="utf-8")
+    return path
+
+
+class TestResolveLoopSharedSources:
+    def test_missing_shared_sources_file_falls_through_to_bundled(self, tmp_path: Path) -> None:
+        # No .dmx/shared-sources.yaml at all — behaves exactly as before GH-27.
+        config = _resolve_loop("spec", tmp_path)
+        assert config.name == "spec"
+
+    def test_shared_source_used_when_no_app_override(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        _write_loop_yaml(tmp_path, tmp_path / ".dmx" / "vendor" / "acme" / "loops", "custom")
+        config = _resolve_loop("custom", tmp_path)
+        assert config.name == "custom"
+
+    def test_app_repo_beats_shared_source(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        shared_path = _write_loop_yaml(
+            tmp_path, tmp_path / ".dmx" / "vendor" / "acme" / "loops", "custom"
+        )
+        shared_path.write_text('name: custom\nskills: ["shared-skill"]\n', encoding="utf-8")
+        app_path = _write_loop_yaml(tmp_path, tmp_path / ".dmx" / "loops", "custom")
+        app_path.write_text('name: custom\nskills: ["app-skill"]\n', encoding="utf-8")
+        config = _resolve_loop("custom", tmp_path)
+        assert config.skills == ["app-skill"]
+
+    def test_declared_order_is_precedence_order(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(
+            tmp_path,
+            [("first", "git::https://x//?ref=v1"), ("second", "git::https://y//?ref=v1")],
+        )
+        first_path = _write_loop_yaml(
+            tmp_path, tmp_path / ".dmx" / "vendor" / "first" / "loops", "custom"
+        )
+        first_path.write_text('name: custom\nskills: ["first-skill"]\n', encoding="utf-8")
+        second_path = _write_loop_yaml(
+            tmp_path, tmp_path / ".dmx" / "vendor" / "second" / "loops", "custom"
+        )
+        second_path.write_text('name: custom\nskills: ["second-skill"]\n', encoding="utf-8")
+        config = _resolve_loop("custom", tmp_path)
+        assert config.skills == ["first-skill"]
+
+    def test_not_found_anywhere_lists_shared_source_loops_too(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        _write_loop_yaml(tmp_path, tmp_path / ".dmx" / "vendor" / "acme" / "loops", "custom")
+        try:
+            _resolve_loop("nonexistent", tmp_path)
+        except FileNotFoundError as exc:
+            assert "custom" in str(exc)
+        else:
+            raise AssertionError("expected FileNotFoundError")
+
+    def test_malformed_shared_sources_file_raises(self, tmp_path: Path) -> None:
+        config_path = tmp_path / ".dmx" / "shared-sources.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("shared_sources: not-a-list\n", encoding="utf-8")
+        try:
+            _resolve_loop("spec", tmp_path)
+        except SharedSourceError:
+            pass
+        else:
+            raise AssertionError("expected SharedSourceError")
+
+
+class TestResolveSkillSharedSources:
+    def test_missing_shared_sources_file_falls_through_to_bundled(self, tmp_path: Path) -> None:
+        content = _resolve_skill("commit", tmp_path)
+        assert content is not None
+
+    def test_shared_source_used_when_no_app_override(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        skill_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("# Custom skill from acme\n", encoding="utf-8")
+        content = _resolve_skill("custom-skill", tmp_path)
+        assert content == "# Custom skill from acme\n"
+
+    def test_app_repo_beats_shared_source(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        shared_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill.md"
+        shared_path.parent.mkdir(parents=True, exist_ok=True)
+        shared_path.write_text("# shared\n", encoding="utf-8")
+        app_path = tmp_path / ".dmx" / "skills" / "custom-skill.md"
+        app_path.parent.mkdir(parents=True, exist_ok=True)
+        app_path.write_text("# app\n", encoding="utf-8")
+        assert _resolve_skill("custom-skill", tmp_path) == "# app\n"
+
+    def test_dmx_prefixed_candidate_also_checked_in_shared_source(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        skill_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "dmx-custom-skill.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("# dmx-prefixed shared\n", encoding="utf-8")
+        assert _resolve_skill("custom-skill", tmp_path) == "# dmx-prefixed shared\n"
+
+    def test_not_found_returns_none(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        assert _resolve_skill("totally-nonexistent-skill", tmp_path) is None
