@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `draft-release-note` now commits and pushes `.dmx/releases/{version}.md` after writing it, instead of leaving it as an uncommitted local file. `release-merge` opens its PR straight from `{branch_base}`'s pushed state, so the release notes file was previously silently absent from that PR's diff whenever it hadn't been committed by hand first. (GH-22)
 - Starting the `spec` loop, or running `/dmx/create-ticket` manually, on a repository with zero commits now surfaces a clear, actionable error instead of a confusing one. Previously, `current_branch()` (which shells out to `git rev-parse --abbrev-ref HEAD`) silently returned `None` on a freshly `git init`'d repo's unborn `HEAD`, causing the `spec` loop's branch guard to fail with a generic "could not determine the current git branch" message — even though the branch name itself was perfectly resolvable. `_branch_guard_error` now distinguishes this specific case and tells the user to commit and push before retrying. `dmx-create-ticket.md` gained the same check as its new Step 2, so manual/foreground usage fails fast before creating a ticket or attempting to branch, rather than failing later when GitHub's `create_branch` API rejects branching from a ref-less remote.
 
 ## [0.3.3] — 2026-09-02
