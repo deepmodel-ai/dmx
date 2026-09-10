@@ -157,6 +157,46 @@ def _check_source_shape(source_dir: Path, name: str) -> None:
         )
 
 
+def _check_skills_shape(source_dir: Path, name: str) -> None:
+    """Raise if any entry under ``skills/`` is neither of the two shapes
+    ``_resolve_skill`` recognizes (GH-27 phase 4): a flat ``{name}.md`` file,
+    or a ``{name}/SKILL.md`` folder. Anything else — a stray non-``.md``
+    file, an empty directory, a directory with no ``SKILL.md`` inside —
+    would otherwise vendor silently and then simply never resolve, with no
+    diagnostic pointing at which entry was wrong.
+
+    Hidden entries (name starting with ``.``) are skipped entirely rather
+    than flagged — ``.gitkeep``, ``.gitignore``, ``.DS_Store``, and similar
+    repo-hygiene artifacts are extremely common at the top of any directory
+    in a real git repo and aren't a "wrong shape" in any meaningful sense;
+    flagging them would fail an otherwise well-formed source on something
+    unrelated to whether its skills resolve correctly.
+
+    No-ops if the source has no ``skills/`` directory at all.
+    """
+    skills_dir = source_dir / "skills"
+    if not skills_dir.is_dir():
+        return
+    bad: list[str] = []
+    for entry in sorted(skills_dir.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        if entry.is_file():
+            if entry.suffix != ".md":
+                bad.append(entry.name)
+        elif entry.is_dir():
+            if not (entry / "SKILL.md").is_file():
+                bad.append(f"{entry.name}/ (missing SKILL.md)")
+        else:
+            bad.append(entry.name)
+    if bad:
+        raise SyncError(
+            f"Shared source '{name}' has malformed entries under skills/: "
+            f"{', '.join(bad)}. Each skill must be either a flat `{{name}}.md` file or a "
+            "`{name}/SKILL.md` folder."
+        )
+
+
 def sync_source(source: SharedSource, workspace_root: Path) -> SyncResult:
     """Clone *source* at its pinned ``ref`` and vendor it into ``.dmx/vendor/{name}/``.
 
@@ -218,6 +258,7 @@ def sync_source(source: SharedSource, workspace_root: Path) -> SyncResult:
                 f"exist at ref '{source.ref}' ({source.url})."
             )
         _check_source_shape(checked_out_root, source.name)
+        _check_skills_shape(checked_out_root, source.name)
 
         dest = vendor_dir(workspace_root, source.name)
         if dest.exists():
@@ -228,7 +269,12 @@ def sync_source(source: SharedSource, workspace_root: Path) -> SyncResult:
                 continue
             target = dest / item.name
             if item.is_dir():
-                shutil.copytree(item, target)
+                # ignore_patterns(".git") also applies recursively to every
+                # subdirectory copytree descends into, not just this one —
+                # so a nested .git (e.g. a submodule checked out somewhere
+                # under skills/) never gets vendored either, not just the
+                # top-level one filtered by the `continue` above.
+                shutil.copytree(item, target, ignore=shutil.ignore_patterns(".git"))
             else:
                 shutil.copy2(item, target)
 
@@ -251,6 +297,48 @@ def _filenames(directory: Path, glob: str) -> set[str]:
     if not directory.is_dir():
         return set()
     return {p.name for p in directory.glob(glob)}
+
+
+def _skill_names(directory: Path) -> set[str]:
+    """Logical skill names present in *directory*.
+
+    Unlike ``_filenames`` (a plain glob), this normalizes the two things
+    that make "same name" ambiguous for skills specifically, so it matches
+    exactly what ``_resolve_skill`` would treat as the same skill:
+
+    - Both supported shapes (GH-27 phase 4) — flat ``{name}.md`` and
+      folder-shaped ``{name}/SKILL.md`` — collapse to the same logical
+      name, so a flat skill in one source colliding with a folder-shaped
+      version of the same name in another is caught, not silently missed
+      because one's a file glob match and the other's a directory.
+    - The ``dmx-`` prefix alias — ``dmx-{name}.md`` and ``{name}.md`` (or
+      their folder-shaped equivalents) also collapse to the same logical
+      name, for the same reason.
+
+    Loops and validators have neither ambiguity (no external ecosystem
+    folder-shape standard, no prefix aliasing), so they stay on the plain
+    ``_filenames`` glob.
+    """
+    if not directory.is_dir():
+        return set()
+    names: set[str] = set()
+    for entry in directory.iterdir():
+        if entry.is_file() and entry.suffix == ".md":
+            stem = entry.stem
+        elif entry.is_dir() and (entry / "SKILL.md").is_file():
+            stem = entry.name
+        else:
+            continue
+        names.add(stem.removeprefix("dmx-"))
+    return names
+
+
+def _names_in(directory: Path, category: str) -> set[str]:
+    """Dispatch to :func:`_skill_names` for ``skills``, the plain glob-based
+    :func:`_filenames` for every other category."""
+    if category == "skills":
+        return _skill_names(directory)
+    return _filenames(directory, _CATEGORY_GLOB[category])
 
 
 def _format_others(names: list[str]) -> str:
@@ -285,14 +373,13 @@ def detect_collisions(sources: list[SharedSource], workspace_root: Path) -> list
     """
     warnings: list[str] = []
     for category, app_rel_dir in _APP_CATEGORY_DIRS.items():
-        glob = _CATEGORY_GLOB[category]
         owners_by_file: dict[str, list[str]] = {}
 
-        for filename in _filenames(workspace_root / app_rel_dir, glob):
+        for filename in _names_in(workspace_root / app_rel_dir, category):
             owners_by_file.setdefault(filename, []).append(_APP_REPO_OWNER)
         for source in sources:
             source_dir = source_root(workspace_root, source) / category
-            for filename in _filenames(source_dir, glob):
+            for filename in _names_in(source_dir, category):
                 owners_by_file.setdefault(filename, []).append(source.name)
 
         for filename, owners in sorted(owners_by_file.items()):

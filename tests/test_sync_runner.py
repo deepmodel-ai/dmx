@@ -187,6 +187,96 @@ class TestSyncSource:
         result = sync_source(_source("acme", source_repo), workspace)
         assert result.name == "acme"
 
+    def test_accepts_folder_shaped_skill(self, tmp_path: Path) -> None:
+        source_repo = tmp_path / "source"
+        _init_source_repo(
+            source_repo, {"skills/custom-skill/SKILL.md": "---\ntitle: X\n---\nbody\n"}
+        )
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+
+        result = sync_source(_source("acme", source_repo), workspace)
+
+        assert result.name == "acme"
+        assert (vendor_dir(workspace, "acme") / "skills" / "custom-skill" / "SKILL.md").exists()
+
+    def test_rejects_folder_shaped_skill_missing_skill_md(self, tmp_path: Path) -> None:
+        source_repo = tmp_path / "source"
+        _init_source_repo(source_repo, {"skills/custom-skill/scripts/run.py": "print(1)\n"})
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+
+        with pytest.raises(SyncError, match="malformed entries under skills/"):
+            sync_source(_source("acme", source_repo), workspace)
+
+    def test_rejects_stray_non_markdown_file_under_skills(self, tmp_path: Path) -> None:
+        source_repo = tmp_path / "source"
+        _init_source_repo(source_repo, {"skills/notes.txt": "not a skill\n"})
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+
+        with pytest.raises(SyncError, match="malformed entries under skills/"):
+            sync_source(_source("acme", source_repo), workspace)
+
+    def test_hidden_files_under_skills_are_not_flagged_as_malformed(self, tmp_path: Path) -> None:
+        # .gitkeep/.gitignore/.DS_Store etc. are common, harmless repo-hygiene
+        # artifacts at the top of any real directory — must not fail an
+        # otherwise well-formed source just for containing one.
+        source_repo = tmp_path / "source"
+        _init_source_repo(
+            source_repo,
+            {
+                "skills/custom-skill.md": "# hi\n",
+                "skills/.gitkeep": "",
+                "skills/.gitignore": "*.log\n",
+            },
+        )
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+
+        result = sync_source(_source("acme", source_repo), workspace)
+
+        assert result.name == "acme"
+        assert (vendor_dir(workspace, "acme") / "skills" / "custom-skill.md").exists()
+
+    def test_uninitialized_submodule_directory_is_vendored_empty(self, tmp_path: Path) -> None:
+        # Git itself refuses to track any path literally named ".git" at any
+        # depth (confirmed: `git add -A` on a manually-created nested `.git/`
+        # is a silent no-op), so a real nested-.git-in-a-tracked-tree
+        # scenario can't actually occur through normal git usage — the only
+        # realistic case is an *uninitialized* submodule, which git clone
+        # (without --recurse-submodules, which sync_source deliberately
+        # doesn't pass) leaves as an empty directory with no .git at all.
+        # This just confirms that case vendors cleanly.
+        source_repo = tmp_path / "source"
+        _init_source_repo(source_repo, {"skills/custom-skill/SKILL.md": "body\n"})
+        submodule_repo = tmp_path / "submodule-target"
+        _init_source_repo(submodule_repo, {"README.md": "sub\n"})
+        _run(
+            [
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                str(submodule_repo),
+                "sub",
+            ],
+            source_repo,
+        )
+        _run(["git", "commit", "-q", "-m", "add submodule"], source_repo)
+        _run(["git", "tag", "-f", "v1"], source_repo)
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+
+        sync_source(_source("acme", source_repo), workspace)
+
+        vendored = vendor_dir(workspace, "acme")
+        assert (vendored / "skills" / "custom-skill" / "SKILL.md").exists()
+        # The submodule directory exists (git always creates it) but is
+        # empty — no nested .git, since --recurse-submodules was never used.
+        assert not (vendored / "sub" / ".git").exists()
+
 
 # ---------------------------------------------------------------------------
 # require_non_base_branch_error
@@ -246,6 +336,14 @@ def _vendor(root: Path, name: str, category: str, filename: str, content: str = 
     path = root / ".dmx" / "vendor" / name / category / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _vendor_skill_dir(root: Path, source_name: str, skill_name: str) -> None:
+    """Simulate an already-vendored folder-shaped skill,
+    .dmx/vendor/{source_name}/skills/{skill_name}/SKILL.md."""
+    path = root / ".dmx" / "vendor" / source_name / "skills" / skill_name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("body\n", encoding="utf-8")
 
 
 def _app_file(root: Path, category: str, filename: str, content: str = "x") -> None:
@@ -345,3 +443,56 @@ class TestDetectCollisions:
         assert len(warnings) == 1
         assert "`custom.yaml`" in warnings[0]
         assert "exists both locally" in warnings[0]
+
+    def test_two_folder_shaped_skills_with_the_same_name_collide(self, tmp_path: Path) -> None:
+        # GH-27 phase 4's folder shape ({name}/SKILL.md) is a directory, not
+        # a "*.md" glob match — this must still be caught, not silently
+        # missed the way a naive filename glob would miss it.
+        _vendor_skill_dir(tmp_path, "first", "custom-skill")
+        _vendor_skill_dir(tmp_path, "second", "custom-skill")
+
+        warnings = detect_collisions([_no_op_source("first"), _no_op_source("second")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "`custom-skill`" in warnings[0]
+        assert "`first`" in warnings[0]
+        assert "`second`" in warnings[0]
+
+    def test_flat_and_folder_shaped_skill_with_the_same_name_collide(self, tmp_path: Path) -> None:
+        # One source has the flat form, another has the folder-shaped form
+        # of the *same logical skill name* — these still collide at actual
+        # _resolve_skill time, so detect_collisions must treat them as the
+        # same name too, not as two unrelated, non-colliding entries.
+        _vendor(tmp_path, "first", "skills", "custom-skill.md")
+        _vendor_skill_dir(tmp_path, "second", "custom-skill")
+
+        warnings = detect_collisions([_no_op_source("first"), _no_op_source("second")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "`custom-skill`" in warnings[0]
+
+    def test_dmx_prefixed_and_unprefixed_skill_collide(self, tmp_path: Path) -> None:
+        # _resolve_skill treats "commit" and "dmx-commit" as the same
+        # logical skill (candidates = [name, f"dmx-{name}"]) — collision
+        # detection must normalize the same way.
+        _vendor(tmp_path, "first", "skills", "custom-skill.md")
+        _vendor(tmp_path, "second", "skills", "dmx-custom-skill.md")
+
+        warnings = detect_collisions([_no_op_source("first"), _no_op_source("second")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "`custom-skill`" in warnings[0]
+
+    def test_folder_shaped_skill_missing_skill_md_is_not_counted(self, tmp_path: Path) -> None:
+        # A directory that merely happens to share a skill's name but has no
+        # SKILL.md inside isn't a skill at all (sync_source's own shape
+        # check would already reject vendoring it) — detect_collisions must
+        # not mistake it for one either.
+        stray_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
+        stray_dir.mkdir(parents=True)
+        (stray_dir / "notes.txt").write_text("not a skill\n", encoding="utf-8")
+        _vendor(tmp_path, "other", "skills", "custom-skill.md")
+
+        warnings = detect_collisions([_no_op_source("acme"), _no_op_source("other")], tmp_path)
+
+        assert warnings == []

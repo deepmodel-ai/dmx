@@ -63,6 +63,21 @@ class TestParseSourceAddress:
         with pytest.raises(SharedSourceError, match="missing `\\?ref="):
             parse_source_address("git::https://github.com/acme/skills.git//shared")
 
+    def test_subdir_starting_with_slash_raises(self) -> None:
+        # Path("x") / "/etc" resolves to the absolute "/etc", silently
+        # discarding "x" entirely — must be rejected before it ever reaches
+        # source_root()/checked_out_root's `Path.__truediv__`.
+        with pytest.raises(SharedSourceError, match="cannot start with `/`"):
+            parse_source_address("git::https://x///etc?ref=v1")
+
+    def test_subdir_with_dotdot_segment_raises(self) -> None:
+        with pytest.raises(SharedSourceError, match="`\\.\\.` segment"):
+            parse_source_address("git::https://x//../../etc?ref=v1")
+
+    def test_subdir_with_dotdot_in_middle_raises(self) -> None:
+        with pytest.raises(SharedSourceError):
+            parse_source_address("git::https://x//shared/../../etc?ref=v1")
+
 
 # ---------------------------------------------------------------------------
 # read_shared_sources
@@ -147,6 +162,32 @@ shared_sources:
         _write(tmp_path, "shared_sources: [unterminated\n")
         with pytest.raises(SharedSourceError, match="Could not parse"):
             read_shared_sources(tmp_path)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../../etc",  # path traversal — the primary risk this guards against
+            "acme/skills",  # embedded path separator
+            "-leading-hyphen",  # would look like a CLI flag if ever shelled out
+            "<app repo>",  # the detect_collisions sentinel — must never be a real name
+            "has space",
+            "",
+        ],
+    )
+    def test_invalid_name_raises(self, tmp_path: Path, name: str) -> None:
+        _write(
+            tmp_path, f'shared_sources:\n  - name: "{name}"\n    source: "git::https://x?ref=v1"\n'
+        )
+        with pytest.raises(SharedSourceError, match="invalid shared source name"):
+            read_shared_sources(tmp_path)
+
+    @pytest.mark.parametrize("name", ["acme", "org-wide", "team_frontend", "acme2"])
+    def test_valid_names_pass(self, tmp_path: Path, name: str) -> None:
+        _write(
+            tmp_path, f'shared_sources:\n  - name: "{name}"\n    source: "git::https://x?ref=v1"\n'
+        )
+        sources = read_shared_sources(tmp_path)
+        assert sources[0].name == name
 
 
 # ---------------------------------------------------------------------------
