@@ -30,6 +30,17 @@ def _write_validator(path: Path, body: str) -> None:
     path.write_text(textwrap.dedent(body), encoding="utf-8")
 
 
+def _write_shared_sources_config(root: Path, sources: list[tuple[str, str]]) -> None:
+    """Write ``.dmx/shared-sources.yaml`` declaring *sources* as ``(name, source)`` pairs."""
+    config_path = root / ".dmx" / "shared-sources.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["shared_sources:"]
+    for name, source in sources:
+        lines.append(f"  - name: {name}")
+        lines.append(f'    source: "{source}"')
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 PASSING_VALIDATOR = """\
     import json, sys
     contract = json.loads(sys.stdin.read())
@@ -116,6 +127,54 @@ class TestResolveValidatorPath:
     def test_unknown_validator_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValidatorRunError, match="not found"):
             resolve_validator_path("nonexistent_validator_xyz", tmp_path)
+
+    def test_shared_source_used_when_no_app_override(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        shared_validator = tmp_path / ".dmx" / "vendor" / "acme" / "validators" / "v.py"
+        _write_validator(shared_validator, PASSING_VALIDATOR)
+        resolved = resolve_validator_path("v", tmp_path)
+        assert resolved == shared_validator
+
+    def test_app_repo_beats_shared_source(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        _write_validator(
+            tmp_path / ".dmx" / "vendor" / "acme" / "validators" / "v.py", FAILING_VALIDATOR
+        )
+        app_validator = tmp_path / "validators" / "v.py"
+        _write_validator(app_validator, PASSING_VALIDATOR)
+        assert resolve_validator_path("v", tmp_path) == app_validator
+
+    def test_shared_source_beats_bundled(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        shared_validator = (
+            tmp_path / ".dmx" / "vendor" / "acme" / "validators" / "check_spec_complete.py"
+        )
+        _write_validator(shared_validator, PASSING_VALIDATOR)
+        assert resolve_validator_path("check_spec_complete", tmp_path) == shared_validator
+
+    def test_declared_order_is_precedence_order(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(
+            tmp_path,
+            [("first", "git::https://x//?ref=v1"), ("second", "git::https://y//?ref=v1")],
+        )
+        first = tmp_path / ".dmx" / "vendor" / "first" / "validators" / "v.py"
+        second = tmp_path / ".dmx" / "vendor" / "second" / "validators" / "v.py"
+        _write_validator(first, PASSING_VALIDATOR)
+        _write_validator(second, FAILING_VALIDATOR)
+        assert resolve_validator_path("v", tmp_path) == first
+
+    def test_missing_shared_sources_file_is_a_noop(self, tmp_path: Path) -> None:
+        # No .dmx/shared-sources.yaml at all — behaves exactly as before GH-27.
+        resolved = resolve_validator_path("check_spec_complete", tmp_path)
+        assert resolved.name == "check_spec_complete.py"
+        assert "dmx" in str(resolved)
+
+    def test_malformed_shared_sources_file_raises_validator_run_error(self, tmp_path: Path) -> None:
+        config_path = tmp_path / ".dmx" / "shared-sources.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("shared_sources: not-a-list\n", encoding="utf-8")
+        with pytest.raises(ValidatorRunError, match="shared-sources.yaml"):
+            resolve_validator_path("check_spec_complete", tmp_path)
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,7 @@ from dmx.loop_state import (
     write_state,
 )
 from dmx.repeat_until import evaluate_repeat_until
+from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 from dmx.validator_runner import evaluate_validator_results, run_validators
 from dmx.workspace import resolve_workspace_root
 
@@ -93,8 +94,11 @@ def _resolve_skill(name: str, workspace_root: Path) -> str | None:
     Search order:
     1. ``{workspace_root}/.dmx/skills/{name}.md`` (project-specific, exact)
     2. ``{workspace_root}/.dmx/skills/dmx-{name}.md`` (project-specific, prefixed)
-    3. Recursive glob in the bundled skills directory for ``{name}.md``
-    4. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
+    3. ``.dmx/vendor/{source}/skills/{name}.md`` (or ``dmx-{name}.md``) for each
+       declared ``shared_sources`` entry, in declared order (GH-27 phase 1 —
+       flat dmx-format only; the ``{name}/SKILL.md`` folder shape is phase 4)
+    4. Recursive glob in the bundled skills directory for ``{name}.md``
+    5. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
 
     Returns ``None`` if the skill is not found in any location.
     """
@@ -105,6 +109,13 @@ def _resolve_skill(name: str, workspace_root: Path) -> str | None:
         path = project_skills / f"{candidate}.md"
         if path.exists():
             return path.read_text()
+
+    for source in read_shared_sources(workspace_root):
+        source_skills = source_root(workspace_root, source) / "skills"
+        for candidate in candidates:
+            path = source_skills / f"{candidate}.md"
+            if path.exists():
+                return path.read_text()
 
     bundled = _bundled_skills_dir()
     for candidate in candidates:
@@ -283,7 +294,8 @@ def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
 
 
 def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
-    """Load a loop config: app repo first, bundled fallback.
+    """Load a loop config: app repo, then declared ``shared_sources`` in
+    order, then bundled fallback.
 
     Args:
         name: Loop name (must match filename stem).
@@ -293,11 +305,17 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
         Validated :class:`LoopConfig`.
 
     Raises:
-        FileNotFoundError: If the loop is not found in either location.
+        FileNotFoundError: If the loop is not found in any location.
     """
     app_path = workspace_root / ".dmx" / "loops" / f"{name}.yaml"
     if app_path.exists():
         return load_loop(app_path)
+
+    shared_sources = read_shared_sources(workspace_root)
+    for source in shared_sources:
+        source_path = source_root(workspace_root, source) / "loops" / f"{name}.yaml"
+        if source_path.exists():
+            return load_loop(source_path)
 
     bundled_path = _bundled_loops_dir() / f"{name}.yaml"
     if bundled_path.exists():
@@ -305,8 +323,11 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
 
     # List available loops for a helpful error.
     app_loops = load_loops_dir(workspace_root / ".dmx" / "loops")
+    shared_loops: set[str] = set()
+    for source in shared_sources:
+        shared_loops |= set(load_loops_dir(source_root(workspace_root, source) / "loops"))
     bundled_loops = load_loops_dir(_bundled_loops_dir())
-    available = sorted(set(app_loops) | set(bundled_loops))
+    available = sorted(set(app_loops) | shared_loops | set(bundled_loops))
     raise FileNotFoundError(f"Loop '{name}' not found. Available loops: {available or ['(none)']}")
 
 
@@ -784,7 +805,10 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
-        raw = _resolve_skill(name, root)
+        try:
+            raw = _resolve_skill(name, root)
+        except SharedSourceError as exc:
+            return f"Error reading .dmx/shared-sources.yaml: {exc}"
         if raw is None:
             return f"Skill '{name}' not found. Check the skill name or add it to .dmx/skills/."
         return _strip_frontmatter(raw)
