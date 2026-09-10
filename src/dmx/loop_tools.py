@@ -41,8 +41,10 @@ import importlib.resources as pkg
 import logging
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+import frontmatter
 from fastmcp import (
     Context,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
@@ -88,17 +90,46 @@ def _bundled_skills_dir() -> Path:
     return Path(str(pkg.files("dmx") / "skills"))
 
 
-def _resolve_skill(name: str, workspace_root: Path) -> str | None:
-    """Find and return the raw content of a skill markdown file.
+@dataclass(frozen=True)
+class ResolvedSkill:
+    """A skill found by :func:`_resolve_skill`.
+
+    Attributes:
+        raw: Full file content, including frontmatter — the caller decides
+            whether/how to strip it.
+        root_path: Workspace-relative path to the skill's own directory,
+            set only for the folder-shaped ``{name}/SKILL.md`` form found in
+            a shared source (GH-27 phase 4). ``None`` for every other case
+            (dmx's own flat ``{name}.md``, wherever it's found) — a flat
+            skill has no directory of its own for ``scripts/``/
+            ``references/``/``assets/`` to resolve against, so there's
+            nothing for the agent to need this for.
+    """
+
+    raw: str
+    root_path: str | None = None
+
+
+def _resolve_skill(name: str, workspace_root: Path) -> ResolvedSkill | None:
+    """Find a skill by name.
 
     Search order:
     1. ``{workspace_root}/.dmx/skills/{name}.md`` (project-specific, exact)
     2. ``{workspace_root}/.dmx/skills/dmx-{name}.md`` (project-specific, prefixed)
-    3. ``.dmx/vendor/{source}/skills/{name}.md`` (or ``dmx-{name}.md``) for each
-       declared ``shared_sources`` entry, in declared order (GH-27 phase 1 —
-       flat dmx-format only; the ``{name}/SKILL.md`` folder shape is phase 4)
+    3. For each declared ``shared_sources`` entry, in declared order:
+       a. ``.dmx/vendor/{source}/skills/{name}.md`` (or ``dmx-{name}.md``) —
+          dmx's own flat convention, checked first (cheap, and matches how
+          dmx already writes skills everywhere else).
+       b. ``.dmx/vendor/{source}/skills/{name}/SKILL.md`` (or
+          ``dmx-{name}/SKILL.md``) — the agentskills.io / Claude Code
+          ecosystem convention, as a fallback, so an org can point a shared
+          source directly at an already-standards-shaped skills repo with
+          zero dmx-specific restructuring. See GH-27.
     4. Recursive glob in the bundled skills directory for ``{name}.md``
     5. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
+
+    Only step 3b ever sets :attr:`ResolvedSkill.root_path` — the flat form
+    (steps 1, 2, 3a, 4, 5) never needs it.
 
     Returns ``None`` if the skill is not found in any location.
     """
@@ -108,22 +139,53 @@ def _resolve_skill(name: str, workspace_root: Path) -> str | None:
     for candidate in candidates:
         path = project_skills / f"{candidate}.md"
         if path.exists():
-            return path.read_text()
+            return ResolvedSkill(raw=path.read_text())
 
     for source in read_shared_sources(workspace_root):
         source_skills = source_root(workspace_root, source) / "skills"
         for candidate in candidates:
             path = source_skills / f"{candidate}.md"
             if path.exists():
-                return path.read_text()
+                return ResolvedSkill(raw=path.read_text())
+        for candidate in candidates:
+            skill_dir = source_skills / candidate
+            path = skill_dir / "SKILL.md"
+            if path.exists():
+                return ResolvedSkill(
+                    raw=path.read_text(), root_path=str(skill_dir.relative_to(workspace_root))
+                )
 
     bundled = _bundled_skills_dir()
     for candidate in candidates:
         matches = list(bundled.rglob(f"{candidate}.md"))
         if matches:
-            return matches[0].read_text()
+            return ResolvedSkill(raw=matches[0].read_text())
 
     return None
+
+
+def _dependencies_note(raw: str) -> str | None:
+    """Return a one-line note if *raw*'s frontmatter declares ``dependencies``.
+
+    Folder-shaped skills (GH-27 phase 4) may declare packages their
+    ``scripts/`` need in frontmatter. dmx has no auto-install mechanism of
+    its own, so this surfaces the declaration as an explicit, agent-visible
+    step rather than silently dropping it the way :func:`_strip_frontmatter`
+    otherwise would — see "Resolving `{name}/SKILL.md`'s bundled resources"
+    in GH-27.
+    """
+    try:
+        post = frontmatter.loads(raw)
+    except Exception:  # noqa: BLE001 — malformed frontmatter isn't this helper's problem
+        return None
+    deps = post.metadata.get("dependencies")
+    if not deps:
+        return None
+    deps_str = ", ".join(str(d) for d in deps) if isinstance(deps, list) else str(deps)
+    return (
+        f"Declared dependencies (not auto-installed — install before running any "
+        f"scripts/): {deps_str}"
+    )
 
 
 def _strip_frontmatter(content: str) -> str:
@@ -806,12 +868,30 @@ def register_loop_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
         try:
-            raw = _resolve_skill(name, root)
+            resolved = _resolve_skill(name, root)
         except SharedSourceError as exc:
             return f"Error reading .dmx/shared-sources.yaml: {exc}"
-        if raw is None:
+        if resolved is None:
             return f"Skill '{name}' not found. Check the skill name or add it to .dmx/skills/."
-        return _strip_frontmatter(raw)
+
+        body = _strip_frontmatter(resolved.raw)
+        if resolved.root_path is None:
+            return body
+
+        # Folder-shaped skill (GH-27 phase 4): the body may reference
+        # scripts/, references/, or assets/ relative to its own directory.
+        # dmx never copies vendored content anywhere else (see GH-27's
+        # "pass the root path, don't copy anything"), so that directory is
+        # exactly where /dmx/sync already vendored it — tell the agent so it
+        # can resolve those paths itself with its own file/shell tools.
+        prefix = (
+            f"Skill root: `{resolved.root_path}/` — resolve any `scripts/`, `references/`, "
+            "or `assets/` paths mentioned below relative to this directory.\n"
+        )
+        deps_note = _dependencies_note(resolved.raw)
+        if deps_note:
+            prefix += deps_note + "\n"
+        return prefix + "\n" + body
 
     @app.tool
     async def loop_advance(

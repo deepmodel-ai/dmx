@@ -19,6 +19,7 @@ from dmx.loop_state import (
 )
 from dmx.loop_tools import (
     _commit_dmx_state,
+    _dependencies_note,
     _find_active,
     _finish_loop,
     _maybe_promote_pending_job,
@@ -872,16 +873,19 @@ class TestResolveLoopSharedSources:
 
 class TestResolveSkillSharedSources:
     def test_missing_shared_sources_file_falls_through_to_bundled(self, tmp_path: Path) -> None:
-        content = _resolve_skill("commit", tmp_path)
-        assert content is not None
+        resolved = _resolve_skill("commit", tmp_path)
+        assert resolved is not None
+        assert resolved.root_path is None
 
     def test_shared_source_used_when_no_app_override(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         skill_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill.md"
         skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text("# Custom skill from acme\n", encoding="utf-8")
-        content = _resolve_skill("custom-skill", tmp_path)
-        assert content == "# Custom skill from acme\n"
+        resolved = _resolve_skill("custom-skill", tmp_path)
+        assert resolved is not None
+        assert resolved.raw == "# Custom skill from acme\n"
+        assert resolved.root_path is None
 
     def test_app_repo_beats_shared_source(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
@@ -891,15 +895,99 @@ class TestResolveSkillSharedSources:
         app_path = tmp_path / ".dmx" / "skills" / "custom-skill.md"
         app_path.parent.mkdir(parents=True, exist_ok=True)
         app_path.write_text("# app\n", encoding="utf-8")
-        assert _resolve_skill("custom-skill", tmp_path) == "# app\n"
+        resolved = _resolve_skill("custom-skill", tmp_path)
+        assert resolved is not None
+        assert resolved.raw == "# app\n"
 
     def test_dmx_prefixed_candidate_also_checked_in_shared_source(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         skill_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "dmx-custom-skill.md"
         skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text("# dmx-prefixed shared\n", encoding="utf-8")
-        assert _resolve_skill("custom-skill", tmp_path) == "# dmx-prefixed shared\n"
+        resolved = _resolve_skill("custom-skill", tmp_path)
+        assert resolved is not None
+        assert resolved.raw == "# dmx-prefixed shared\n"
 
     def test_not_found_returns_none(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         assert _resolve_skill("totally-nonexistent-skill", tmp_path) is None
+
+    def test_folder_shaped_skill_found_as_fallback_after_flat(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# folder-shaped\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# folder-shaped\n"
+        assert resolved.root_path == ".dmx/vendor/acme/skills/custom-skill"
+
+    def test_flat_form_beats_folder_shaped_form_in_the_same_source(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        flat_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill.md"
+        flat_path.parent.mkdir(parents=True, exist_ok=True)
+        flat_path.write_text("# flat\n", encoding="utf-8")
+        skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# folder-shaped\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# flat\n"
+        assert resolved.root_path is None
+
+    def test_dmx_prefixed_folder_shaped_skill_is_found(self, tmp_path: Path) -> None:
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "dmx-custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# dmx-prefixed folder-shaped\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# dmx-prefixed folder-shaped\n"
+        assert resolved.root_path == ".dmx/vendor/acme/skills/dmx-custom-skill"
+
+    def test_folder_shaped_form_is_shared_source_only_not_app_repo_or_bundled(
+        self, tmp_path: Path
+    ) -> None:
+        # A folder named "custom-skill/" with a SKILL.md sitting under the
+        # app repo's own .dmx/skills/ isn't part of this phase's scope — the
+        # app-repo tier only ever checked flat {name}.md files, and phase 4
+        # doesn't change that. Confirm it's simply not found (not a crash,
+        # not misresolved).
+        skill_dir = tmp_path / ".dmx" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# should not resolve\n", encoding="utf-8")
+
+        assert _resolve_skill("custom-skill", tmp_path) is None
+
+
+class TestDependenciesNote:
+    def test_list_dependencies(self) -> None:
+        raw = '---\ndependencies: ["requests", "pyyaml"]\n---\n\nbody\n'
+        note = _dependencies_note(raw)
+        assert note is not None
+        assert "requests" in note
+        assert "pyyaml" in note
+        assert "not auto-installed" in note
+
+    def test_string_dependency(self) -> None:
+        raw = "---\ndependencies: requests\n---\n\nbody\n"
+        note = _dependencies_note(raw)
+        assert note is not None
+        assert "requests" in note
+
+    def test_no_dependencies_key_returns_none(self) -> None:
+        raw = "---\ntitle: Foo\n---\n\nbody\n"
+        assert _dependencies_note(raw) is None
+
+    def test_no_frontmatter_at_all_returns_none(self) -> None:
+        assert _dependencies_note("just a plain body, no frontmatter\n") is None
+
+    def test_empty_dependencies_list_returns_none(self) -> None:
+        raw = "---\ndependencies: []\n---\n\nbody\n"
+        assert _dependencies_note(raw) is None

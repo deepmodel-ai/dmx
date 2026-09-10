@@ -511,3 +511,68 @@ def _read_json(path: Path) -> dict:
     import json
 
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+class TestGetSkillDefinitionFolderShaped:
+    """GH-27 phase 4: the {name}/SKILL.md folder shape, end-to-end through
+    the actual get_skill_definition MCP tool (not the internal helper)."""
+
+    @pytest.mark.asyncio
+    async def test_folder_shaped_skill_includes_root_path_and_dependencies(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / ".dmx" / "shared-sources.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            'shared_sources:\n  - name: acme\n    source: "git::https://x//?ref=v1"\n',
+            encoding="utf-8",
+        )
+        skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            '---\ndependencies: ["requests", "pyyaml"]\n---\n\nRun `scripts/run.py`.\n',
+            encoding="utf-8",
+        )
+
+        app = create_app()
+        async with Client(app) as client:
+            msg = await _call(client, "get_skill_definition", tmp_path, name="custom-skill")
+
+        assert "`.dmx/vendor/acme/skills/custom-skill/`" in msg
+        assert "requests" in msg
+        assert "pyyaml" in msg
+        assert "Run `scripts/run.py`." in msg
+
+    @pytest.mark.asyncio
+    async def test_folder_shaped_skill_without_dependencies_omits_the_note(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / ".dmx" / "shared-sources.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            'shared_sources:\n  - name: acme\n    source: "git::https://x//?ref=v1"\n',
+            encoding="utf-8",
+        )
+        skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "no-deps-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("Just a body, no frontmatter deps.\n", encoding="utf-8")
+
+        app = create_app()
+        async with Client(app) as client:
+            msg = await _call(client, "get_skill_definition", tmp_path, name="no-deps-skill")
+
+        assert "`.dmx/vendor/acme/skills/no-deps-skill/`" in msg
+        assert "Declared dependencies" not in msg
+
+    @pytest.mark.asyncio
+    async def test_flat_skill_gets_no_root_path_prefix(self, tmp_path: Path) -> None:
+        skill_path = tmp_path / ".dmx" / "skills" / "flat-skill.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("---\ntitle: Flat\n---\n\nJust do the thing.\n", encoding="utf-8")
+
+        app = create_app()
+        async with Client(app) as client:
+            msg = await _call(client, "get_skill_definition", tmp_path, name="flat-skill")
+
+        assert msg.strip() == "Just do the thing."
+        assert "Skill root:" not in msg
