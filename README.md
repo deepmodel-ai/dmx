@@ -92,7 +92,7 @@ shared_sources:
 Then run `/dmx/sync` to clone each source at its pinned ref and vendor it into `.dmx/vendor/{name}/`, committed to the repo like any other `.dmx/` state. Re-run it whenever a source's ref changes. `/dmx/sync`:
 
 - Is blocked on `branch_base` — like every other write path in dmx, it produces a commit that belongs on a reviewed branch, not straight on `main`.
-- Fails clearly (not silently) if a source can't be cloned, its ref doesn't exist, or the resolved directory doesn't look like a dmx shared source (no `loops/`, `skills/`, or `validators/` at the resolved path).
+- Fails clearly (not silently) if a source can't be cloned, its ref doesn't exist, the resolved directory doesn't look like a dmx shared source (no `loops/`, `skills/`, or `validators/` at the resolved path), or an entry under its `skills/` doesn't match either supported shape.
 - Warns — without failing the sync — about same-name collisions across the app repo and every declared source, e.g. two sources both defining `spec.yaml`, so an unintended shadow never goes unnoticed.
 
 Skills support two shapes inside a shared source's `skills/` directory: dmx's own flat `{name}.md`, or the [agentskills.io](https://agentskills.io) / Claude Code / Cursor convention of a `{name}/SKILL.md` folder with optional `scripts/`, `references/`, and `assets/` — so a shared source can point straight at an org's existing standards-shaped skills repo with zero dmx-specific restructuring. When a folder-shaped skill resolves, dmx tells the agent its on-disk root path so it can resolve those `scripts/`/`references/`/`assets/` paths directly, and surfaces any `dependencies:` declared in its frontmatter as an explicit note (dmx has no auto-install step of its own).

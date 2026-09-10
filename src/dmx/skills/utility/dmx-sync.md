@@ -39,9 +39,11 @@ Call `sync_shared_sources` on `user-dmx`. It reads `.dmx/shared-sources.yaml`, c
 
 ## Step 4 — Handle the result
 
+**If the response is a single top-level error, not a per-source list** (e.g. "Error reading .dmx/shared-sources.yaml: ..."): the config itself is invalid — nothing was attempted for any source. Show the error to the user verbatim and stop; fix `.dmx/shared-sources.yaml` before retrying. Common causes: bad YAML, a duplicate or invalid `name` (must be a plain slug — letters, digits, `_`, `-`), or an invalid `subdir`/address (missing `?ref=`, a `subdir` starting with `/` or containing a `..` segment).
+
 **If every source succeeded** (no `❌` lines in the tool's response): proceed to Step 5.
 
-**If some sources failed:** show the user exactly which ones and why, using the tool's own per-source messages (auth failure, missing ref, or a wrong-shaped source are the three distinguishable causes it reports). Ask whether to proceed and commit the sources that *did* succeed, or stop entirely and fix the failing entry in `.dmx/shared-sources.yaml` first. Do not silently commit a partial sync without asking.
+**If some sources failed:** show the user exactly which ones and why, using the tool's own per-source messages (auth failure, missing ref, a wrong-shaped source, or malformed entries under a source's `skills/` directory are the four distinguishable causes it reports). Ask whether to proceed and commit the sources that *did* succeed, or stop entirely and fix the failing entry in `.dmx/shared-sources.yaml` first. Do not silently commit a partial sync without asking.
 
 **If every source failed:** stop. There is nothing to commit.
 
