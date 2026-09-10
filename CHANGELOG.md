@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-09
+
 ### Added
 
 - **(Phase 1 of GH-27, org-wide shared sources)** A new `.dmx/shared-sources.yaml` file lets a repo declare one or more org-wide shared sources (`git::<url>[//<subdir>]?ref=<tag|branch|sha>`, Terraform's module-source convention) that resolve as a new tier — after the app repo, before the bundled fallback — for loops (`_resolve_loop`), skills (`_resolve_skill`), and validators (`resolve_validator_path`). Declared-list order is the precedence order among multiple shared sources. This phase wires the resolver tier only; it reads directly from `.dmx/vendor/{name}/` if already populated, but nothing yet clones/fetches a source into that location — that's the `/dmx/sync` skill, landing in a follow-up phase. A repo with no `.dmx/shared-sources.yaml` behaves exactly as it did before this change — fully backward compatible, zero risk to existing resolution behavior.
