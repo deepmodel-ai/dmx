@@ -17,7 +17,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from dmx.shared_sources import SharedSource, vendor_dir, vendor_lock_path
-from dmx.sync_runner import SyncError, require_non_base_branch_error, sync_source
+from dmx.sync_runner import (
+    SyncError,
+    detect_collisions,
+    require_non_base_branch_error,
+    sync_source,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -228,3 +233,115 @@ class TestRequireNonBaseBranchError:
     def test_not_a_git_repo_does_not_block(self, tmp_path: Path) -> None:
         _write_config(tmp_path, branch_base="main")
         assert require_non_base_branch_error(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# detect_collisions
+# ---------------------------------------------------------------------------
+
+
+def _vendor(root: Path, name: str, category: str, filename: str, content: str = "x") -> None:
+    """Simulate an already-vendored file at .dmx/vendor/{name}/{category}/{filename},
+    without going through a real clone — detect_collisions only reads from disk."""
+    path = root / ".dmx" / "vendor" / name / category / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _app_file(root: Path, category: str, filename: str, content: str = "x") -> None:
+    app_dir = {"loops": ".dmx/loops", "skills": ".dmx/skills", "validators": "validators"}[category]
+    path = root / app_dir / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _no_op_source(name: str) -> SharedSource:
+    return SharedSource(
+        name=name, source=f"git::https://x//{name}?ref=v1", url="https://x", subdir=None, ref="v1"
+    )
+
+
+class TestDetectCollisions:
+    def test_no_sources_no_collisions(self, tmp_path: Path) -> None:
+        assert detect_collisions([], tmp_path) == []
+
+    def test_no_overlap_no_collisions(self, tmp_path: Path) -> None:
+        _vendor(tmp_path, "acme", "loops", "custom.yaml")
+        _app_file(tmp_path, "loops", "other.yaml")
+        assert detect_collisions([_no_op_source("acme")], tmp_path) == []
+
+    def test_two_shared_sources_collide(self, tmp_path: Path) -> None:
+        _vendor(tmp_path, "first", "loops", "spec.yaml")
+        _vendor(tmp_path, "second", "loops", "spec.yaml")
+
+        warnings = detect_collisions([_no_op_source("first"), _no_op_source("second")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "`spec.yaml`" in warnings[0]
+        assert "`first`" in warnings[0]
+        assert "`second`" in warnings[0]
+        assert "wins per shared_sources order" in warnings[0]
+
+    def test_declared_order_determines_the_stated_winner(self, tmp_path: Path) -> None:
+        _vendor(tmp_path, "second", "loops", "spec.yaml")
+        _vendor(tmp_path, "first", "loops", "spec.yaml")
+
+        # Declared order is [second, first] here — "second" must be reported
+        # as the winner, regardless of alphabetical or vendoring order.
+        warnings = detect_collisions([_no_op_source("second"), _no_op_source("first")], tmp_path)
+
+        assert "`second` wins" in warnings[0]
+
+    def test_app_repo_beats_shared_source(self, tmp_path: Path) -> None:
+        _app_file(tmp_path, "skills", "code-review.md")
+        _vendor(tmp_path, "org-wide", "skills", "code-review.md")
+
+        warnings = detect_collisions([_no_op_source("org-wide")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "exists both locally" in warnings[0]
+        assert "`org-wide`" in warnings[0]
+        assert "the local copy wins" in warnings[0]
+
+    def test_no_collision_when_only_app_repo_has_the_file(self, tmp_path: Path) -> None:
+        _app_file(tmp_path, "validators", "check_a.py")
+        assert detect_collisions([_no_op_source("acme")], tmp_path) == []
+
+    def test_collisions_checked_independently_per_category(self, tmp_path: Path) -> None:
+        # Same filename string, but in different categories — not a collision.
+        _vendor(tmp_path, "acme", "loops", "shared.yaml")
+        _app_file(tmp_path, "validators", "shared.yaml")
+        assert detect_collisions([_no_op_source("acme")], tmp_path) == []
+
+    def test_three_way_collision_lists_all_shadowed_names(self, tmp_path: Path) -> None:
+        _app_file(tmp_path, "loops", "spec.yaml")
+        _vendor(tmp_path, "first", "loops", "spec.yaml")
+        _vendor(tmp_path, "second", "loops", "spec.yaml")
+
+        warnings = detect_collisions([_no_op_source("first"), _no_op_source("second")], tmp_path)
+
+        assert len(warnings) == 1
+        assert "exists both locally" in warnings[0]
+        assert "`first`" in warnings[0]
+        assert "`second`" in warnings[0]
+
+    def test_bundled_skills_are_never_flagged(self, tmp_path: Path) -> None:
+        # e.g. "spec.yaml"/"commit.md" exist in the bundled fallback for
+        # every repo — that must never surface as a collision.
+        _vendor(tmp_path, "acme", "skills", "dmx-commit.md")
+        assert detect_collisions([_no_op_source("acme")], tmp_path) == []
+
+    def test_end_to_end_with_real_sync_source(self, tmp_path: Path) -> None:
+        source_repo = tmp_path / "source"
+        _init_source_repo(source_repo, {"loops/custom.yaml": "name: custom\n"})
+        workspace = tmp_path / "consumer"
+        workspace.mkdir()
+        _app_file(workspace, "loops", "custom.yaml")
+
+        source = _source("acme", source_repo)
+        sync_source(source, workspace)
+
+        warnings = detect_collisions([source], workspace)
+        assert len(warnings) == 1
+        assert "`custom.yaml`" in warnings[0]
+        assert "exists both locally" in warnings[0]

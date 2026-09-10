@@ -17,7 +17,12 @@ from fastmcp import (
 
 from dmx.exceptions import WorkspaceRootInvalid
 from dmx.shared_sources import SharedSourceError, read_shared_sources
-from dmx.sync_runner import SyncError, require_non_base_branch_error, sync_source
+from dmx.sync_runner import (
+    SyncError,
+    detect_collisions,
+    require_non_base_branch_error,
+    sync_source,
+)
 from dmx.workspace import resolve_workspace_root
 
 __all__ = ["register_sync_tools"]
@@ -38,6 +43,13 @@ def register_sync_tools(app: FastMCP) -> None:
         ``.lock.json`` recording the resolved commit SHA. Does **not** commit
         or push — the calling skill does that once this returns.
 
+        After vendoring, checks for same-name collisions across the app
+        repo's own ``loops``/``skills``/``validators`` and every declared
+        source (in declared-order precedence) and surfaces them as warnings
+        — the resolver would silently pick the winner per that same
+        precedence, so this is the one point where an unintended shadowing
+        can be caught and flagged before it's ever hit at loop-run time.
+
         Blocked from running on the repo's configured ``branch_base`` — every
         other write path in dmx requires a reviewed PR rather than a direct
         commit there, and this tool produces one.
@@ -47,7 +59,8 @@ def register_sync_tools(app: FastMCP) -> None:
 
         Returns:
             A per-source summary (success with resolved SHA, or a specific
-            failure reason), plus next-step instructions for the agent.
+            failure reason), any collision warnings, and next-step
+            instructions for the agent.
         """
         try:
             root = await resolve_workspace_root(ctx, workspace_root)
@@ -79,11 +92,18 @@ def register_sync_tools(app: FastMCP) -> None:
             lines.append(f"✅ `{source.name}` synced at `{result.resolved_sha[:12]}`.")
 
         body = "\n".join(lines)
+
+        collisions = detect_collisions(sources, root)
+        collisions_block = ""
+        if collisions:
+            collision_lines = "\n".join(f"⚠️ {c}" for c in collisions)
+            collisions_block = f"\n\n**Collisions detected:**\n\n{collision_lines}"
+
         if any_success:
             return (
-                f"**Shared sources synced:**\n\n{body}\n\n"
+                f"**Shared sources synced:**\n\n{body}{collisions_block}\n\n"
                 "Next: stage and commit the vendored files, then push and open a PR — "
                 "e.g.:\n```\ngit add .dmx/vendor/ .dmx/shared-sources.yaml\n"
                 'git commit -m "chore: sync shared sources"\ngit push\n```'
             )
-        return f"**Shared source sync failed — nothing was vendored:**\n\n{body}"
+        return f"**Shared source sync failed — nothing was vendored:**\n\n{body}{collisions_block}"
