@@ -20,6 +20,7 @@ ready to search ``.dmx/vendor/{name}/`` once something populates it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,12 @@ class SharedSourceError(Exception):
 
 
 _GIT_SCHEME_PREFIX = "git::"
+
+# `name` becomes a literal path segment in `.dmx/vendor/{name}/`, which
+# `sync_source` unconditionally `rmtree`s before repopulating — restricting
+# it to a plain slug (no `/`, no `..`, no leading `-`) rules out path
+# traversal outside `.dmx/vendor/` from a typo'd or malicious config entry.
+_NAME_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
 
 
 @dataclass(frozen=True)
@@ -106,7 +113,29 @@ def parse_source_address(source: str) -> tuple[str, str | None, str]:
             f"Invalid shared source address: {source!r}. Expected "
             "`git::<url>[//<subdir>]?ref=<tag|branch|sha>`."
         )
+    if subdir is not None:
+        _validate_subdir(subdir, source)
     return url, subdir, ref
+
+
+def _validate_subdir(subdir: str, source: str) -> None:
+    """Reject a ``subdir`` that could escape the cloned tree it's joined against.
+
+    Two concrete risks, both from plain ``Path`` joining (no normalization
+    happens automatically): a leading ``/`` makes ``Path`` treat it as
+    *absolute*, silently discarding the left-hand operand entirely (e.g.
+    ``clone_dir / "/etc"`` resolves to ``/etc``, not ``clone_dir/etc``); and
+    a ``..`` segment walks back out of it. Either way, code further down
+    (``_check_source_shape``, and every resolver via ``source_root``) would
+    then search — and, for validators, execute — a location the vendoring
+    step never intended to touch.
+    """
+    if subdir.startswith("/") or ".." in subdir.split("/"):
+        raise SharedSourceError(
+            f"Invalid `subdir` in shared source address: {source!r}. `subdir` must be a "
+            "relative path within the source repo — it cannot start with `/` or contain "
+            "a `..` segment."
+        )
 
 
 def read_shared_sources(workspace_root: Path) -> list[SharedSource]:
@@ -145,6 +174,12 @@ def read_shared_sources(workspace_root: Path) -> list[SharedSource]:
         if not isinstance(entry, dict) or "name" not in entry or "source" not in entry:
             raise SharedSourceError(f"{path}: entry #{i + 1} must have `name` and `source` fields.")
         name = str(entry["name"])
+        if not _NAME_RE.match(name):
+            raise SharedSourceError(
+                f"{path}: invalid shared source name `{name}` — names must be a plain slug "
+                "(letters, digits, `_`, `-`, not starting with `-`) since it becomes a literal "
+                "path segment under `.dmx/vendor/`."
+            )
         if name in seen:
             raise SharedSourceError(
                 f"{path}: duplicate shared source name `{name}` — names must be unique."
