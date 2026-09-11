@@ -8,10 +8,19 @@ manual confirmation — override ``validators/check_pr_ready.py`` in the app
 repo for a real ticketing-API-backed check.
 
 ``memory_updated`` fails if ``.dmx/`` has *any* uncommitted changes (staged
-or not) — a skill that edits the memory bank without committing (see GH-15)
-would otherwise leave dangling working-tree state that's silently excluded
-from the PR. Only once the tree is clean does it fall back to checking
-whether the latest commit touched ``.dmx/*.md``.
+or not), **excluding** ``.dmx/jobs/`` — a skill that edits the memory bank
+(or any other tracked ``.dmx/`` file, e.g. ``shared-sources.yaml``) without
+committing (see GH-15) would otherwise leave dangling working-tree state
+that's silently excluded from the PR. Only once the tree is clean does it
+fall back to checking whether the latest commit touched ``.dmx/*.md``.
+
+``.dmx/jobs/`` is excluded, not just narrowed to ``*.md``, because it's the
+loop runtime's own bookkeeping (see GH-23), not a skill's uncommitted
+edit — it's routinely dirty mid-loop (e.g. the paused state ``loop_advance``
+writes right after ``create-pr``, before ``_commit_dmx_state`` runs).
+Grading it here produced a false failure on an otherwise-good PR (see
+GH-37). Everything else under ``.dmx/`` — memory bank files, config,
+``shared-sources.yaml``, any future top-level file — is still checked.
 
 Contract
 --------
@@ -90,10 +99,13 @@ def _ticket_transitioned(loop_context: dict[str, Any]) -> tuple[bool, str]:
 
 
 def _dirty_dmx_files(workspace_root: Path) -> list[str]:
-    """Return paths under .dmx/ with uncommitted changes (staged or not)."""
+    """Return paths under ``.dmx/`` with uncommitted changes, excluding
+    ``.dmx/jobs/`` (the loop runtime's own state — see the module docstring
+    and GH-37 for why it must not be graded here).
+    """
     try:
         proc = subprocess.run(
-            ["git", "status", "--short", "--", ".dmx/"],
+            ["git", "status", "--short", "--", ".dmx", ":!.dmx/jobs"],
             cwd=workspace_root,
             capture_output=True,
             text=True,
@@ -112,6 +124,8 @@ def _memory_updated(workspace_root: Path) -> tuple[bool, str]:
     if dirty:
         # A skill (e.g. update-memory) edited .dmx/ without committing —
         # this loop's memory sync isn't actually reflected in the PR.
+        # .dmx/jobs/ is excluded — that's the runtime's own bookkeeping,
+        # not a skill's uncommitted edit (see GH-37).
         return False, (
             f"Uncommitted changes under .dmx/ ({', '.join(dirty)}) — "
             "memory bank edits must be committed, not left dangling in the "
