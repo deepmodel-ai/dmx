@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -232,6 +233,48 @@ class TestFindActiveRun:
         job_dir = root / ".dmx" / "jobs" / "PAY-1"
         job_dir.mkdir(parents=True)
         (job_dir / "dev-broken.json").write_text("not json", encoding="utf-8")
+        assert find_active_run(root, "PAY-1") is None
+
+    def test_ignores_skill_artifact_alongside_paused_run(self, tmp_path: Path) -> None:
+        """GH-36: a skill artifact like validate's validation-report.json
+        lives in the same job directory but has no loop_name/task_id/status
+        — it must not be mistaken for a second non-terminal run."""
+        root = self._workspace(tmp_path)
+        write_initial_state(root, "validate", "PAY-1", "task-1", ["s"])
+        write_state(root, "PAY-1", "validate", "task-1", {"status": LoopStatus.paused.value})
+        job_dir = root / ".dmx" / "jobs" / "PAY-1"
+        (job_dir / "validation-report.json").write_text(
+            json.dumps(
+                {
+                    "commit": "deadbeef",
+                    "scope_items": [],
+                    "scope_creep": [],
+                    "regressions": [],
+                    "edge_cases": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert find_active_run(root, "PAY-1") == ("validate", "task-1")
+
+    def test_ignores_skill_artifact_with_no_real_run(self, tmp_path: Path) -> None:
+        """The artifact alone (no loop-state file at all) must not surface
+        as an active run."""
+        root = self._workspace(tmp_path)
+        job_dir = root / ".dmx" / "jobs" / "PAY-1"
+        job_dir.mkdir(parents=True)
+        (job_dir / "validation-report.json").write_text(
+            json.dumps({"commit": "deadbeef", "scope_items": []}), encoding="utf-8"
+        )
+        assert find_active_run(root, "PAY-1") is None
+
+    def test_ignores_non_dict_json_file(self, tmp_path: Path) -> None:
+        """A JSON file that parses but isn't an object (e.g. a bare list)
+        must not crash the scan or be mistaken for a run."""
+        root = self._workspace(tmp_path)
+        job_dir = root / ".dmx" / "jobs" / "PAY-1"
+        job_dir.mkdir(parents=True)
+        (job_dir / "weird.json").write_text("[1, 2, 3]", encoding="utf-8")
         assert find_active_run(root, "PAY-1") is None
 
 
