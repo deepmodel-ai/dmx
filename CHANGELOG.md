@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-11
+
 ### Fixed
 
 - **(GH-37)** `check_pr_ready`'s `memory_updated` check now excludes `.dmx/jobs/` specifically, rather than grading all of `.dmx/`. Previously, the bundled `release` loop's own uncommitted job-state write (`.dmx/jobs/{job_id}/release-*.json`, written by `loop_advance` at the human-gate pause — see GH-23) was graded as a forgotten memory-bank edit, failing `memory_updated` on an otherwise-good PR that had already committed its `.dmx/*.md` changes. Everything else under `.dmx/` — memory bank files, `.dmx/shared-sources.yaml`, any other top-level file — is still checked exactly as before.
