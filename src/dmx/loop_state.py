@@ -277,6 +277,14 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
             next starts — so this should never happen in normal operation.
             Rather than guess which one is "active", this fails loudly so
             it can be investigated.
+
+    Note:
+        The job directory can hold non-state JSON artifacts a skill was
+        told to write there (e.g. ``validate`` writing
+        ``validation-report.json`` — see ``dmx-validate.md`` Step 9 and
+        ``validators/spec_adherence.py``). Those files have no
+        ``loop_name``/``task_id``/``status`` and are skipped rather than
+        misread as a second, permanently-non-terminal run (see GH-36).
     """
     job_dir = _job_dir(workspace_root, job_id)
     if not job_dir.exists():
@@ -287,6 +295,10 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict) or not {"loop_name", "task_id", "status"} <= data.keys():
+            # Not a loop-state file (e.g. a skill artifact like
+            # validation-report.json) — not a run candidate at all.
             continue
         if data.get("status") in _TERMINAL_STATUSES:
             continue
