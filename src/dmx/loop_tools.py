@@ -90,6 +90,15 @@ def _bundled_skills_dir() -> Path:
     return Path(str(pkg.files("dmx") / "skills"))
 
 
+# `name` (and the shared-source config's own `name`/`subdir` fields — see
+# shared_sources._NAME_RE) becomes a literal path segment below `.dmx/skills/`,
+# a shared source's `skills/`, or the bundled skills dir. Restricting it to a
+# plain slug (no `/`, no `..`, no leading `-`) rules out escaping those
+# directories via a `../`-laden or absolute skill name passed to
+# `get_skill_definition` — see GH-40's review for the concrete reproduction.
+_SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
+
+
 @dataclass(frozen=True)
 class ResolvedSkill:
     """A skill found by :func:`_resolve_skill`.
@@ -184,8 +193,14 @@ def _resolve_skill(name: str, workspace_root: Path) -> ResolvedSkill | None:
     its own directory for ``scripts/``/``references/``/``assets/`` to
     resolve against, not just when it came from a shared source.
 
-    Returns ``None`` if the skill is not found in any location.
+    Returns ``None`` if the skill is not found in any location, or if
+    *name* isn't a plain slug (see ``_SKILL_NAME_RE``) — a `/`, `..`, or
+    absolute-path-shaped name is never a real skill, only ever a path
+    traversal attempt, so it's rejected before touching the filesystem.
     """
+    if not _SKILL_NAME_RE.match(name):
+        return None
+
     candidates = [name, f"dmx-{name}"]
 
     project_skills = workspace_root / ".dmx" / "skills"

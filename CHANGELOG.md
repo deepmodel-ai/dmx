@@ -12,6 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **(GH-40)** The folder-shaped `{name}/SKILL.md` fallback (GH-27 phase 4) now applies to every skill-resolution tier, not just shared sources: a project's own `.dmx/skills/` and dmx's bundled `skills/` directory both get the same flat-then-folder-shaped lookup. Previously, a folder-shaped skill dropped straight into `.dmx/skills/` (e.g. by copying an agentskills.io/Claude Code skill in without going through a shared source) silently failed to resolve — `get_skill_definition` returned "Skill not found" with no indication a folder existed. Extracted the flat-then-folder lookup into a shared helper (`_find_skill_in_dir`) used by all three tiers; existing precedence (app repo > shared sources > bundled) and `root_path` semantics are unchanged.
+- **(GH-40 review)** `get_skill_definition`'s `name` argument is now validated as a plain slug (`_SKILL_NAME_RE`, mirroring `shared_sources.py`'s existing `name`/`subdir` validation) before any filesystem lookup. Found during review of the fix above: a `../`-laden or absolute skill name previously resolved to arbitrary files outside the intended `.dmx/skills/`, shared-source, or bundled directories — reproducible on `main` prior to this release, not introduced by the fix above, but widened from one reachable tier to three by it. A malformed name now behaves exactly like "skill not found" rather than reading the file.
 
 ## [0.4.1] — 2026-09-11
 

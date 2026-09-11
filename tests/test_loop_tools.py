@@ -912,6 +912,50 @@ class TestResolveSkillSharedSources:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         assert _resolve_skill("totally-nonexistent-skill", tmp_path) is None
 
+    def test_path_traversal_name_rejected_even_when_target_exists(self, tmp_path: Path) -> None:
+        """GH-40 review: a `../`-laden name must never escape .dmx/skills/,
+        a shared source's skills/, or the bundled skills dir — reject it
+        outright rather than letting it resolve to a real file elsewhere."""
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        outside = tmp_path / "outside-workspace"
+        outside.mkdir()
+        (outside / "evil.md").write_text("# should never resolve\n", encoding="utf-8")
+
+        assert _resolve_skill("../outside-workspace/evil", workspace_root) is None
+
+    def test_folder_shaped_path_traversal_name_rejected(self, tmp_path: Path) -> None:
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        outside = tmp_path / "outside-workspace"
+        outside.mkdir()
+        (outside / "SKILL.md").write_text("# should never resolve\n", encoding="utf-8")
+
+        assert _resolve_skill("../outside-workspace", workspace_root) is None
+
+    def test_absolute_path_name_rejected(self, tmp_path: Path) -> None:
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        assert _resolve_skill("/etc/passwd", workspace_root) is None
+
+    def test_leading_hyphen_name_rejected(self, tmp_path: Path) -> None:
+        # Mirrors shared_sources._NAME_RE's own restriction — a leading
+        # "-" could be misread as a flag by anything that later shells out
+        # using this name; reject it here too, defensively.
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        assert _resolve_skill("-rf", workspace_root) is None
+
+    def test_ordinary_hyphenated_skill_name_still_resolves(self, tmp_path: Path) -> None:
+        # Confirm the guard doesn't collaterally break real skill names,
+        # which are routinely hyphenated (e.g. "create-ticket").
+        skill_path = tmp_path / ".dmx" / "skills" / "my-real-skill.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("# real skill\n", encoding="utf-8")
+        resolved = _resolve_skill("my-real-skill", tmp_path)
+        assert resolved is not None
+        assert resolved.raw == "# real skill\n"
+
     def test_folder_shaped_skill_found_as_fallback_after_flat(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
