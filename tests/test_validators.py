@@ -512,6 +512,84 @@ class TestCheckPrReady:
         memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
         assert memory_check["pass"] is False
 
+    def test_dirty_job_state_does_not_fail_memory_check(self, tmp_path: Path) -> None:
+        """GH-37: an uncommitted .dmx/jobs/ write (the loop runtime's own
+        bookkeeping — see GH-23) is not a memory-bank edit and must not
+        fail memory_updated, even though it's genuinely dirty under .dmx/.
+
+        Mirrors the real release-loop sequence: create-pr commits
+        .dmx/*.md, then loop_advance writes the paused job-state JSON
+        without committing it, then check_pr_ready runs against that tree.
+        """
+        self._run_git(tmp_path, "init", "-q")
+        self._run_git(tmp_path, "config", "user.email", "test@example.com")
+        self._run_git(tmp_path, "config", "user.name", "Test")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "activeContext.md").write_text("committed by create-pr\n", encoding="utf-8")
+        self._run_git(tmp_path, "add", ".")
+        self._run_git(tmp_path, "commit", "-q", "-m", "chore: sync memory bank")
+
+        # Simulate loop_advance's uncommitted pause-state write.
+        jobs_dir = dmx / "jobs" / "PAY-1"
+        jobs_dir.mkdir(parents=True)
+        (jobs_dir / "release-task1.json").write_text('{"status": "paused"}\n', encoding="utf-8")
+
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == []
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is True
+
+    def test_dirty_memory_bank_file_still_fails_alongside_dirty_job_state(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuinely forgotten .dmx/*.md edit must still fail even when
+        .dmx/jobs/ is also dirty at the same time."""
+        self._run_git(tmp_path, "init", "-q")
+        self._run_git(tmp_path, "config", "user.email", "test@example.com")
+        self._run_git(tmp_path, "config", "user.name", "Test")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "activeContext.md").write_text("initial\n", encoding="utf-8")
+        self._run_git(tmp_path, "add", ".")
+        self._run_git(tmp_path, "commit", "-q", "-m", "initial commit")
+
+        (dmx / "activeContext.md").write_text("edited without committing\n", encoding="utf-8")
+        jobs_dir = dmx / "jobs" / "PAY-1"
+        jobs_dir.mkdir(parents=True)
+        (jobs_dir / "release-task1.json").write_text('{"status": "paused"}\n', encoding="utf-8")
+
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == [".dmx/activeContext.md"]
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is False
+
+    def test_dirty_non_markdown_top_level_file_still_fails(self, tmp_path: Path) -> None:
+        """The fix for GH-37 excludes .dmx/jobs/ specifically — it must not
+        widen into "only .md files count". A dirty top-level non-.md file
+        (e.g. shared-sources.yaml) must still be caught, same as before."""
+        self._run_git(tmp_path, "init", "-q")
+        self._run_git(tmp_path, "config", "user.email", "test@example.com")
+        self._run_git(tmp_path, "config", "user.name", "Test")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "activeContext.md").write_text("initial\n", encoding="utf-8")
+        (dmx / "shared-sources.yaml").write_text("shared_sources: []\n", encoding="utf-8")
+        self._run_git(tmp_path, "add", ".")
+        self._run_git(tmp_path, "commit", "-q", "-m", "initial commit")
+
+        (dmx / "shared-sources.yaml").write_text(
+            "shared_sources: [{name: acme}]\n", encoding="utf-8"
+        )
+
+        assert check_pr_ready._dirty_dmx_files(tmp_path) == [".dmx/shared-sources.yaml"]
+
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+        memory_check = next(c for c in result["checks"] if c["name"] == "memory_updated")
+        assert memory_check["pass"] is False
+
 
 # ---------------------------------------------------------------------------
 # End-to-end subprocess contract (bundled scripts on disk)

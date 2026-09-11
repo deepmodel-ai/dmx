@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **(GH-37)** `check_pr_ready`'s `memory_updated` check now excludes `.dmx/jobs/` specifically, rather than grading all of `.dmx/`. Previously, the bundled `release` loop's own uncommitted job-state write (`.dmx/jobs/{job_id}/release-*.json`, written by `loop_advance` at the human-gate pause — see GH-23) was graded as a forgotten memory-bank edit, failing `memory_updated` on an otherwise-good PR that had already committed its `.dmx/*.md` changes. Everything else under `.dmx/` — memory bank files, `.dmx/shared-sources.yaml`, any other top-level file — is still checked exactly as before.
 - **(GH-36)** `find_active_run` no longer mistakes a skill's own JSON artifact (e.g. `validate` writing `.dmx/jobs/{job_id}/validation-report.json`) for a second, permanently-non-terminal loop run. A file now has to actually look like loop state — carry `loop_name`, `task_id`, and `status` — before it's considered a candidate at all; anything else in the job directory is skipped outright rather than defaulting to "non-terminal" when `status` is absent. Previously, a correct `validate` run left two JSON files in the same directory and `loop_advance`/`loop_continue` raised `AmbiguousActiveRun` on every attempt to proceed, with no fix short of hand-editing the artifact to fake a `status: complete` it doesn't have.
 
 ## [0.4.0] — 2026-09-09
