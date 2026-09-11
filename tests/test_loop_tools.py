@@ -912,6 +912,50 @@ class TestResolveSkillSharedSources:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         assert _resolve_skill("totally-nonexistent-skill", tmp_path) is None
 
+    def test_path_traversal_name_rejected_even_when_target_exists(self, tmp_path: Path) -> None:
+        """GH-40 review: a `../`-laden name must never escape .dmx/skills/,
+        a shared source's skills/, or the bundled skills dir — reject it
+        outright rather than letting it resolve to a real file elsewhere."""
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        outside = tmp_path / "outside-workspace"
+        outside.mkdir()
+        (outside / "evil.md").write_text("# should never resolve\n", encoding="utf-8")
+
+        assert _resolve_skill("../outside-workspace/evil", workspace_root) is None
+
+    def test_folder_shaped_path_traversal_name_rejected(self, tmp_path: Path) -> None:
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        outside = tmp_path / "outside-workspace"
+        outside.mkdir()
+        (outside / "SKILL.md").write_text("# should never resolve\n", encoding="utf-8")
+
+        assert _resolve_skill("../outside-workspace", workspace_root) is None
+
+    def test_absolute_path_name_rejected(self, tmp_path: Path) -> None:
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        assert _resolve_skill("/etc/passwd", workspace_root) is None
+
+    def test_leading_hyphen_name_rejected(self, tmp_path: Path) -> None:
+        # Mirrors shared_sources._NAME_RE's own restriction — a leading
+        # "-" could be misread as a flag by anything that later shells out
+        # using this name; reject it here too, defensively.
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".dmx" / "skills").mkdir(parents=True)
+        assert _resolve_skill("-rf", workspace_root) is None
+
+    def test_ordinary_hyphenated_skill_name_still_resolves(self, tmp_path: Path) -> None:
+        # Confirm the guard doesn't collaterally break real skill names,
+        # which are routinely hyphenated (e.g. "create-ticket").
+        skill_path = tmp_path / ".dmx" / "skills" / "my-real-skill.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("# real skill\n", encoding="utf-8")
+        resolved = _resolve_skill("my-real-skill", tmp_path)
+        assert resolved is not None
+        assert resolved.raw == "# real skill\n"
+
     def test_folder_shaped_skill_found_as_fallback_after_flat(self, tmp_path: Path) -> None:
         _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
         skill_dir = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill"
@@ -951,19 +995,99 @@ class TestResolveSkillSharedSources:
         assert resolved.raw == "# dmx-prefixed folder-shaped\n"
         assert resolved.root_path == ".dmx/vendor/acme/skills/dmx-custom-skill"
 
-    def test_folder_shaped_form_is_shared_source_only_not_app_repo_or_bundled(
+    def test_folder_shaped_skill_resolves_from_app_repos_own_dmx_skills(
         self, tmp_path: Path
     ) -> None:
-        # A folder named "custom-skill/" with a SKILL.md sitting under the
-        # app repo's own .dmx/skills/ isn't part of this phase's scope — the
-        # app-repo tier only ever checked flat {name}.md files, and phase 4
-        # doesn't change that. Confirm it's simply not found (not a crash,
-        # not misresolved).
+        """GH-40: the folder-shaped form isn't shared-source-only — a
+        project's own .dmx/skills/ gets the same fallback."""
         skill_dir = tmp_path / ".dmx" / "skills" / "custom-skill"
         skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "SKILL.md").write_text("# should not resolve\n", encoding="utf-8")
+        (skill_dir / "SKILL.md").write_text("# app repo folder-shaped\n", encoding="utf-8")
 
-        assert _resolve_skill("custom-skill", tmp_path) is None
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# app repo folder-shaped\n"
+        assert resolved.root_path == ".dmx/skills/custom-skill"
+
+    def test_dmx_prefixed_folder_shaped_skill_resolves_from_app_repo(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / ".dmx" / "skills" / "dmx-custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# app repo dmx-prefixed\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# app repo dmx-prefixed\n"
+        assert resolved.root_path == ".dmx/skills/dmx-custom-skill"
+
+    def test_app_repo_flat_form_still_beats_app_repo_folder_shaped_form(
+        self, tmp_path: Path
+    ) -> None:
+        flat_path = tmp_path / ".dmx" / "skills" / "custom-skill.md"
+        flat_path.parent.mkdir(parents=True, exist_ok=True)
+        flat_path.write_text("# app flat\n", encoding="utf-8")
+        skill_dir = tmp_path / ".dmx" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# app folder-shaped\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# app flat\n"
+        assert resolved.root_path is None
+
+    def test_app_repo_folder_shaped_beats_shared_source_and_bundled(self, tmp_path: Path) -> None:
+        """Tier precedence (app repo > shared sources > bundled) still
+        holds when the app repo's match is folder-shaped."""
+        _write_shared_sources_config(tmp_path, [("acme", "git::https://x//?ref=v1")])
+        shared_path = tmp_path / ".dmx" / "vendor" / "acme" / "skills" / "custom-skill.md"
+        shared_path.parent.mkdir(parents=True, exist_ok=True)
+        shared_path.write_text("# shared flat\n", encoding="utf-8")
+        skill_dir = tmp_path / ".dmx" / "skills" / "custom-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# app folder-shaped\n", encoding="utf-8")
+
+        resolved = _resolve_skill("custom-skill", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# app folder-shaped\n"
+        assert resolved.root_path == ".dmx/skills/custom-skill"
+
+    def test_folder_shaped_bundled_skill_resolves_with_root_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GH-40: the bundled tier also gets the folder-shaped fallback —
+        including nested category subdirectories, matching how bundled
+        skills are actually laid out (e.g. workflow/0-init/dmx-init.md)."""
+        bundled_dir = tmp_path / "bundled-skills"
+        skill_dir = bundled_dir / "utility" / "custom-bundled-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# bundled folder-shaped\n", encoding="utf-8")
+        monkeypatch.setattr("dmx.loop_tools._bundled_skills_dir", lambda: bundled_dir)
+
+        workspace_root = tmp_path / "workspace"
+        workspace_root.mkdir()
+        resolved = _resolve_skill("custom-bundled-skill", workspace_root)
+
+        assert resolved is not None
+        assert resolved.raw == "# bundled folder-shaped\n"
+        # skill_dir is outside workspace_root — falls back to an absolute path.
+        assert resolved.root_path == str(skill_dir)
+
+    def test_folder_shaped_bundled_skill_not_shadowed_by_app_repo_or_shared_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundled_dir = tmp_path / "bundled-skills"
+        skill_dir = bundled_dir / "custom-bundled-only"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# bundled only\n", encoding="utf-8")
+        monkeypatch.setattr("dmx.loop_tools._bundled_skills_dir", lambda: bundled_dir)
+
+        resolved = _resolve_skill("custom-bundled-only", tmp_path)
+
+        assert resolved is not None
+        assert resolved.raw == "# bundled only\n"
 
 
 class TestDependenciesNote:
