@@ -110,58 +110,97 @@ class ResolvedSkill:
     root_path: str | None = None
 
 
+def _find_skill_in_dir(
+    skills_dir: Path,
+    candidates: list[str],
+    workspace_root: Path,
+    *,
+    recursive: bool,
+) -> ResolvedSkill | None:
+    """Look up *candidates* under *skills_dir*: dmx's flat ``{name}.md``
+    first, then the folder-shaped ``{name}/SKILL.md`` convention (the
+    agentskills.io / Claude Code ecosystem shape, with optional
+    ``scripts/``/``references/``/``assets/`` — see GH-27 phase 4) as a
+    fallback. Checked in this order for every candidate before moving on —
+    flat always wins over folder-shaped for the same logical name.
+
+    Args:
+        recursive: ``True`` to search anywhere under *skills_dir* (needed
+            for the bundled skills directory, which nests skills under
+            category subdirectories, e.g. ``workflow/0-init/dmx-init.md``).
+            ``False`` to only look directly inside *skills_dir* (the flat,
+            single-level convention used by ``.dmx/skills/`` and every
+            shared source's ``skills/`` directory).
+    """
+    for candidate in candidates:
+        if recursive:
+            matches = list(skills_dir.rglob(f"{candidate}.md"))
+            if matches:
+                return ResolvedSkill(raw=matches[0].read_text())
+        else:
+            path = skills_dir / f"{candidate}.md"
+            if path.exists():
+                return ResolvedSkill(raw=path.read_text())
+
+    for candidate in candidates:
+        if recursive:
+            matches = list(skills_dir.rglob(f"{candidate}/SKILL.md"))
+            if not matches:
+                continue
+            path = matches[0]
+            skill_dir = path.parent
+        else:
+            skill_dir = skills_dir / candidate
+            path = skill_dir / "SKILL.md"
+            if not path.exists():
+                continue
+        try:
+            root_path = str(skill_dir.relative_to(workspace_root))
+        except ValueError:
+            # Outside workspace_root — only possible for the bundled
+            # skills directory (installed with the package, not vendored
+            # into the workspace). Fall back to an absolute path so the
+            # agent still has something resolvable.
+            root_path = str(skill_dir)
+        return ResolvedSkill(raw=path.read_text(), root_path=root_path)
+
+    return None
+
+
 def _resolve_skill(name: str, workspace_root: Path) -> ResolvedSkill | None:
     """Find a skill by name.
 
-    Search order:
-    1. ``{workspace_root}/.dmx/skills/{name}.md`` (project-specific, exact)
-    2. ``{workspace_root}/.dmx/skills/dmx-{name}.md`` (project-specific, prefixed)
-    3. For each declared ``shared_sources`` entry, in declared order:
-       a. ``.dmx/vendor/{source}/skills/{name}.md`` (or ``dmx-{name}.md``) —
-          dmx's own flat convention, checked first (cheap, and matches how
-          dmx already writes skills everywhere else).
-       b. ``.dmx/vendor/{source}/skills/{name}/SKILL.md`` (or
-          ``dmx-{name}/SKILL.md``) — the agentskills.io / Claude Code
-          ecosystem convention, as a fallback, so an org can point a shared
-          source directly at an already-standards-shaped skills repo with
-          zero dmx-specific restructuring. See GH-27.
-    4. Recursive glob in the bundled skills directory for ``{name}.md``
-    5. Recursive glob in the bundled skills directory for ``dmx-{name}.md``
+    Search order — each tier tries the flat ``{name}.md``/``dmx-{name}.md``
+    form first, then the folder-shaped ``{name}/SKILL.md`` form as a
+    fallback (see :func:`_find_skill_in_dir`):
 
-    Only step 3b ever sets :attr:`ResolvedSkill.root_path` — the flat form
-    (steps 1, 2, 3a, 4, 5) never needs it.
+    1. ``{workspace_root}/.dmx/skills/`` (project-specific override)
+    2. For each declared ``shared_sources`` entry, in declared order:
+       ``.dmx/vendor/{source}/skills/``
+    3. The bundled ``skills/`` directory shipped with dmx
+
+    ``root_path`` is set on the result whenever the folder-shaped form
+    matched, regardless of which tier — a skill needs it any time it has
+    its own directory for ``scripts/``/``references/``/``assets/`` to
+    resolve against, not just when it came from a shared source.
 
     Returns ``None`` if the skill is not found in any location.
     """
     candidates = [name, f"dmx-{name}"]
 
     project_skills = workspace_root / ".dmx" / "skills"
-    for candidate in candidates:
-        path = project_skills / f"{candidate}.md"
-        if path.exists():
-            return ResolvedSkill(raw=path.read_text())
+    resolved = _find_skill_in_dir(project_skills, candidates, workspace_root, recursive=False)
+    if resolved is not None:
+        return resolved
 
     for source in read_shared_sources(workspace_root):
         source_skills = source_root(workspace_root, source) / "skills"
-        for candidate in candidates:
-            path = source_skills / f"{candidate}.md"
-            if path.exists():
-                return ResolvedSkill(raw=path.read_text())
-        for candidate in candidates:
-            skill_dir = source_skills / candidate
-            path = skill_dir / "SKILL.md"
-            if path.exists():
-                return ResolvedSkill(
-                    raw=path.read_text(), root_path=str(skill_dir.relative_to(workspace_root))
-                )
+        resolved = _find_skill_in_dir(source_skills, candidates, workspace_root, recursive=False)
+        if resolved is not None:
+            return resolved
 
     bundled = _bundled_skills_dir()
-    for candidate in candidates:
-        matches = list(bundled.rglob(f"{candidate}.md"))
-        if matches:
-            return ResolvedSkill(raw=matches[0].read_text())
-
-    return None
+    return _find_skill_in_dir(bundled, candidates, workspace_root, recursive=True)
 
 
 def _dependencies_note(raw: str) -> str | None:
