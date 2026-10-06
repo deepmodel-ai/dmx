@@ -17,17 +17,25 @@ Tool contracts
     - Writes initial state to ``.dmx/jobs/{job_id}/{name}-{task_id}.json``.
     - Returns: instruction to run the first skill, then call ``loop_advance``.
 
-``loop_advance(output)``
+``loop_advance(output, skill)``
     - Finds the active run by scanning ``.dmx/jobs/`` (no separate pointer
       file — see ``dmx.loop_state`` module docstring).
+    - Ignores the call when ``skill`` is not the run's current skill, so a
+      retry cannot record the same output against the next skill. Skill
+      names in a loop are matched by name and must be unique.
     - Persists the skill output.
     - If more skills remain and ``human_gate: true``: pauses, returns pause msg.
     - If more skills remain and ``human_gate: false``: returns next instruction.
-    - If all skills complete: runs validators, applies policy
-      (``failure_handling`` / ``on_optional_failure``), writes outcome, and —
-      if ``on_complete`` declares a ``trigger_loop`` for that outcome —
-      starts the next loop automatically and returns its first-skill
-      instruction. Otherwise returns a terminal completion message.
+    - If all skills complete: marks the run ``validating`` and runs validators
+      on a worker thread. The tool returns immediately. ``loop_status``
+      waits for the outcome. A ``validating`` run with no live worker was
+      interrupted; ``loop_continue`` runs the validators again.
+
+``loop_status()``
+    - Read-only. Waits up to 25 seconds for a live validator worker and
+      returns as soon as it finishes. If the worker is still going, reports
+      that. If the run is ``validating`` but this process has no worker,
+      tells the agent to call ``loop_continue``.
 
 ``loop_continue()``
     - Finds the active run the same way as ``loop_advance``.
@@ -37,7 +45,9 @@ Tool contracts
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources as pkg
+import json
 import logging
 import re
 import subprocess
@@ -56,6 +66,7 @@ from dmx.loop_schema import LoopConfig, RequireBranch, load_loop, load_loops_dir
 from dmx.loop_state import (
     LoopOutcome,
     LoopStatus,
+    _now_iso,
     current_branch,
     find_active_run,
     find_pending_run,
@@ -544,7 +555,8 @@ def _skill_instruction(
         f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the skill "
         f"instructions, then execute them exactly as written.\n\n"
         f"REQUIRED: When the skill finishes, you MUST immediately call the "
-        f"`loop_advance` MCP tool with the skill's full output as the `output` argument. "
+        f"`loop_advance` MCP tool with `skill`=`{skill_name}` and the skill's full "
+        f"output as the `output` argument. "
         f"Do not wait for user input. Do not suggest next steps. Call loop_advance."
     )
 
@@ -621,7 +633,57 @@ def _iterating_message(
 # ---------------------------------------------------------------------------
 
 
-def _start_loop(root: Path, name: str, description: str | None = None) -> str:
+@dataclass(frozen=True)
+class _StartedLoop:
+    """A ``_start_loop`` result: the agent message, plus the new run's ids.
+
+    ``job_id`` is ``None`` when startup was refused and no state was written.
+    Chaining publishes its outcome onto ``(job_id, loop_name, task_id)``
+    and nowhere else.
+    """
+
+    message: str
+    job_id: str | None = None
+    loop_name: str | None = None
+    task_id: str | None = None
+
+    @property
+    def chained(self) -> tuple[str, str, str] | None:
+        if self.job_id is None or self.loop_name is None or self.task_id is None:
+            return None
+        return self.job_id, self.loop_name, self.task_id
+
+
+def _validating_start_refusal(root: Path) -> str | None:
+    """Refuse ``run_loop`` while this job already has a ``validating`` run.
+
+    Validators no longer block the server, so a second ``run_loop`` can land
+    before the worker finishes. The worker would then write its outcome onto
+    whichever run is active, which would be the new one.
+    """
+    try:
+        found = _find_active(root)
+    except AmbiguousActiveRun as exc:
+        return f"Error: {exc}"
+    if not found:
+        return None
+    job_id, loop_name, task_id = found
+    try:
+        state = read_state(root, job_id, loop_name, task_id)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if state.get("status") != LoopStatus.validating.value:
+        return None
+    return (
+        f"Cannot start a new loop: `{loop_name}` is still validating "
+        f"(job `{job_id}`, task `{task_id[:8]}`). "
+        "Call `loop_status`, or `loop_continue` if validation was interrupted."
+    )
+
+
+def _start_loop(
+    root: Path, name: str, description: str | None = None, *, pending_finish: bool = False
+) -> _StartedLoop:
     """Load a loop config, initialise its state, and return the first-skill instruction.
 
     Shared by the ``run_loop`` tool and automatic ``on_complete`` chaining —
@@ -633,16 +695,20 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
     the "reads persistent context before running" half of the loop's memory
     property.
     """
+    if not pending_finish:
+        refusal = _validating_start_refusal(root)
+        if refusal:
+            return _StartedLoop(refusal)
     try:
         config = _resolve_loop(name, root)
     except FileNotFoundError as exc:
-        return f"Error: {exc}"
+        return _StartedLoop(f"Error: {exc}")
     except Exception as exc:  # noqa: BLE001
-        return f"Error loading loop config '{name}': {exc}"
+        return _StartedLoop(f"Error loading loop config '{name}': {exc}")
 
     guard_error = _branch_guard_error(root, config)
     if guard_error:
-        return guard_error
+        return _StartedLoop(guard_error)
 
     task_id = make_task_id()
     if config.require_branch is not None:
@@ -656,7 +722,7 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
             existing_pending = None  # already ambiguous; let it surface below
         if existing_pending is not None:
             pending_job_id, pending_loop_name, pending_task_id = existing_pending
-            return (
+            return _StartedLoop(
                 f"Cannot start a new `{name}` loop: a `{pending_loop_name}` run is already "
                 f"in progress under a not-yet-identified job (`{pending_job_id}`, task "
                 f"`{pending_task_id[:8]}`). Finish or resume it first with `loop_continue`, "
@@ -673,7 +739,14 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
         task_id=task_id,
         skills=config.skills,
     )
-    write_state(root, job_id, name, task_id, {"status": LoopStatus.running.value})
+    updates: dict[str, object] = {"status": LoopStatus.running.value}
+    if pending_finish:
+        # The outcome message is published a moment later. Until then this
+        # run must still look like validation in progress, or loop_status
+        # reports a bare skill instruction instead of the chain result.
+        updates["validation_started_at"] = _now_iso()
+        updates["finish_message"] = None
+    write_state(root, job_id, name, task_id, updates)
 
     logger.info("start_loop: name=%s job=%s task=%s", name, job_id, task_id)
 
@@ -687,7 +760,7 @@ def _start_loop(root: Path, name: str, description: str | None = None) -> str:
         instruction = (
             f"Memory context (from `.dmx/activeContext.md`):\n{memory_context}\n\n{instruction}"
         )
-    return instruction
+    return _StartedLoop(instruction, job_id, name, task_id)
 
 
 # ---------------------------------------------------------------------------
@@ -966,7 +1039,7 @@ def snapshot_loop_for_pr(root: Path) -> str:
     )
 
 
-def _finish_loop(
+def _apply_loop_outcome(
     root: Path,
     job_id: str,
     loop_name: str,
@@ -1086,17 +1159,12 @@ def _finish_loop(
                 f"{loop_name} loop completed (outcome: {outcome}) — chaining to "
                 f"{next_loop} was configured but blocked: {chain_guard_error}",
             )
-            commit_warning = _commit_dmx_state(
-                root, f"chore: sync loop state for {loop_name} (job {job_id})"
-            )
             message = (
                 f"{_complete_message(loop_name, job_id, outcome)}\n\n"
                 f"Configured to chain to **{next_loop}**, but it couldn't start: "
                 f"{chain_guard_error}"
             )
-            if commit_warning:
-                message += f"\n\n{commit_warning}"
-            return message
+            return _store_outcome(root, job_id, loop_name, task_id, message)
 
         append_session_note(
             root,
@@ -1106,22 +1174,305 @@ def _finish_loop(
         commit_warning = _commit_dmx_state(
             root, f"chore: sync loop state for {loop_name} (job {job_id})"
         )
+        started = _start_loop(root, next_loop, pending_finish=True)
         chain_header = (
             f"**{loop_name} loop — complete** (outcome: `{outcome}`)\n\n"
             f"Chaining automatically to **{next_loop}** loop.\n\n"
         )
         if commit_warning:
             chain_header += f"{commit_warning}\n\n"
-        return chain_header + _start_loop(root, next_loop)
+        message = chain_header + started.message
+        _publish_finish_message(root, job_id, loop_name, task_id, message, chained=started.chained)
+        return message
 
     append_session_note(root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`).")
-    commit_warning = _commit_dmx_state(
-        root, f"chore: sync loop state for {loop_name} (job {job_id})"
+    return _store_outcome(
+        root, job_id, loop_name, task_id, _complete_message(loop_name, job_id, outcome)
     )
-    message = _complete_message(loop_name, job_id, outcome)
-    if commit_warning:
-        message += f"\n\n{commit_warning}"
+
+
+_VALIDATORS_RUNNING = "Validators are running. Call `loop_status` to see the result."
+_VALIDATION_INTERRUPTED = "Validation was interrupted; call `loop_continue` to re-run it."
+_STATUS_WAIT_SECONDS = 25.0
+_VALIDATION_TASKS: dict[str, asyncio.Task[None]] = {}
+
+
+def _finish_loop(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    skill_outputs: dict[str, str],
+) -> str:
+    """Run validators and remember the message ``loop_status`` should return."""
+    message = _apply_loop_outcome(root, job_id, loop_name, task_id, config, skill_outputs)
+    state = read_state(root, job_id, loop_name, task_id)
+    if not state.get("finish_message"):
+        _publish_finish_message(root, job_id, loop_name, task_id, message)
     return message
+
+
+def _publish_finish_message(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    message: str,
+    *,
+    chained: tuple[str, str, str] | None = None,
+) -> None:
+    """Store *message* on the finished run, and on the run chaining just started.
+
+    *chained* is that new run's ids. Publishing onto whichever run happens
+    to be active would stamp a "complete" message onto a ``run_loop`` the
+    agent started while validators were still going.
+    """
+    write_state(root, job_id, loop_name, task_id, {"finish_message": message})
+    if chained is None or chained == (job_id, loop_name, task_id):
+        return
+    write_state(root, chained[0], chained[1], chained[2], {"finish_message": message})
+
+
+def _store_outcome(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    message: str,
+) -> str:
+    """Store *message*, commit ``.dmx/``, and store again if the commit warned.
+
+    The warning only exists after ``_commit_dmx_state`` returns. Publishing
+    beforehand and then appending the warning to the discarded return value
+    drops it: ``loop_status`` would never show a skipped push.
+    """
+    _publish_finish_message(root, job_id, loop_name, task_id, message)
+    warning = _commit_dmx_state(root, f"chore: sync loop state for {loop_name} (job {job_id})")
+    if warning:
+        message = f"{message}\n\n{warning}"
+        _publish_finish_message(root, job_id, loop_name, task_id, message)
+    return message
+
+
+def _finish_loop_guarded(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    skill_outputs: dict[str, str],
+) -> None:
+    try:
+        _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("finish_loop failed for %s", loop_name)
+        try:
+            write_state(
+                root,
+                job_id,
+                loop_name,
+                task_id,
+                {
+                    "status": LoopStatus.failed.value,
+                    "outcome": LoopOutcome.failure.value,
+                    "finish_message": f"Error finishing the {loop_name} loop: {exc}",
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record validation failure for %s", loop_name)
+
+
+def _validation_worker_alive(task_id: str) -> bool:
+    """True when this process has a validator worker for *task_id*."""
+    task = _VALIDATION_TASKS.get(task_id)
+    return task is not None and not task.done()
+
+
+def _forget_validation_task(task: asyncio.Task[None], task_id: str) -> None:
+    current = _VALIDATION_TASKS.get(task_id)
+    if current is task:
+        del _VALIDATION_TASKS[task_id]
+
+
+def _schedule_finish_loop(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    skill_outputs: dict[str, str],
+) -> str:
+    """Mark the run validating and finish it off the request path.
+
+    A second call while this process still has a worker for *task_id* does
+    not start another one. A ``validating`` file with no worker — the server
+    restarted — is started again.
+    """
+    if _validation_worker_alive(task_id):
+        return _VALIDATORS_RUNNING
+    write_state(
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        {
+            "status": LoopStatus.validating.value,
+            "validation_started_at": _now_iso(),
+            "finish_message": None,
+        },
+    )
+    task = asyncio.get_running_loop().create_task(
+        asyncio.to_thread(
+            _finish_loop_guarded, root, job_id, loop_name, task_id, config, skill_outputs
+        )
+    )
+    _VALIDATION_TASKS[task_id] = task
+
+    def _drop(done: asyncio.Task[None]) -> None:
+        _forget_validation_task(done, task_id)
+
+    task.add_done_callback(_drop)
+    return _VALIDATORS_RUNNING
+
+
+async def _wait_for_validation(task_id: str) -> None:
+    """Wait for the live worker, up to ``_STATUS_WAIT_SECONDS``.
+
+    Returns as soon as the worker finishes. On timeout the worker keeps
+    running; the caller reports that validation is still in progress.
+    """
+    task = _VALIDATION_TASKS.get(task_id)
+    if task is None or task.done():
+        # Chaining replaces the active run before the worker returns. The
+        # worker is still keyed by the run that just finished.
+        pending = [item for item in _VALIDATION_TASKS.values() if not item.done()]
+        if len(pending) != 1:
+            return
+        task = pending[0]
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=_STATUS_WAIT_SECONDS)
+    except TimeoutError:
+        return
+
+
+def _rejected_advance(state: dict[str, object], skill: str) -> str | None:
+    """Return a no-op message when *skill* is not the run's current skill.
+
+    Matched by name. A loop that repeats a skill name can record a retry
+    against the later occurrence; bundled loops use each name once.
+    """
+    skills = state.get("skills")
+    if not isinstance(skills, list):
+        skills = []
+    completed = state.get("skills_completed")
+    if not isinstance(completed, list):
+        completed = []
+    index = state.get("current_skill_index")
+    if not isinstance(index, int):
+        index = 0
+    current = skills[index] if 0 <= index < len(skills) else None
+    if current == skill:
+        return None
+    if skill in completed:
+        if current:
+            return (
+                f"`{skill}` is already recorded. Nothing was advanced. "
+                f"Current skill is `{current}`."
+            )
+        return (
+            f"`{skill}` is already recorded. Nothing was advanced. "
+            "Call `loop_status` for the result."
+        )
+    if current is None:
+        return (
+            f"`{skill}` is not the current skill. All skills are already recorded. "
+            "Nothing was advanced."
+        )
+    return f"`{skill}` is not the current skill (`{current}`). Nothing was recorded."
+
+
+def _latest_run_state(root: Path) -> dict[str, object] | None:
+    """The newest loop-state file under the current job or a pending job."""
+    jobs_dir = root / ".dmx" / "jobs"
+    job_ids = [resolve_job_id(root)]
+    if jobs_dir.exists():
+        job_ids.extend(path.name for path in jobs_dir.glob("_pending-*") if path.is_dir())
+    best_at = ""
+    best: dict[str, object] | None = None
+    for job_id in job_ids:
+        job_dir = jobs_dir / job_id
+        if not job_dir.exists():
+            continue
+        for path in job_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not isinstance(data, dict) or "status" not in data:
+                continue
+            updated = str(data.get("updated_at", ""))
+            if updated >= best_at:
+                best_at = updated
+                best = data
+    return best
+
+
+def loop_status_message(root: Path) -> str:
+    """Describe the active run, or the outcome of the run that just finished."""
+    try:
+        found = _find_active(root)
+    except AmbiguousActiveRun as exc:
+        return f"Error: {exc}"
+    if found:
+        job_id, loop_name, task_id = found
+        state = read_state(root, job_id, loop_name, task_id)
+        if state.get("status") == LoopStatus.validating.value and not _validation_worker_alive(
+            task_id
+        ):
+            return _VALIDATION_INTERRUPTED
+        if state.get("status") == LoopStatus.validating.value or (
+            state.get("validation_started_at") and not state.get("finish_message")
+        ):
+            started = state.get("validation_started_at") or "just now"
+            return (
+                f"Validators are running for `{loop_name}` (started {started}). "
+                "Call `loop_status` to see the result."
+            )
+        if state.get("finish_message"):
+            return str(state["finish_message"])
+        skills = state.get("skills")
+        index = state.get("current_skill_index")
+        if isinstance(skills, list) and isinstance(index, int) and 0 <= index < len(skills):
+            return (
+                f"The {loop_name} loop is {state.get('status')} "
+                f"on skill `{skills[index]}` ({index + 1}/{len(skills)}). "
+                f"Job: `{job_id}`."
+            )
+        return f"The {loop_name} loop is {state.get('status')}. Job: `{job_id}`."
+    latest = _latest_run_state(root)
+    if isinstance(latest, dict):
+        latest_task = latest.get("task_id")
+        latest_alive = isinstance(latest_task, str) and _validation_worker_alive(latest_task)
+        if latest.get("status") == LoopStatus.validating.value and not latest_alive:
+            return _VALIDATION_INTERRUPTED
+        if (
+            latest_alive
+            and latest.get("validation_started_at")
+            and not latest.get("finish_message")
+        ):
+            latest_loop = latest.get("loop_name") or "loop"
+            started = latest.get("validation_started_at") or "just now"
+            return (
+                f"Validators are running for `{latest_loop}` (started {started}). "
+                "Call `loop_status` to see the result."
+            )
+        if latest.get("finish_message"):
+            return str(latest["finish_message"])
+    return (
+        "No active loop run found. "
+        "Start a loop with `run_loop` or check if the previous loop completed."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1157,7 +1508,7 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
-        return _start_loop(root, name, description)
+        return _start_loop(root, name, description).message
 
     @app.tool
     async def get_skill_definition(
@@ -1237,16 +1588,20 @@ def register_loop_tools(app: FastMCP) -> None:
     async def loop_advance(
         ctx: Context,
         output: str,
+        skill: str,
         workspace_root: str | None = None,
     ) -> str:
         """Advance the active loop after a skill completes.
 
-        Call this after every skill run, passing the full skill output.
-        The orchestrator persists state, applies the human gate policy, and
-        returns either the next skill instruction or a pause/completion message.
+        Call this after every skill run, passing the full skill output and
+        the skill name you just finished. A repeat of a skill that is no
+        longer the current one is ignored. Each skill name must appear once
+        in the loop; a repeated name is matched by name, not by index.
 
         Args:
             output: Full output from the skill that just completed.
+            skill: Name of the skill that just completed. Must be the run's
+                current skill.
             workspace_root: Repo root path override.  Auto-detected if omitted.
 
         Returns:
@@ -1270,6 +1625,13 @@ def register_loop_tools(app: FastMCP) -> None:
             return f"Error: {exc}"
 
         state = read_state(root, job_id, loop_name, task_id)
+        if state.get("status") == LoopStatus.validating.value:
+            if _validation_worker_alive(task_id):
+                return _VALIDATORS_RUNNING
+            return _VALIDATION_INTERRUPTED
+        rejected = _rejected_advance(state, skill)
+        if rejected:
+            return rejected
         was_snapshot = is_pr_snapshot(state)
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
@@ -1299,6 +1661,8 @@ def register_loop_tools(app: FastMCP) -> None:
                 "current_skill_index": next_idx,
                 "skills_completed": skills_completed,
                 "skill_outputs": skill_outputs,
+                "finish_message": None,
+                "validation_started_at": None,
             },
         )
 
@@ -1338,8 +1702,8 @@ def register_loop_tools(app: FastMCP) -> None:
                 )
             return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
         else:
-            # All skills complete — run validators and apply policy.
-            return _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            # All skills complete — validators run off this request.
+            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
     @app.tool
     async def loop_continue(
@@ -1380,6 +1744,16 @@ def register_loop_tools(app: FastMCP) -> None:
         state = read_state(root, job_id, loop_name, task_id)
         snapshot = is_pr_snapshot(state)
 
+        if state.get("status") == LoopStatus.validating.value:
+            if _validation_worker_alive(task_id):
+                return _VALIDATORS_RUNNING
+            try:
+                config = _resolve_loop(loop_name, root)
+            except Exception as exc:  # noqa: BLE001
+                return f"Error reloading loop config: {exc}"
+            skill_outputs: dict[str, str] = state.get("skill_outputs", {})
+            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+
         if state["status"] != LoopStatus.paused.value and not snapshot:
             if state["status"] == LoopStatus.running.value:
                 return (
@@ -1393,6 +1767,20 @@ def register_loop_tools(app: FastMCP) -> None:
 
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
+
+        if idx >= len(skills):
+            # All skills already complete — human approved (or a previous
+            # validator run paused for review). Validators run off this request.
+            # Leave a PR snapshot ``complete``; do not flip it to ``running``.
+            logger.info("loop_continue: %s all skills done, running validators", loop_name)
+
+            try:
+                config = _resolve_loop(loop_name, root)
+            except Exception as exc:  # noqa: BLE001
+                return f"Error reloading loop config: {exc}"
+
+            skill_outputs = state.get("skill_outputs", {})
+            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
         # A PR snapshot stays complete until validators fill in the outcome.
         # Flipping it to running here would be the next commit's status if
@@ -1408,22 +1796,40 @@ def register_loop_tools(app: FastMCP) -> None:
                 },
             )
 
-        if idx >= len(skills):
-            # All skills already complete — human approved (or a previous
-            # validator run paused for review). Run validators and finish.
-            logger.info("loop_continue: %s all skills done, running validators", loop_name)
-
-            try:
-                config = _resolve_loop(loop_name, root)
-            except Exception as exc:  # noqa: BLE001
-                return f"Error reloading loop config: {exc}"
-
-            skill_outputs: dict[str, str] = state.get("skill_outputs", {})
-            return _finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
-
         logger.info(
             "loop_continue: %s job=%s task=%s skill_index=%d", loop_name, job_id, task_id, idx
         )
 
         next_skill = skills[idx]
         return _skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id)
+
+    @app.tool
+    async def loop_status(
+        ctx: Context,
+        workspace_root: str | None = None,
+    ) -> str:
+        """Report the active loop without changing it.
+
+        While validators run, this waits up to 25 seconds and returns as
+        soon as they finish. If they are still running, it says so. If the
+        server restarted mid-validation, it tells the agent to call
+        ``loop_continue``. Once validation finishes, it returns the outcome
+        message, including the next skill instruction when the loop chained.
+
+        Args:
+            workspace_root: Repo root path override.  Auto-detected if omitted.
+
+        Returns:
+            Plain-English status for the agent.
+        """
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
+        try:
+            found = _find_active(root)
+        except AmbiguousActiveRun:
+            found = None
+        if found:
+            await _wait_for_validation(found[2])
+        return loop_status_message(root)

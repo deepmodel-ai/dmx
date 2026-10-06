@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import subprocess
 from datetime import UTC, datetime
@@ -60,6 +61,7 @@ class LoopStatus(StrEnum):
     running = "running"
     paused = "paused"
     iterating = "iterating"
+    validating = "validating"
     complete = "complete"
     failed = "failed"
 
@@ -273,8 +275,7 @@ def write_initial_state(
     }
 
     path = state_path(workspace_root, job_id, loop_name, task_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    _replace_json(path, state)
     return path
 
 
@@ -311,9 +312,29 @@ def write_state(
     state = read_state(workspace_root, job_id, loop_name, task_id)
     state.update(updates)
     state["updated_at"] = _now_iso()
-    path = state_path(workspace_root, job_id, loop_name, task_id)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    _replace_json(state_path(workspace_root, job_id, loop_name, task_id), state)
     return state
+
+
+def _replace_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write *payload* to *path* by replacing the file, not truncating it.
+
+    ``Path.write_text`` empties the destination before the new bytes land.
+    A reader on another thread (``loop_status`` while a validator worker
+    writes) can then observe a partial file and raise ``JSONDecodeError``.
+    Writing a sibling temp file and ``os.replace``-ing it into place is
+    atomic on the same filesystem.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Unique per write. The worker thread and a request share a pid, so a
+    # pid-only name lets one thread's os.replace move the other's temp file.
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +347,7 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
 
     Returns:
         ``(loop_name, task_id)`` for the run currently
-        ``pending``/``running``/``paused``/``iterating``, or ``None`` if
+        ``pending``/``running``/``paused``/``iterating``/``validating``, or ``None`` if
         every run under this job has reached a terminal status (or the job
         has no runs at all).
 

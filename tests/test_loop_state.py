@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from dmx.exceptions import AmbiguousActiveRun
 from dmx.loop_state import (
     LoopStatus,
+    _replace_json,
     find_active_run,
     find_pending_run,
     is_pending_job_id,
@@ -185,6 +187,48 @@ class TestStateIO:
         assert updated["current_skill_index"] == 1
         # Ensure other fields preserved.
         assert updated["loop_name"] == "spec"
+
+    def test_failed_replace_leaves_the_previous_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = self._workspace(tmp_path)
+        path = write_initial_state(root, "spec", "PAY-1", "task-uuid", ["s"])
+        before = path.read_bytes()
+
+        def fail_replace(_src: str, _dst: str) -> None:
+            raise OSError("replace failed")
+
+        monkeypatch.setattr("dmx.loop_state.os.replace", fail_replace)
+
+        with pytest.raises(OSError, match="replace failed"):
+            write_state(root, "PAY-1", "spec", "task-uuid", {"status": LoopStatus.running.value})
+
+        assert path.read_bytes() == before
+        assert list(path.parent.glob(".*.tmp")) == []
+
+    def test_concurrent_writes_do_not_share_a_temp_file(self, tmp_path: Path) -> None:
+        root = self._workspace(tmp_path)
+        path = write_initial_state(root, "spec", "PAY-1", "task-uuid", ["s"])
+        errors: list[BaseException] = []
+
+        def writer(n: int) -> None:
+            try:
+                for i in range(100):
+                    _replace_json(path, {"writer": n, "i": i, "status": "running"})
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(n,)) for n in (1, 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["status"] == "running"
+        assert data["writer"] in {1, 2}
+        assert list(path.parent.glob(".*.tmp")) == []
 
     def test_multiple_runs_same_job(self, tmp_path: Path) -> None:
         root = self._workspace(tmp_path)
