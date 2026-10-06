@@ -41,15 +41,45 @@ class TestCheckSpecComplete:
         assert result["pass"] is False
         assert any(c["name"] == "spec_exists" and not c["pass"] for c in result["checks"])
 
-    def test_complete_spec_passes(self, tmp_path: Path) -> None:
+    def test_complete_spec_passes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(check_spec_complete, "_current_branch", lambda _root: "feature-gh-1")
         self._write_spec(
             tmp_path,
+            "---\nticket: GH-1\nbranch: feature-gh-1\n---\n"
             "Q: What?\nA: Rate limiting.\n\n"
             "## Technical Approach\nUse a token bucket per API key, stored in Redis.\n\n"
             "## Scope\n- Add rate limiter middleware\n- Add config for limits\n",
         )
         result = check_spec_complete.run(tmp_path)
         assert result["pass"] is True
+
+    def test_branch_mismatch_fails_identity_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(check_spec_complete, "_current_branch", lambda _root: "feature-gh-2")
+        self._write_spec(
+            tmp_path,
+            "---\nticket: GH-1\nbranch: feature-gh-1\n---\n"
+            "Q: What?\nA: Rate limiting.\n\n"
+            "## Technical Approach\nUse a token bucket per API key, stored in Redis.\n\n"
+            "## Scope\n- Add rate limiter middleware\n- Add config for limits\n",
+        )
+        result = check_spec_complete.run(tmp_path)
+        identity = next(c for c in result["checks"] if c["name"] == "spec_identity_matches_branch")
+        assert identity["pass"] is False
+        assert "feature-gh-1" in identity["message"]
+        assert "feature-gh-2" in identity["message"]
+        assert result["pass"] is False
+
+    def test_missing_branch_fails_identity_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(check_spec_complete, "_current_branch", lambda _root: "feature-gh-2")
+        self._write_spec(tmp_path, "---\nticket: GH-1\n---\n# Spec\n")
+        result = check_spec_complete.run(tmp_path)
+        identity = next(c for c in result["checks"] if c["name"] == "spec_identity_matches_branch")
+        assert identity["pass"] is False
+        assert "no branch" in identity["message"]
 
     def test_tbd_answers_fail_qa_check(self, tmp_path: Path) -> None:
         self._write_spec(

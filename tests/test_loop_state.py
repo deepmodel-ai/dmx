@@ -15,6 +15,7 @@ from dmx.loop_state import (
     is_pending_job_id,
     make_pending_job_id,
     make_task_id,
+    read_spec_identity,
     read_state,
     rename_job,
     resolve_job_id,
@@ -49,27 +50,76 @@ def test_make_task_id_is_unique() -> None:
 
 
 class TestResolveJobId:
-    def test_reads_ticket_from_spec_md(self, tmp_path: Path) -> None:
+    def test_reads_ticket_from_spec_md(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # spec.md frontmatter uses the key `ticket` (see dmx-create-ticket.md,
-        # dmx-derive-ticket.md, dmx-hotfix.md) — not `ticket_id`.
+        # dmx-derive-ticket.md, dmx-hotfix.md) — not `ticket_id`. The ticket
+        # counts only when `branch` matches the current branch.
+        monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: "feature-pay-1234")
         dmx = tmp_path / ".dmx"
         dmx.mkdir()
         spec = dmx / "spec.md"
         spec.write_text(
-            "---\nticket: PAY-1234\ntitle: My ticket\n---\n\n# Spec",
+            "---\nticket: PAY-1234\nbranch: feature-pay-1234\ntitle: My ticket\n---\n\n# Spec",
             encoding="utf-8",
         )
         assert resolve_job_id(tmp_path) == "PAY-1234"
 
-    def test_quoted_ticket(self, tmp_path: Path) -> None:
+    def test_quoted_ticket(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: "feature-gh-42")
         dmx = tmp_path / ".dmx"
         dmx.mkdir()
         spec = dmx / "spec.md"
         spec.write_text(
-            '---\nticket: "GH-42"\n---\n',
+            '---\nticket: "GH-42"\nbranch: "feature-gh-42"\n---\n',
             encoding="utf-8",
         )
         assert resolve_job_id(tmp_path) == "GH-42"
+
+    def test_stale_ticket_falls_through_to_the_current_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: "feature-gh-2")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "spec.md").write_text(
+            "---\nticket: GH-1\nbranch: feature-gh-1\n---\n",
+            encoding="utf-8",
+        )
+        assert resolve_job_id(tmp_path) == "feature-gh-2"
+
+    def test_none_ticket_uses_the_branch_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "dmx.loop_state.current_branch", lambda _root: "feature-add-rate-limiting"
+        )
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "spec.md").write_text(
+            "---\nticket: none\nbranch: feature-add-rate-limiting\n---\n",
+            encoding="utf-8",
+        )
+        assert resolve_job_id(tmp_path) == "feature-add-rate-limiting"
+
+    def test_bare_ticket_line_does_not_read_the_next_line(self, tmp_path: Path) -> None:
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "spec.md").write_text(
+            "---\nticket:\nbranch: feature-gh-2\n---\n",
+            encoding="utf-8",
+        )
+        assert read_spec_identity(tmp_path) == (None, "feature-gh-2")
+
+    def test_ticket_without_a_branch_is_not_an_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: "feature-gh-2")
+        dmx = tmp_path / ".dmx"
+        dmx.mkdir()
+        (dmx / "spec.md").write_text("---\nticket: GH-1\n---\n", encoding="utf-8")
+        assert resolve_job_id(tmp_path) == "feature-gh-2"
 
     def test_falls_back_to_branch_name(self, tmp_path: Path) -> None:
         # No spec.md — use branch. tmp_path is not a git repo, falls back to "unknown".

@@ -10,6 +10,8 @@ import importlib.resources as pkg
 import subprocess
 from typing import TYPE_CHECKING
 
+import pytest
+
 from dmx.loop_schema import LoopConfig
 from dmx.loop_state import (
     LoopStatus,
@@ -20,6 +22,7 @@ from dmx.loop_state import (
     write_state,
 )
 from dmx.loop_tools import (
+    PendingJobPromotionError,
     _commit_dmx_state,
     _dependencies_note,
     _find_active,
@@ -34,8 +37,6 @@ from dmx.shared_sources import SharedSourceError
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 PASSING_VALIDATOR = """\
 import json, sys
@@ -588,11 +589,15 @@ class TestFindActiveAndPendingPromotion:
 
         assert found == (pending_id, "spec", "task-1")
 
-    def test_find_active_prefers_resolved_job_over_pending(self, tmp_path: Path) -> None:
+    def test_find_active_prefers_resolved_job_over_pending(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         (tmp_path / ".dmx" / "spec.md").write_text(
-            "---\nticket: GH-7\n---\n# Spec", encoding="utf-8"
+            "---\nticket: GH-7\nbranch: feature-gh-7\n---\n# Spec", encoding="utf-8"
         )
+        monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: "feature-gh-7")
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-7")
         write_initial_state(tmp_path, "plan", "GH-7", "task-real", ["plan"])
         write_initial_state(
             tmp_path, "spec", make_pending_job_id("task-old"), "task-old", ["create-ticket"]
@@ -606,12 +611,15 @@ class TestFindActiveAndPendingPromotion:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         assert _find_active(tmp_path) is None
 
-    def test_promote_renames_once_real_identity_resolvable(self, tmp_path: Path) -> None:
+    def test_promote_renames_once_real_identity_resolvable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         pending_id = make_pending_job_id("task-1")
         write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-9")
         (tmp_path / ".dmx" / "spec.md").write_text(
-            "---\nticket: GH-9\n---\n# Spec", encoding="utf-8"
+            "---\nticket: GH-9\nbranch: feature-gh-9\n---\n# Spec", encoding="utf-8"
         )
 
         real_job_id = _maybe_promote_pending_job(tmp_path, pending_id)
@@ -620,6 +628,98 @@ class TestFindActiveAndPendingPromotion:
         assert not (tmp_path / ".dmx" / "jobs" / pending_id).exists()
         state = read_state(tmp_path, "GH-9", "spec", "task-1")
         assert state["job_id"] == "GH-9"
+
+    def test_stale_spec_leaves_the_pending_job_in_place(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-2")
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: GH-1\nbranch: feature-gh-1\n---\n# Spec", encoding="utf-8"
+        )
+
+        result = _maybe_promote_pending_job(tmp_path, pending_id)
+
+        assert result == pending_id
+        assert (tmp_path / ".dmx" / "jobs" / pending_id).exists()
+        assert not (tmp_path / ".dmx" / "jobs" / "GH-1").exists()
+
+    def test_promote_succeeds_once_spec_names_the_current_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-2")
+        spec = tmp_path / ".dmx" / "spec.md"
+        spec.write_text("---\nticket: GH-1\nbranch: feature-gh-1\n---\n# Spec", encoding="utf-8")
+        assert _maybe_promote_pending_job(tmp_path, pending_id) == pending_id
+
+        spec.write_text("---\nticket: GH-2\nbranch: feature-gh-2\n---\n# Spec", encoding="utf-8")
+        assert _maybe_promote_pending_job(tmp_path, pending_id) == "GH-2"
+        assert not (tmp_path / ".dmx" / "jobs" / pending_id).exists()
+        assert read_state(tmp_path, "GH-2", "spec", "task-1")["job_id"] == "GH-2"
+
+    def test_promote_refuses_a_job_that_already_has_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        write_initial_state(tmp_path, "spec", "GH-1", "old-task", ["create-ticket"])
+        write_state(
+            tmp_path,
+            "GH-1",
+            "spec",
+            "old-task",
+            {"status": "complete", "outcome": "success"},
+        )
+        pending_id = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", pending_id, "task-1", ["create-ticket"])
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-2")
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: GH-1\nbranch: feature-gh-2\n---\n# Spec", encoding="utf-8"
+        )
+
+        with pytest.raises(PendingJobPromotionError, match="GH-1") as exc:
+            _maybe_promote_pending_job(tmp_path, pending_id)
+
+        message = str(exc.value)
+        assert pending_id in message
+        assert "update the frontmatter and retry" in message
+        assert "move or delete `.dmx/jobs/GH-1/`" in message
+        assert (tmp_path / ".dmx" / "jobs" / pending_id).exists()
+        assert (tmp_path / ".dmx" / "jobs" / "GH-1" / "spec-old-task.json").exists()
+
+    def test_none_ticketing_promotes_each_branch_into_its_own_folder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        current = {"name": "feature-add-rate-limiting"}
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: current["name"])
+        spec = tmp_path / ".dmx" / "spec.md"
+
+        first = make_pending_job_id("task-1")
+        write_initial_state(tmp_path, "spec", first, "task-1", ["create-ticket"])
+        spec.write_text(
+            "---\nticket: none\nbranch: feature-add-rate-limiting\n---\n# Spec",
+            encoding="utf-8",
+        )
+        assert _maybe_promote_pending_job(tmp_path, first) == "feature-add-rate-limiting"
+
+        current["name"] = "feature-add-logging"
+        second = make_pending_job_id("task-2")
+        write_initial_state(tmp_path, "spec", second, "task-2", ["create-ticket"])
+        spec.write_text(
+            "---\nticket: none\nbranch: feature-add-logging\n---\n# Spec",
+            encoding="utf-8",
+        )
+        assert _maybe_promote_pending_job(tmp_path, second) == "feature-add-logging"
+
+        jobs = tmp_path / ".dmx" / "jobs"
+        assert (jobs / "feature-add-rate-limiting").is_dir()
+        assert (jobs / "feature-add-logging").is_dir()
+        assert not (jobs / "none").exists()
 
     def test_promote_is_noop_when_identity_still_unresolvable(self, tmp_path: Path) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
@@ -1120,9 +1220,16 @@ class TestDependenciesNote:
         assert _dependencies_note(raw) is None
 
 
-def _release_job(root: Path, *, status: str = "running") -> None:
+def _stub_branch(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    monkeypatch.setattr("dmx.loop_state.current_branch", lambda _root: name)
+    monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: name)
+
+
+def _release_job(root: Path, *, status: str = "running", branch: str = "feature-gh-49") -> None:
     (root / ".dmx").mkdir(exist_ok=True)
-    (root / ".dmx" / "spec.md").write_text("---\nticket: GH-49\n---\n# Spec\n", encoding="utf-8")
+    (root / ".dmx" / "spec.md").write_text(
+        f"---\nticket: GH-49\nbranch: {branch}\n---\n# Spec\n", encoding="utf-8"
+    )
     write_initial_state(root, "release", "GH-49", "task-49", ["create-pr"])
     write_state(root, "GH-49", "release", "task-49", {"status": status})
 
@@ -1130,8 +1237,11 @@ def _release_job(root: Path, *, status: str = "running") -> None:
 class TestPrSnapshot:
     """GH-49: the release job file committed with the PR must not stay running."""
 
-    def test_snapshot_marks_the_active_loop_complete(self, tmp_path: Path) -> None:
+    def test_snapshot_marks_the_active_loop_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _release_job(tmp_path)
+        _stub_branch(monkeypatch, "feature-gh-49")
 
         message = snapshot_loop_for_pr(tmp_path)
 
@@ -1151,7 +1261,7 @@ class TestPrSnapshot:
         (tmp_path / ".dmx" / "config.md").write_text(
             "branch_base: main\nproduction_branch: main\n", encoding="utf-8"
         )
-        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-49")
+        _stub_branch(monkeypatch, "feature-gh-49")
 
         assert _find_active(tmp_path) == ("GH-49", "release", "task-49")
 
@@ -1162,7 +1272,7 @@ class TestPrSnapshot:
         (tmp_path / ".dmx" / "config.md").write_text(
             "branch_base: main\nproduction_branch: main\n", encoding="utf-8"
         )
-        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "main")
+        _stub_branch(monkeypatch, "main")
 
         assert _find_active(tmp_path) is None
 
@@ -1192,12 +1302,16 @@ class TestPrSnapshot:
         assert ".dmx/jobs/{job_id}/*.json" in rule
         assert ".dmx/jobs/_pending-*/*.json" in rule
         assert '"outcome": null' in rule
+        assert "not `none`, `unknown`, or empty" in rule
 
     def test_snapshot_does_nothing_unless_the_current_skill_is_create_pr(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
-        (tmp_path / ".dmx" / "spec.md").write_text("---\nticket: GH-49\n---\n", encoding="utf-8")
+        (tmp_path / ".dmx" / "spec.md").write_text(
+            "---\nticket: GH-49\nbranch: feature-gh-49\n---\n", encoding="utf-8"
+        )
+        _stub_branch(monkeypatch, "feature-gh-49")
         write_initial_state(
             tmp_path, "dev", "GH-49", "task-dev", ["implement-next-phase", "commit"]
         )
@@ -1215,8 +1329,11 @@ class TestPrSnapshot:
         assert state["status"] == "paused"
         assert message == "The active loop is not on create-pr. Nothing to snapshot."
 
-    def test_a_later_snapshot_closes_the_earlier_one(self, tmp_path: Path) -> None:
+    def test_a_later_snapshot_closes_the_earlier_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _release_job(tmp_path)
+        _stub_branch(monkeypatch, "feature-gh-49")
         snapshot_loop_for_pr(tmp_path)
         write_initial_state(tmp_path, "release", "GH-49", "task-50", ["create-pr"])
         write_state(tmp_path, "GH-49", "release", "task-50", {"status": "running"})
