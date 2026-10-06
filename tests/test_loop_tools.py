@@ -6,6 +6,7 @@ can be exercised directly without mocking the MCP server plumbing.
 
 from __future__ import annotations
 
+import importlib.resources as pkg
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ from dmx.loop_state import (
     make_pending_job_id,
     read_state,
     write_initial_state,
+    write_state,
 )
 from dmx.loop_tools import (
     _commit_dmx_state,
@@ -26,6 +28,7 @@ from dmx.loop_tools import (
     _resolve_loop,
     _resolve_skill,
     _start_loop,
+    snapshot_loop_for_pr,
 )
 from dmx.shared_sources import SharedSourceError
 
@@ -1115,3 +1118,201 @@ class TestDependenciesNote:
     def test_empty_dependencies_list_returns_none(self) -> None:
         raw = "---\ndependencies: []\n---\n\nbody\n"
         assert _dependencies_note(raw) is None
+
+
+def _release_job(root: Path, *, status: str = "running") -> None:
+    (root / ".dmx").mkdir(exist_ok=True)
+    (root / ".dmx" / "spec.md").write_text("---\nticket: GH-49\n---\n# Spec\n", encoding="utf-8")
+    write_initial_state(root, "release", "GH-49", "task-49", ["create-pr"])
+    write_state(root, "GH-49", "release", "task-49", {"status": status})
+
+
+class TestPrSnapshot:
+    """GH-49: the release job file committed with the PR must not stay running."""
+
+    def test_snapshot_marks_the_active_loop_complete(self, tmp_path: Path) -> None:
+        _release_job(tmp_path)
+
+        message = snapshot_loop_for_pr(tmp_path)
+
+        state = read_state(tmp_path, "GH-49", "release", "task-49")
+        assert state["status"] == "complete"
+        assert state["outcome"] is None
+        assert state["validator_results"] == []
+        assert "complete" in message
+
+    def test_snapshot_with_no_active_loop_is_a_noop(self, tmp_path: Path) -> None:
+        assert snapshot_loop_for_pr(tmp_path) == "No active loop run. Nothing to snapshot."
+
+    def test_feature_branch_still_sees_the_snapshot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _release_job(tmp_path, status="complete")
+        (tmp_path / ".dmx" / "config.md").write_text(
+            "branch_base: main\nproduction_branch: main\n", encoding="utf-8"
+        )
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature-gh-49")
+
+        assert _find_active(tmp_path) == ("GH-49", "release", "task-49")
+
+    def test_integration_branch_ignores_the_snapshot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _release_job(tmp_path, status="complete")
+        (tmp_path / ".dmx" / "config.md").write_text(
+            "branch_base: main\nproduction_branch: main\n", encoding="utf-8"
+        )
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "main")
+
+        assert _find_active(tmp_path) is None
+
+    def test_finished_loop_with_an_outcome_is_not_a_snapshot(self, tmp_path: Path) -> None:
+        _release_job(tmp_path, status="complete")
+        write_state(
+            tmp_path,
+            "GH-49",
+            "release",
+            "task-49",
+            {"outcome": "success", "validator_results": [{"tool": "check_pr_ready", "pass": True}]},
+        )
+
+        assert snapshot_loop_for_pr(tmp_path) == "No active loop run. Nothing to snapshot."
+
+    def test_create_pr_skill_snapshots_before_the_commit(self) -> None:
+        skill = (pkg.files("dmx") / "skills/workflow/5-ship/dmx-create-pr.md").read_text(
+            encoding="utf-8"
+        )
+        snapshot_at = skill.index("snapshot_loop_for_pr")
+        commit_at = skill.index("git commit -m")
+        assert snapshot_at < commit_at
+
+    def test_loop_mode_rule_searches_the_current_job_only(self) -> None:
+        rule = (pkg.files("dmx") / "rules/system-prompt.md").read_text(encoding="utf-8")
+        assert ".dmx/jobs/**" not in rule
+        assert ".dmx/jobs/{job_id}/*.json" in rule
+        assert ".dmx/jobs/_pending-*/*.json" in rule
+        assert '"outcome": null' in rule
+
+    def test_snapshot_does_nothing_unless_the_current_skill_is_create_pr(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "spec.md").write_text("---\nticket: GH-49\n---\n", encoding="utf-8")
+        write_initial_state(
+            tmp_path, "dev", "GH-49", "task-dev", ["implement-next-phase", "commit"]
+        )
+        write_state(
+            tmp_path,
+            "GH-49",
+            "dev",
+            "task-dev",
+            {"status": "paused", "current_skill_index": 1},
+        )
+
+        message = snapshot_loop_for_pr(tmp_path)
+
+        state = read_state(tmp_path, "GH-49", "dev", "task-dev")
+        assert state["status"] == "paused"
+        assert message == "The active loop is not on create-pr. Nothing to snapshot."
+
+    def test_a_later_snapshot_closes_the_earlier_one(self, tmp_path: Path) -> None:
+        _release_job(tmp_path)
+        snapshot_loop_for_pr(tmp_path)
+        write_initial_state(tmp_path, "release", "GH-49", "task-50", ["create-pr"])
+        write_state(tmp_path, "GH-49", "release", "task-50", {"status": "running"})
+
+        message = snapshot_loop_for_pr(tmp_path)
+
+        first = read_state(tmp_path, "GH-49", "release", "task-49")
+        second = read_state(tmp_path, "GH-49", "release", "task-50")
+        assert first["outcome"] == "warning"
+        assert second["status"] == "complete"
+        assert second["outcome"] is None
+        assert "complete" in message
+        assert _find_active(tmp_path) == ("GH-49", "release", "task-50")
+
+
+class TestCommitDmxStateProtectedBranch:
+    def test_does_not_commit_on_the_integration_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _init_real_git_repo(tmp_path)
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        (tmp_path / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+        monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "main")
+        before = _commit_count(tmp_path)
+
+        result = _commit_dmx_state(tmp_path, "chore: sync loop state")
+
+        assert result is not None
+        assert "integration" in result.lower()
+        assert _commit_count(tmp_path) == before
+
+    def test_pushes_when_the_branch_has_an_open_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        bare = tmp_path / "origin.git"
+        _init_real_git_repo(repo)
+        subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+        subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=repo, check=True)
+        monkeypatch.setattr("dmx.loop_tools._has_open_pr", lambda _root: True)
+        (repo / ".dmx").mkdir(exist_ok=True)
+        (repo / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+
+        result = _commit_dmx_state(repo, "chore: sync loop state")
+
+        assert result is None
+        pushed = subprocess.run(
+            ["git", "--git-dir", str(bare), "log", "-1", "--format=%s", branch],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert pushed == "chore: sync loop state"
+
+    def test_does_not_push_when_other_commits_are_unpushed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        bare = tmp_path / "origin.git"
+        _init_real_git_repo(repo)
+        subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+        subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=repo, check=True)
+        (repo / "README.md").write_text("unpushed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "unpushed work"], cwd=repo, check=True)
+        monkeypatch.setattr("dmx.loop_tools._has_open_pr", lambda _root: True)
+        (repo / ".dmx").mkdir(exist_ok=True)
+        (repo / ".dmx" / "activeContext.md").write_text("note\n", encoding="utf-8")
+
+        result = _commit_dmx_state(repo, "chore: sync loop state")
+
+        assert result is not None
+        assert "other unpushed commits" in result
+        pushed = subprocess.run(
+            ["git", "--git-dir", str(bare), "log", "-1", "--format=%s", branch],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert pushed == "initial"
