@@ -300,6 +300,10 @@ class TestRepeatUntilIntegration:
             active = find_active_run(tmp_path, "unknown")
             assert active is not None
             assert active[0] == "dev"
+            _loop_name, task_id = active
+            round_state = _read_json(tmp_path / ".dmx" / "jobs" / "unknown" / f"dev-{task_id}.json")
+            assert round_state["status"] == "running"
+            assert round_state["iteration_count"] == 1
 
             # Second pass: mark the phase complete before finishing.
             tasks_path.write_text("## Phase 1: X\n- [x] Done now\n", encoding="utf-8")
@@ -1037,3 +1041,79 @@ class TestStaleSpecPromotion:
         promoted = find_active_run(tmp_path, "GH-2")
         assert promoted == ("spec", task_id)
         assert not (tmp_path / ".dmx" / "jobs" / "GH-1").exists()
+
+
+def _write_interrupted_finish(root: Path, status: str) -> None:
+    """A one-skill loop whose last advance was saved and whose finish never started."""
+    loops = root / ".dmx" / "loops"
+    loops.mkdir(parents=True)
+    (loops / "finishme.yaml").write_text(
+        "name: finishme\n"
+        "skills:\n"
+        "  - do-thing\n"
+        "human_gate: false\n"
+        "validators:\n"
+        "  - tool: finish_check\n"
+        "    checks:\n"
+        "      - name: ok\n"
+        "        required: true\n",
+        encoding="utf-8",
+    )
+    validators = root / "validators"
+    validators.mkdir(parents=True)
+    (validators / "finish_check.py").write_text(
+        "import json, sys\n"
+        "print(json.dumps({'pass': True, 'message': 'ok', "
+        "'checks': [{'name': 'ok', 'pass': True}]}))\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    write_initial_state(root, "finishme", "unknown", "task-48", ["do-thing"])
+    write_state(
+        root,
+        "unknown",
+        "finishme",
+        "task-48",
+        {
+            "status": status,
+            "current_skill_index": 1,
+            "skills_completed": ["do-thing"],
+            "skill_outputs": {"do-thing": "done"},
+        },
+    )
+
+
+class TestFinishPending:
+    """GH-48: skills recorded, finish never started, status still running or iterating."""
+
+    @pytest.mark.parametrize("status", ["running", "iterating"])
+    @pytest.mark.asyncio
+    async def test_continue_finishes_a_run_whose_skills_were_already_recorded(
+        self, tmp_path: Path, status: str
+    ) -> None:
+        _write_interrupted_finish(tmp_path, status)
+        app = create_app()
+        recovery = (
+            "All skills for this run are complete; the finish step did not complete. "
+            "Call `loop_continue` to re-run validators."
+        )
+
+        async with Client(app) as client:
+            advance = await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                wait=False,
+                output="again",
+                skill="do-thing",
+            )
+            assert advance == recovery
+            assert await _call(client, "loop_status", tmp_path) == recovery
+            state = _read_json(tmp_path / ".dmx" / "jobs" / "unknown" / "finishme-task-48.json")
+            assert state["status"] == status
+            assert state["current_skill_index"] == 1
+            assert state["skills_completed"] == ["do-thing"]
+
+            outcome = await _call(client, "loop_continue", tmp_path)
+
+        assert "finishme loop — complete" in outcome

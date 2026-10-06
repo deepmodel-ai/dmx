@@ -241,6 +241,7 @@ def write_initial_state(
     job_id: str,
     task_id: str,
     skills: list[str],
+    updates: dict[str, Any] | None = None,
 ) -> Path:
     """Write the initial state file for a new loop run.
 
@@ -254,6 +255,9 @@ def write_initial_state(
             :func:`make_pending_job_id`).
         task_id: UUID4 task ID for this run.
         skills: Ordered list of skill names for this loop.
+        updates: Fields merged into that first write. Chaining uses this so
+            the new run is never visible as ``pending`` with no
+            ``validation_started_at``.
 
     Returns:
         Path to the written state file.
@@ -273,6 +277,8 @@ def write_initial_state(
         "timestamp": _now_iso(),
         "updated_at": _now_iso(),
     }
+    if updates:
+        state.update(updates)
 
     path = state_path(workspace_root, job_id, loop_name, task_id)
     _replace_json(path, state)
