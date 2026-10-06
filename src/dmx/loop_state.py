@@ -7,7 +7,8 @@ State layout::
         {job_id}/
           {loop_name}-{task_id}.json   — full state for each loop run
 
-Job ID  = ticket ID from ``.dmx/spec.md`` frontmatter, or branch name fallback.
+Job ID  = ticket ID from ``.dmx/spec.md`` frontmatter when its ``branch``
+matches the current branch, or the branch name fallback.
 Task ID = UUID4 generated at ``run_loop`` invocation.
 
 There is no separate "active run pointer" file. Which run is active is
@@ -105,9 +106,6 @@ def is_pending_job_id(job_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-# spec.md frontmatter is written with the key `ticket` (see dmx-create-ticket.md,
-# dmx-derive-ticket.md, dmx-hotfix.md) — not `ticket_id`.
-_TICKET_KEY_RE = re.compile(r"^ticket\s*:\s*(.+)$", re.MULTILINE)
 
 
 def current_branch(workspace_root: Path) -> str | None:
@@ -128,12 +126,60 @@ def current_branch(workspace_root: Path) -> str | None:
     return None
 
 
+# ``[ \t]*`` rather than ``\s*``: ``\s`` matches a newline, so a bare
+# ``ticket:`` line would take the next line as its value.
+_FRONTMATTER_FIELD_RE = r"^{key}[ \t]*:[ \t]*(.+)$"
+
+_NO_TICKET_VALUES = frozenset({"none", "unknown"})
+
+
+def _frontmatter_field(frontmatter: str, key: str) -> str | None:
+    """Return one ``key: value`` from a frontmatter block, or None."""
+    match = re.search(_FRONTMATTER_FIELD_RE.format(key=re.escape(key)), frontmatter, re.MULTILINE)
+    if not match:
+        return None
+    value = match.group(1).strip().strip('"').strip("'")
+    return value or None
+
+
+def usable_ticket(ticket: str | None) -> str | None:
+    """Return *ticket* when it is a real ticket id, else None.
+
+    An empty value, ``none`` (ticketing is off), and ``unknown`` are not
+    identities. Callers then use the branch name.
+    """
+    if not ticket or ticket.lower() in _NO_TICKET_VALUES:
+        return None
+    return ticket
+
+
+def read_spec_identity(workspace_root: Path) -> tuple[str | None, str | None]:
+    """Return ``(ticket, branch)`` from ``.dmx/spec.md`` frontmatter.
+
+    Either side is None when the file or that key is missing. ``branch`` is
+    the frontmatter key of that name, not ``from_branch``.
+    """
+    spec = workspace_root / ".dmx" / "spec.md"
+    if not spec.exists():
+        return None, None
+    content = spec.read_text(encoding="utf-8")
+    fm_match = _FRONTMATTER_RE.match(content)
+    if not fm_match:
+        return None, None
+    frontmatter = fm_match.group(1)
+    return _frontmatter_field(frontmatter, "ticket"), _frontmatter_field(frontmatter, "branch")
+
+
 def resolve_job_id(workspace_root: Path) -> str:
     """Resolve job ID for the current workspace.
 
     Resolution order:
-    1. ``ticket`` in ``.dmx/spec.md`` YAML frontmatter.
-    2. Current git branch name.
+    1. ``ticket`` in ``.dmx/spec.md`` frontmatter, only when it is a real
+       ticket id and its ``branch`` equals the current git branch. A stale
+       ticket, or ``none`` / ``unknown`` / empty, is not an identity.
+    2. Current git branch name. A renamed branch therefore resolves to the
+       new name, and an in-flight job under the old name is no longer found.
+       Detached HEAD has no branch name.
     3. ``unknown`` fallback.
 
     Args:
@@ -142,22 +188,35 @@ def resolve_job_id(workspace_root: Path) -> str:
     Returns:
         A string job ID — stable across multiple loop runs on the same ticket.
     """
-    spec = workspace_root / ".dmx" / "spec.md"
-    if spec.exists():
-        content = spec.read_text(encoding="utf-8")
-        fm_match = _FRONTMATTER_RE.match(content)
-        if fm_match:
-            ticket_match = _TICKET_KEY_RE.search(fm_match.group(1))
-            if ticket_match:
-                ticket_id = ticket_match.group(1).strip().strip('"').strip("'")
-                if ticket_id:
-                    return ticket_id
-
+    ticket, spec_branch = read_spec_identity(workspace_root)
     branch = current_branch(workspace_root)
+    identity = usable_ticket(ticket)
+    if identity and spec_branch and branch and spec_branch == branch:
+        return identity
+
     if branch:
         return branch
 
     return "unknown"
+
+
+def job_has_loop_runs(workspace_root: Path, job_id: str) -> bool:
+    """True when ``.dmx/jobs/{job_id}/`` already holds a loop-state file.
+
+    Skill artifacts that lack ``loop_name``, ``task_id``, and ``status``
+    do not count. An empty or missing directory does not count.
+    """
+    job_dir = _job_dir(workspace_root, job_id)
+    if not job_dir.exists():
+        return False
+    for path in job_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(data, dict) and {"loop_name", "task_id", "status"} <= data.keys():
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

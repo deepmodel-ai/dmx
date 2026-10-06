@@ -89,7 +89,7 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 
 ## Loop mode
 
-Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the `ticket` in `.dmx/spec.md` frontmatter, or the current branch name when that file has no ticket. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
+Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the `ticket` in `.dmx/spec.md` frontmatter when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
 
 A state file is an active loop when its `status` is `running`, `paused`, or `iterating`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
 

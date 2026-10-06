@@ -62,12 +62,15 @@ from dmx.loop_state import (
     find_pr_snapshot_run,
     is_pending_job_id,
     is_pr_snapshot,
+    job_has_loop_runs,
     make_pending_job_id,
     make_task_id,
+    read_spec_identity,
     read_state,
     rename_job,
     resolve_job_id,
     supersede_pr_snapshots,
+    usable_ticket,
     write_initial_state,
     write_state,
 )
@@ -412,6 +415,10 @@ def _find_active(root: Path) -> tuple[str, str, str] | None:
     return find_pending_run(root)
 
 
+class PendingJobPromotionError(Exception):
+    """A pending job must not be renamed into the target folder."""
+
+
 def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
     """Rename a temp/pending job folder to its real id once resolvable.
 
@@ -421,21 +428,41 @@ def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
     real ticket/branch resolvable. A no-op once the job is already real, or
     if the real identity still isn't resolvable yet.
 
-    ``resolve_job_id``'s own fallbacks are deliberately *not* treated as a
-    real identity here: ``"unknown"`` is a catch-all that unrelated pending
-    jobs could collide under, and ``branch_base`` means ``create-ticket``
-    hasn't actually switched to the new feature branch yet.
+    The real identity is the frontmatter ``ticket`` when it is a real ticket
+    id and its ``branch`` matches the current branch. ``none``, ``unknown``,
+    and an empty ticket are not ids: when the frontmatter ``branch`` matches,
+    the job is promoted to that branch name. A stale ``spec.md`` (previous
+    ticket, or a ``branch`` that does not match) leaves the pending folder
+    in place so the next call can retry.
+
+    ``branch_base`` means ``create-ticket`` hasn't actually switched to the
+    new feature branch yet.
+
+    Raises:
+        PendingJobPromotionError: The target job directory already holds
+            loop runs. The pending folder is left unchanged.
     """
     if not is_pending_job_id(job_id):
         return job_id
-    real_job_id = resolve_job_id(root)
+    ticket, spec_branch = read_spec_identity(root)
+    branch = current_branch(root)
+    if not branch or not spec_branch or spec_branch != branch:
+        return job_id
+    real_job_id = usable_ticket(ticket) or branch
     if (
-        real_job_id == job_id
-        or is_pending_job_id(real_job_id)
+        is_pending_job_id(real_job_id)
         or real_job_id == "unknown"
         or real_job_id == _read_branch_base(root)
     ):
         return job_id
+    if job_has_loop_runs(root, real_job_id):
+        raise PendingJobPromotionError(
+            f"Cannot promote `{job_id}` into `{real_job_id}`: "
+            f".dmx/jobs/{real_job_id}/ already has loop runs. "
+            "If `.dmx/spec.md` names the wrong ticket, update the frontmatter and retry. "
+            f"If `{real_job_id}` was reopened, move or delete "
+            f"`.dmx/jobs/{real_job_id}/` and retry."
+        )
     rename_job(root, job_id, real_job_id)
     logger.info("promoted pending job %s -> %s", job_id, real_job_id)
     return real_job_id
@@ -1237,7 +1264,10 @@ def register_loop_tools(app: FastMCP) -> None:
         if not found:
             return "No active loop run found. Start a loop with `run_loop` first."
         job_id, loop_name, task_id = found
-        job_id = _maybe_promote_pending_job(root, job_id)
+        try:
+            job_id = _maybe_promote_pending_job(root, job_id)
+        except PendingJobPromotionError as exc:
+            return f"Error: {exc}"
 
         state = read_state(root, job_id, loop_name, task_id)
         was_snapshot = is_pr_snapshot(state)
@@ -1342,7 +1372,10 @@ def register_loop_tools(app: FastMCP) -> None:
                 "Start a loop with `run_loop` or check if the previous loop completed."
             )
         job_id, loop_name, task_id = found
-        job_id = _maybe_promote_pending_job(root, job_id)
+        try:
+            job_id = _maybe_promote_pending_job(root, job_id)
+        except PendingJobPromotionError as exc:
+            return f"Error: {exc}"
 
         state = read_state(root, job_id, loop_name, task_id)
         snapshot = is_pr_snapshot(state)

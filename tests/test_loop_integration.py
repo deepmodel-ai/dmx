@@ -41,6 +41,7 @@ _STUB_CHECKS = {
         "qa_answered",
         "technical_approach_filled",
         "scope_defined",
+        "spec_identity_matches_branch",
     ],
     "check_plan_complete": [
         "tasks_file_exists",
@@ -125,9 +126,9 @@ def _write_config(workspace_root: Path, branch_base: str = "main") -> None:
     (dmx_dir / "config.md").write_text(f"branch_base: {branch_base}\n", encoding="utf-8")
 
 
-def _write_spec_md(workspace_root: Path, ticket: str) -> None:
+def _write_spec_md(workspace_root: Path, ticket: str, branch: str) -> None:
     (workspace_root / ".dmx" / "spec.md").write_text(
-        f"---\nticket: {ticket}\n---\n# Spec\n", encoding="utf-8"
+        f"---\nticket: {ticket}\nbranch: {branch}\n---\n# Spec\n", encoding="utf-8"
     )
 
 
@@ -159,7 +160,7 @@ class TestFullPipeline:
             # Simulate what create-ticket actually does: switch to the new
             # feature branch, then write spec.md with the real ticket id.
             branch.checkout("bug-gh-1-example")
-            _write_spec_md(tmp_path, "GH-1")
+            _write_spec_md(tmp_path, "GH-1", "bug-gh-1-example")
 
             msg = await call("loop_advance", output="created ticket, spec.md filled in")
             assert "paused" in msg.lower()
@@ -421,7 +422,7 @@ class TestLoopStateIsolationIntegration:
             # touch .dmx/, so GH-1's spec.md is still sitting there) ---
             await call("run_loop", name="spec")
             branch.checkout("bug-gh-1-first-ticket")
-            _write_spec_md(tmp_path, "GH-1")
+            _write_spec_md(tmp_path, "GH-1", "bug-gh-1-first-ticket")
             await call("loop_advance", output="created ticket GH-1")
             msg = await call("loop_continue")
             assert "chaining automatically to **plan**" in msg.lower()
@@ -434,7 +435,7 @@ class TestLoopStateIsolationIntegration:
             # never cleans .dmx/ on main, and the merge itself brought GH-1's
             # spec.md forward — main now has it as a leftover, stale file.
             branch.checkout("main")
-            _write_spec_md(tmp_path, "GH-1")
+            _write_spec_md(tmp_path, "GH-1", "bug-gh-1-first-ticket")
 
             # --- Ticket 2: fresh spec loop from main ---
             msg = await call("run_loop", name="spec")
@@ -442,7 +443,7 @@ class TestLoopStateIsolationIntegration:
             assert "create-ticket" in msg
 
             branch.checkout("bug-gh-2-second-ticket")
-            _write_spec_md(tmp_path, "GH-2")
+            _write_spec_md(tmp_path, "GH-2", "bug-gh-2-second-ticket")
             msg = await call("loop_advance", output="created ticket GH-2")
             assert "paused" in msg.lower()
 
@@ -475,7 +476,7 @@ class TestLoopStateIsolationIntegration:
 
             # Ticket A: dev loop paused after its first skill.
             branch.checkout("feature-gh-a")
-            _write_spec_md(tmp_path, "GH-A")
+            _write_spec_md(tmp_path, "GH-A", "feature-gh-a")
             msg = await call("run_loop", name="dev")
             assert "implement-next-phase" in msg
             msg = await call("loop_advance", output="implemented phase 1 on A")
@@ -483,7 +484,7 @@ class TestLoopStateIsolationIntegration:
 
             # Switch to ticket B, run its own independent dev loop.
             branch.checkout("feature-gh-b")
-            _write_spec_md(tmp_path, "GH-B")
+            _write_spec_md(tmp_path, "GH-B", "feature-gh-b")
             msg = await call("run_loop", name="dev")
             assert "implement-next-phase" in msg
             msg = await call("loop_advance", output="implemented phase 1 on B")
@@ -589,7 +590,7 @@ class TestReleaseSnapshot:
         _install_passing_validators(tmp_path)
         _write_config(tmp_path)
         _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
-        _write_spec_md(tmp_path, "GH-1")
+        _write_spec_md(tmp_path, "GH-1", "feature-gh-1")
         app = create_app()
 
         async with Client(app) as client:
@@ -616,7 +617,7 @@ class TestReleaseSnapshot:
         _install_passing_validators(tmp_path)
         _write_config(tmp_path)
         _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
-        _write_spec_md(tmp_path, "GH-1")
+        _write_spec_md(tmp_path, "GH-1", "feature-gh-1")
         app = create_app()
 
         async with Client(app) as client:
@@ -642,7 +643,7 @@ class TestReleaseSnapshot:
         _install_passing_validators(tmp_path)
         _write_config(tmp_path)
         _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
-        _write_spec_md(tmp_path, "GH-1")
+        _write_spec_md(tmp_path, "GH-1", "feature-gh-1")
         app = create_app()
 
         async with Client(app) as client:
@@ -670,3 +671,65 @@ class TestReleaseSnapshot:
         ]
         assert len(snapshots) == 1
         assert snapshots[0]["status"] == "complete"
+
+
+class TestStaleSpecPromotion:
+    """GH-50: a stale spec.md must not file the new spec run under the previous ticket."""
+
+    @pytest.mark.asyncio
+    async def test_pending_run_promotes_only_after_spec_matches_the_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_config(tmp_path)
+        branch = _MockBranch(monkeypatch, tmp_path)
+        validators_dir = tmp_path / "validators"
+        validators_dir.mkdir()
+        # Fails the identity check on purpose. A stub that passes every check
+        # would let loop_continue chain to plan while the spec is still stale.
+        checks = repr(
+            [
+                {"name": "spec_exists", "pass": True},
+                {"name": "qa_answered", "pass": True},
+                {"name": "technical_approach_filled", "pass": True},
+                {"name": "scope_defined", "pass": True},
+                {"name": "spec_identity_matches_branch", "pass": False},
+            ]
+        )
+        (validators_dir / "check_spec_complete.py").write_text(
+            "import json, sys\n"
+            f"print(json.dumps({{'pass': False, 'message': 'branch mismatch', "
+            f"'checks': {checks}}}))\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        app = create_app()
+
+        async with Client(app) as client:
+
+            async def call(tool: str, **kwargs: str) -> str:
+                return await _call(client, tool, tmp_path, **kwargs)
+
+            await call("run_loop", name="spec")
+            branch.checkout("feature-gh-2")
+            _write_spec_md(tmp_path, "GH-1", "feature-gh-1")
+            advanced = await call("loop_advance", output="created the branch")
+
+            assert "paused" in advanced.lower()
+            assert not advanced.startswith("Error:")
+            pending = find_pending_run(tmp_path)
+            assert pending is not None
+            pending_id, loop_name, task_id = pending
+            assert loop_name == "spec"
+            state = _read_json(tmp_path / ".dmx" / "jobs" / pending_id / f"spec-{task_id}.json")
+            assert state["status"] == "paused"
+            assert not (tmp_path / ".dmx" / "jobs" / "GH-1").exists()
+
+            _write_spec_md(tmp_path, "GH-2", "feature-gh-2")
+            continued = await call("loop_continue")
+
+        assert "spec_identity_matches_branch" in continued
+        assert "chaining" not in continued.lower()
+        assert find_pending_run(tmp_path) is None
+        promoted = find_active_run(tmp_path, "GH-2")
+        assert promoted == ("spec", task_id)
+        assert not (tmp_path / ".dmx" / "jobs" / "GH-1").exists()

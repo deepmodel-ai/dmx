@@ -26,10 +26,11 @@ Writes JSON to stdout::
       "pass": true,
       "message": "Spec completeness check passed",
       "checks": [
-        {"name": "spec_exists",              "pass": true},
-        {"name": "qa_answered",              "pass": true},
-        {"name": "technical_approach_filled","pass": true},
-        {"name": "scope_defined",            "pass": true}
+        {"name": "spec_exists",                 "pass": true},
+        {"name": "qa_answered",                 "pass": true},
+        {"name": "technical_approach_filled",   "pass": true},
+        {"name": "scope_defined",               "pass": true},
+        {"name": "spec_identity_matches_branch","pass": true}
       ]
     }
 """
@@ -38,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -118,6 +120,57 @@ def _technical_approach_filled(content: str) -> tuple[bool, str]:
     return True, "Technical Approach section has content"
 
 
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+
+
+def _frontmatter_branch(content: str) -> str | None:
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        return None
+    field = re.search(r"^branch[ \t]*:[ \t]*(.+)$", match.group(1), re.MULTILINE)
+    if not field:
+        return None
+    value = field.group(1).strip().strip('"').strip("'")
+    return value or None
+
+
+# Same bound as check_pr_ready. A hung git must not stall the validator.
+GIT_TIMEOUT_SECONDS = 15
+
+
+def _current_branch(workspace_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=workspace_root,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    branch = result.stdout.strip()
+    if branch and branch != "HEAD":
+        return branch
+    return None
+
+
+def _spec_identity_matches_branch(content: str, current: str | None) -> tuple[bool, str]:
+    """Fail when frontmatter ``branch`` is missing or is not the current branch."""
+    spec_branch = _frontmatter_branch(content)
+    if not spec_branch:
+        return False, "spec.md frontmatter has no branch"
+    if not current:
+        return False, "current git branch could not be determined"
+    if spec_branch != current:
+        return (
+            False,
+            f"spec.md branch is {spec_branch} but the current branch is {current}",
+        )
+    return True, f"spec.md branch matches {current}"
+
+
 def _scope_defined(content: str) -> tuple[bool, str]:
     """Check that a scope / in-scope / out-of-scope section is present."""
     match = re.search(
@@ -147,6 +200,10 @@ def run(workspace_root: Path) -> dict[str, Any]:
         ("qa_answered", _qa_answered(content)),
         ("technical_approach_filled", _technical_approach_filled(content)),
         ("scope_defined", _scope_defined(content)),
+        (
+            "spec_identity_matches_branch",
+            _spec_identity_matches_branch(content, _current_branch(workspace_root)),
+        ),
     ]
 
     checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
