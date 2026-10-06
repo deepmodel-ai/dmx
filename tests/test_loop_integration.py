@@ -18,12 +18,20 @@ validators, which are covered separately in ``test_validators.py``.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 from fastmcp import Client
 
-from dmx.loop_state import find_active_run, find_pending_run, resolve_job_id
+from dmx.loop_state import (
+    find_active_run,
+    find_pending_run,
+    resolve_job_id,
+    write_initial_state,
+    write_state,
+)
 from dmx.server import create_app
 
 if TYPE_CHECKING:
@@ -80,10 +88,26 @@ def _install_passing_validators(workspace_root: Path) -> Path:
     return validators_dir
 
 
-async def _call(client: Client, tool: str, workspace_root: Path, **kwargs: str) -> str:
+async def _call(
+    client: Client, tool: str, workspace_root: Path, *, wait: bool = True, **kwargs: str
+) -> str:
     kwargs["workspace_root"] = str(workspace_root)
     result = await client.call_tool(tool, kwargs)
-    return result.data
+    message = result.data
+    if (
+        not wait
+        or tool not in {"loop_advance", "loop_continue"}
+        or "Validators are running" not in message
+    ):
+        return message
+    last = message
+    for _ in range(100):
+        await asyncio.sleep(0.05)
+        status = await client.call_tool("loop_status", {"workspace_root": str(workspace_root)})
+        last = status.data
+        if "Validators are running" not in last:
+            return last
+    raise AssertionError(f"validators did not finish; last message: {last}")
 
 
 class _MockBranch:
@@ -162,7 +186,11 @@ class TestFullPipeline:
             branch.checkout("bug-gh-1-example")
             _write_spec_md(tmp_path, "GH-1", "bug-gh-1-example")
 
-            msg = await call("loop_advance", output="created ticket, spec.md filled in")
+            msg = await call(
+                "loop_advance",
+                output="created ticket, spec.md filled in",
+                skill="create-ticket",
+            )
             assert "paused" in msg.lower()
 
             msg = await call("loop_continue")
@@ -171,7 +199,7 @@ class TestFullPipeline:
             assert "plan" in msg
 
             # --- plan (1 skill) ---
-            msg = await call("loop_advance", output="tasks.md created with 2 phases")
+            msg = await call("loop_advance", output="tasks.md created with 2 phases", skill="plan")
             assert "paused" in msg.lower()
 
             msg = await call("loop_continue")
@@ -180,13 +208,15 @@ class TestFullPipeline:
             assert "implement-next-phase" in msg
 
             # --- dev (2 skills; no tasks.md -> repeat_until treated as met) ---
-            msg = await call("loop_advance", output="implemented phase 1")
+            msg = await call(
+                "loop_advance", output="implemented phase 1", skill="implement-next-phase"
+            )
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "get_skill_definition" in msg
             assert "commit" in msg
 
-            msg = await call("loop_advance", output="committed")
+            msg = await call("loop_advance", output="committed", skill="commit")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "chaining automatically to **validate**" in msg.lower()
@@ -194,7 +224,7 @@ class TestFullPipeline:
             assert "validate" in msg
 
             # --- validate (1 skill) ---
-            msg = await call("loop_advance", output="all checks green")
+            msg = await call("loop_advance", output="all checks green", skill="validate")
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "chaining automatically to **release**" in msg.lower()
@@ -206,7 +236,9 @@ class TestFullPipeline:
             # update-memory is intentionally NOT chained after it, since that
             # left dangling uncommitted .dmx/ changes after the PR was
             # already opened (see GH-15).
-            msg = await call("loop_advance", output="opened PR #42, memory bank synced")
+            msg = await call(
+                "loop_advance", output="opened PR #42, memory bank synced", skill="create-pr"
+            )
             assert "paused" in msg.lower()
             msg = await call("loop_continue")
             assert "release loop — complete" in msg.lower()
@@ -252,9 +284,13 @@ class TestRepeatUntilIntegration:
             assert "get_skill_definition" in msg
             assert "implement-next-phase" in msg
 
-            await call("loop_advance", output="implemented phase 1 partially")
+            await call(
+                "loop_advance",
+                output="implemented phase 1 partially",
+                skill="implement-next-phase",
+            )
             await call("loop_continue")  # -> commit
-            await call("loop_advance", output="committed wip")
+            await call("loop_advance", output="committed wip", skill="commit")
             msg = await call("loop_continue")  # all skills done, repeat_until not met
 
             assert "iterating (round 1)" in msg.lower()
@@ -268,9 +304,11 @@ class TestRepeatUntilIntegration:
             # Second pass: mark the phase complete before finishing.
             tasks_path.write_text("## Phase 1: X\n- [x] Done now\n", encoding="utf-8")
 
-            await call("loop_advance", output="implemented phase 1 fully")
+            await call(
+                "loop_advance", output="implemented phase 1 fully", skill="implement-next-phase"
+            )
             await call("loop_continue")  # -> commit
-            await call("loop_advance", output="committed final")
+            await call("loop_advance", output="committed final", skill="commit")
             msg = await call("loop_continue")  # repeat_until met -> chain to validate
 
             assert "chaining automatically to **validate**" in msg.lower()
@@ -320,7 +358,7 @@ class TestValidatorFailureRetryIntegration:
                 return await _call(client, tool, tmp_path, **kwargs)
 
             await call("run_loop", name="spec")
-            await call("loop_advance", output="ticket created")
+            await call("loop_advance", output="ticket created", skill="create-ticket")
             msg = await call("loop_continue")
 
             assert "paused (validation failed)" in msg.lower()
@@ -423,11 +461,11 @@ class TestLoopStateIsolationIntegration:
             await call("run_loop", name="spec")
             branch.checkout("bug-gh-1-first-ticket")
             _write_spec_md(tmp_path, "GH-1", "bug-gh-1-first-ticket")
-            await call("loop_advance", output="created ticket GH-1")
+            await call("loop_advance", output="created ticket GH-1", skill="create-ticket")
             msg = await call("loop_continue")
             assert "chaining automatically to **plan**" in msg.lower()
 
-            await call("loop_advance", output="tasks.md created")
+            await call("loop_advance", output="tasks.md created", skill="plan")
             msg = await call("loop_continue")
             assert "release loop — complete" not in msg.lower()
 
@@ -444,7 +482,7 @@ class TestLoopStateIsolationIntegration:
 
             branch.checkout("bug-gh-2-second-ticket")
             _write_spec_md(tmp_path, "GH-2", "bug-gh-2-second-ticket")
-            msg = await call("loop_advance", output="created ticket GH-2")
+            msg = await call("loop_advance", output="created ticket GH-2", skill="create-ticket")
             assert "paused" in msg.lower()
 
         jobs_dir = tmp_path / ".dmx" / "jobs"
@@ -479,7 +517,9 @@ class TestLoopStateIsolationIntegration:
             _write_spec_md(tmp_path, "GH-A", "feature-gh-a")
             msg = await call("run_loop", name="dev")
             assert "implement-next-phase" in msg
-            msg = await call("loop_advance", output="implemented phase 1 on A")
+            msg = await call(
+                "loop_advance", output="implemented phase 1 on A", skill="implement-next-phase"
+            )
             assert "paused" in msg.lower()
 
             # Switch to ticket B, run its own independent dev loop.
@@ -487,7 +527,9 @@ class TestLoopStateIsolationIntegration:
             _write_spec_md(tmp_path, "GH-B", "feature-gh-b")
             msg = await call("run_loop", name="dev")
             assert "implement-next-phase" in msg
-            msg = await call("loop_advance", output="implemented phase 1 on B")
+            msg = await call(
+                "loop_advance", output="implemented phase 1 on B", skill="implement-next-phase"
+            )
             assert "paused" in msg.lower()
 
             # Switch back to A — its paused run resumes untouched.
@@ -600,7 +642,7 @@ class TestReleaseSnapshot:
 
             await call("run_loop", name="release")
             await call("snapshot_loop_for_pr")
-            message = await call("loop_advance", output="opened PR #42")
+            message = await call("loop_advance", output="opened PR #42", skill="create-pr")
 
         assert "paused" in message.lower()
         assert not message.startswith("Error:")
@@ -627,7 +669,7 @@ class TestReleaseSnapshot:
 
             await call("run_loop", name="release")
             await call("snapshot_loop_for_pr")
-            await call("loop_advance", output="opened PR #42")
+            await call("loop_advance", output="opened PR #42", skill="create-pr")
             message = await call("loop_continue")
 
         assert "release loop — complete" in message.lower()
@@ -653,15 +695,15 @@ class TestReleaseSnapshot:
 
             await call("run_loop", name="release")
             await call("snapshot_loop_for_pr")
-            await call("loop_advance", output="opened PR #42")
+            await call("loop_advance", output="opened PR #42", skill="create-pr")
 
             await call("run_loop", name="validate")
-            await call("loop_advance", output="all checks green")
+            await call("loop_advance", output="all checks green", skill="validate")
             chained = await call("loop_continue")
             assert "create-pr" in chained
 
             await call("snapshot_loop_for_pr")
-            message = await call("loop_advance", output="opened PR #43")
+            message = await call("loop_advance", output="opened PR #43", skill="create-pr")
 
         assert not message.startswith("Error:")
         snapshots = [
@@ -671,6 +713,266 @@ class TestReleaseSnapshot:
         ]
         assert len(snapshots) == 1
         assert snapshots[0]["status"] == "complete"
+
+
+def _write_slow_loop(root: Path, *, name: str, human_gate: bool) -> None:
+    loops = root / ".dmx" / "loops"
+    loops.mkdir(parents=True, exist_ok=True)
+    (loops / f"{name}.yaml").write_text(
+        f"name: {name}\n"
+        "skills:\n"
+        "  - do-thing\n"
+        "goal_state: done\n"
+        f"human_gate: {str(human_gate).lower()}\n"
+        "validators:\n"
+        "  - tool: slow_check\n"
+        "    checks:\n"
+        "      - name: slept\n"
+        "        required: true\n"
+        "on_optional_failure: warn\n"
+        "failure_handling: pause\n",
+        encoding="utf-8",
+    )
+    validators = root / "validators"
+    validators.mkdir(parents=True, exist_ok=True)
+    (validators / "slow_check.py").write_text(
+        "import json, sys, time\n"
+        "time.sleep(1.5)\n"
+        "print(json.dumps({'pass': True, 'message': 'slept', "
+        "'checks': [{'name': 'slept', 'pass': True}]}))\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+
+
+class TestAsyncValidators:
+    """GH-47: validators run off the MCP request, and a repeated advance is ignored."""
+
+    @pytest.mark.asyncio
+    async def test_advance_returns_while_a_slow_validator_is_still_running(
+        self, tmp_path: Path
+    ) -> None:
+        _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="quickfinish")
+            started = time.perf_counter()
+            message = await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                wait=False,
+                output="done",
+                skill="do-thing",
+            )
+            elapsed = time.perf_counter() - started
+            assert elapsed < 1
+            assert message == "Validators are running. Call `loop_status` to see the result."
+
+            status_task = asyncio.create_task(_call(client, "loop_status", tmp_path))
+            await asyncio.sleep(0.05)
+            other_started = time.perf_counter()
+            other = await _call(client, "get_skill_definition", tmp_path, name="does-not-exist")
+            assert time.perf_counter() - other_started < 1
+            assert "not found" in other.lower()
+
+            repeated = await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                wait=False,
+                output="done again",
+                skill="do-thing",
+            )
+            assert "Nothing was advanced" in repeated or "Validators are running" in repeated
+
+            outcome = await status_task
+
+        assert "quickfinish loop — complete" in outcome
+        state = _read_json(next((tmp_path / ".dmx" / "jobs").glob("*/*.json")))
+        assert state["skills_completed"] == ["do-thing"]
+        assert state["validator_results"]
+
+    @pytest.mark.asyncio
+    async def test_continue_returns_while_a_slow_validator_is_still_running(
+        self, tmp_path: Path
+    ) -> None:
+        _write_slow_loop(tmp_path, name="gated", human_gate=True)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="gated")
+            paused = await _call(client, "loop_advance", tmp_path, output="done", skill="do-thing")
+            assert "paused" in paused.lower()
+
+            started = time.perf_counter()
+            message = await _call(client, "loop_continue", tmp_path, wait=False)
+            assert time.perf_counter() - started < 1
+            assert "Validators are running" in message
+
+            again = await _call(client, "loop_continue", tmp_path, wait=False)
+            assert again == "Validators are running. Call `loop_status` to see the result."
+
+            outcome = await _call(client, "loop_status", tmp_path)
+
+        assert "gated loop — complete" in outcome
+
+    @pytest.mark.asyncio
+    async def test_repeating_loop_advance_does_not_record_the_skill_twice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_passing_validators(tmp_path)
+        _write_config(tmp_path)
+        _MockBranch(monkeypatch, tmp_path)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="spec")
+            first = await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                output="created ticket",
+                skill="create-ticket",
+            )
+            assert "paused" in first.lower()
+            second = await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                output="created ticket",
+                skill="create-ticket",
+            )
+
+        assert "already recorded" in second
+        assert "Nothing was advanced" in second
+        pending = find_pending_run(tmp_path)
+        assert pending is not None
+        job_id, _loop_name, task_id = pending
+        state = _read_json(tmp_path / ".dmx" / "jobs" / job_id / f"spec-{task_id}.json")
+        assert state["skills_completed"] == ["create-ticket"]
+        assert state["current_skill_index"] == 1
+
+    @pytest.mark.asyncio
+    async def test_loop_status_reports_running_when_validation_outlasts_the_wait(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("dmx.loop_tools._STATUS_WAIT_SECONDS", 0.2)
+        _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="quickfinish")
+            await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                wait=False,
+                output="done",
+                skill="do-thing",
+            )
+            started = time.perf_counter()
+            during = await _call(client, "loop_status", tmp_path)
+            elapsed = time.perf_counter() - started
+            assert "Validators are running" in during
+            assert elapsed < 1
+            monkeypatch.setattr("dmx.loop_tools._STATUS_WAIT_SECONDS", 25)
+            outcome = await _call(client, "loop_status", tmp_path)
+
+        assert "quickfinish loop — complete" in outcome
+
+    @pytest.mark.asyncio
+    async def test_validating_without_a_worker_is_interrupted(self, tmp_path: Path) -> None:
+        _write_slow_loop(tmp_path, name="gated", human_gate=True)
+        (tmp_path / "validators" / "slow_check.py").write_text(
+            "import json, sys\n"
+            "print(json.dumps({'pass': True, 'message': 'ok', "
+            "'checks': [{'name': 'slept', 'pass': True}]}))\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        write_initial_state(tmp_path, "gated", "unknown", "task-47", ["do-thing"])
+        write_state(
+            tmp_path,
+            "unknown",
+            "gated",
+            "task-47",
+            {
+                "status": "validating",
+                "current_skill_index": 1,
+                "skills_completed": ["do-thing"],
+                "skill_outputs": {"do-thing": "done"},
+                "validation_started_at": "2026-10-01T00:00:00Z",
+            },
+        )
+        app = create_app()
+
+        async with Client(app) as client:
+            started = time.perf_counter()
+            status = await _call(client, "loop_status", tmp_path)
+            assert time.perf_counter() - started < 1
+            assert status == "Validation was interrupted; call `loop_continue` to re-run it."
+
+            advance = await _call(
+                client, "loop_advance", tmp_path, wait=False, output="again", skill="do-thing"
+            )
+            assert advance == status
+
+            restarted = await _call(client, "loop_continue", tmp_path, wait=False)
+            assert restarted == "Validators are running. Call `loop_status` to see the result."
+            outcome = await _call(client, "loop_status", tmp_path)
+
+        assert "gated loop — complete" in outcome
+        state = _read_json(tmp_path / ".dmx" / "jobs" / "unknown" / "gated-task-47.json")
+        assert state["skills_completed"] == ["do-thing"]
+
+    @pytest.mark.asyncio
+    async def test_run_loop_refuses_while_a_run_is_validating(self, tmp_path: Path) -> None:
+        _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="quickfinish")
+            await _call(
+                client,
+                "loop_advance",
+                tmp_path,
+                wait=False,
+                output="done",
+                skill="do-thing",
+            )
+            refused = await _call(client, "run_loop", tmp_path, name="other")
+            outcome = await _call(client, "loop_status", tmp_path)
+
+        assert "still validating" in refused
+        assert "quickfinish loop — complete" in outcome
+        jobs = tmp_path / ".dmx" / "jobs"
+        assert len(list(jobs.glob("*/*.json"))) == 1
+
+    @pytest.mark.asyncio
+    async def test_repeating_advance_on_a_later_skill_does_not_move_the_index(
+        self, tmp_path: Path
+    ) -> None:
+        loops = tmp_path / ".dmx" / "loops"
+        loops.mkdir(parents=True)
+        (loops / "two.yaml").write_text(
+            "name: two\nskills:\n  - first\n  - second\nhuman_gate: true\nvalidators: []\n",
+            encoding="utf-8",
+        )
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="two")
+            first = await _call(client, "loop_advance", tmp_path, output="one", skill="first")
+            assert "paused" in first.lower()
+            second = await _call(client, "loop_advance", tmp_path, output="one", skill="first")
+
+        assert "already recorded" in second
+        assert "Current skill is `second`" in second
+        state = _read_json(next((tmp_path / ".dmx" / "jobs").glob("*/*.json")))
+        assert state["skills_completed"] == ["first"]
+        assert state["current_skill_index"] == 1
 
 
 class TestStaleSpecPromotion:
@@ -712,7 +1014,9 @@ class TestStaleSpecPromotion:
             await call("run_loop", name="spec")
             branch.checkout("feature-gh-2")
             _write_spec_md(tmp_path, "GH-1", "feature-gh-1")
-            advanced = await call("loop_advance", output="created the branch")
+            advanced = await call(
+                "loop_advance", output="created the branch", skill="create-ticket"
+            )
 
             assert "paused" in advanced.lower()
             assert not advanced.startswith("Error:")

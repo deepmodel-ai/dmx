@@ -27,6 +27,7 @@ from dmx.loop_tools import (
     _dependencies_note,
     _find_active,
     _finish_loop,
+    _finish_loop_guarded,
     _maybe_promote_pending_job,
     _resolve_loop,
     _resolve_skill,
@@ -359,7 +360,7 @@ class TestLoopMemoryHooks:
             encoding="utf-8",
         )
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "Memory context" in message
         assert "validators must print JSON on stdout only" in message
@@ -370,7 +371,7 @@ class TestLoopMemoryHooks:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _allow_spec_loop_start(tmp_path, monkeypatch)
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "Memory context" not in message
         assert "get_skill_definition" in message
@@ -446,7 +447,7 @@ class TestBranchGuard:
         _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
         monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: "feature/gh-1-old-work")
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in message.lower()
         assert "main" in message
@@ -456,7 +457,7 @@ class TestBranchGuard:
     def test_blocks_start_when_branch_base_not_configured(self, tmp_path: Path) -> None:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in message.lower()
         assert "/dmx/init" in message
@@ -467,7 +468,7 @@ class TestBranchGuard:
         _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
         monkeypatch.setattr("dmx.loop_tools.current_branch", lambda _root: None)
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in message.lower()
         assert "no commits yet" not in message.lower()
@@ -482,7 +483,7 @@ class TestBranchGuard:
         (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
         subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in message.lower()
         assert "no commits yet" in message.lower()
@@ -495,7 +496,7 @@ class TestBranchGuard:
         (tmp_path / ".dmx").mkdir(exist_ok=True)
         (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in message.lower()
         assert "no commits yet" not in message.lower()
@@ -513,7 +514,7 @@ class TestBranchGuard:
         subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
         _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "get_skill_definition" in message
 
@@ -522,7 +523,7 @@ class TestBranchGuard:
     ) -> None:
         _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
 
-        message = _start_loop(tmp_path, "spec")
+        message = _start_loop(tmp_path, "spec").message
 
         assert "get_skill_definition" in message
         assert "create-ticket" in message
@@ -531,7 +532,7 @@ class TestBranchGuard:
         # No .dmx/config.md, no branch mocking — "dev" has no require_branch
         # so the guard must not even run.
         (tmp_path / ".dmx").mkdir(exist_ok=True)
-        message = _start_loop(tmp_path, "dev")
+        message = _start_loop(tmp_path, "dev").message
         assert "cannot start" not in message.lower()
         assert "get_skill_definition" in message
 
@@ -562,10 +563,10 @@ class TestBranchGuard:
         AmbiguousActiveRun on the next loop_advance/loop_continue call."""
         _allow_spec_loop_start(tmp_path, monkeypatch, branch="main")
 
-        first_message = _start_loop(tmp_path, "spec")
+        first_message = _start_loop(tmp_path, "spec").message
         assert "get_skill_definition" in first_message
 
-        second_message = _start_loop(tmp_path, "spec")
+        second_message = _start_loop(tmp_path, "spec").message
 
         assert "cannot start" in second_message.lower()
         assert "already in progress" in second_message.lower()
@@ -886,8 +887,34 @@ class TestCommitDmxState:
 
         message = _finish_loop(tmp_path, "GH-1", "release", "T", config, {})
 
+        stored = read_state(tmp_path, "GH-1", "release", "T")["finish_message"]
         assert "complete" in message.lower()
         assert "could not auto-commit" in message.lower()
+        assert "could not auto-commit" in stored.lower()
+
+    def test_worker_exception_is_stored_as_a_failed_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = LoopConfig.model_validate(
+            {
+                "name": "release",
+                "skills": ["create-pr"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+            }
+        )
+        _setup(tmp_path, config, job_id="GH-1", task_id="T")
+
+        def explode(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("validator boom")
+
+        monkeypatch.setattr("dmx.loop_tools.run_validators", explode)
+
+        _finish_loop_guarded(tmp_path, "GH-1", "release", "T", config, {})
+
+        state = read_state(tmp_path, "GH-1", "release", "T")
+        assert state["status"] == "failed"
+        assert state["outcome"] == "failure"
+        assert "validator boom" in state["finish_message"]
 
 
 # ---------------------------------------------------------------------------
@@ -1303,6 +1330,8 @@ class TestPrSnapshot:
         assert ".dmx/jobs/_pending-*/*.json" in rule
         assert '"outcome": null' in rule
         assert "not `none`, `unknown`, or empty" in rule
+        assert "`validating`" in rule
+        assert "skill name" in rule
 
     def test_snapshot_does_nothing_unless_the_current_skill_is_create_pr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

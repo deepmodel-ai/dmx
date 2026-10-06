@@ -91,9 +91,9 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 
 Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the `ticket` in `.dmx/spec.md` frontmatter when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
 
-A state file is an active loop when its `status` is `running`, `paused`, or `iterating`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
+A state file is an active loop when its `status` is `running`, `paused`, `iterating`, or `validating`. A `validating` loop is waiting on validators: call `loop_status` (it waits for them and returns the outcome). If `loop_status` says validation was interrupted, call `loop_continue`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
 
-- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with skill output, or wait for the developer to call `/loop-continue`. I do not offer alternative paths.
+- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and its output, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths.
 - **If none is found** — no loop is active. Normal workflow guidance applies.
 
 | Command | Purpose |
