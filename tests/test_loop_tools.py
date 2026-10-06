@@ -15,6 +15,7 @@ import pytest
 from dmx.loop_schema import LoopConfig
 from dmx.loop_state import (
     LoopStatus,
+    _replace_json,
     find_active_run,
     make_pending_job_id,
     read_state,
@@ -22,6 +23,7 @@ from dmx.loop_state import (
     write_state,
 )
 from dmx.loop_tools import (
+    _VALIDATION_TASKS,
     PendingJobPromotionError,
     _commit_dmx_state,
     _dependencies_note,
@@ -32,6 +34,7 @@ from dmx.loop_tools import (
     _resolve_loop,
     _resolve_skill,
     _start_loop,
+    loop_status_message,
     snapshot_loop_for_pr,
 )
 from dmx.shared_sources import SharedSourceError
@@ -527,6 +530,28 @@ class TestBranchGuard:
 
         assert "get_skill_definition" in message
         assert "create-ticket" in message
+
+    def test_pending_finish_writes_the_next_run_once_already_in_progress(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A chained run must not be visible as pending before its flags land."""
+        (tmp_path / ".dmx").mkdir(exist_ok=True)
+        writes: list[dict[str, object]] = []
+
+        def spy(path: Path, payload: dict[str, object]) -> None:
+            if "jobs" in path.parts and path.suffix == ".json":
+                writes.append(dict(payload))
+            _replace_json(path, payload)
+
+        monkeypatch.setattr("dmx.loop_state._replace_json", spy)
+
+        started = _start_loop(tmp_path, "dev", pending_finish=True)
+
+        assert started.job_id is not None
+        assert len(writes) == 1
+        assert writes[0]["status"] == LoopStatus.running.value
+        assert writes[0]["validation_started_at"]
+        assert writes[0]["finish_message"] is None
 
     def test_loops_without_require_branch_are_unaffected(self, tmp_path: Path) -> None:
         # No .dmx/config.md, no branch mocking — "dev" has no require_branch
@@ -1462,3 +1487,18 @@ class TestCommitDmxStateProtectedBranch:
             check=True,
         ).stdout.strip()
         assert pushed == "initial"
+
+
+class _LiveWorker:
+    def done(self) -> bool:
+        return False
+
+
+def test_status_reports_a_live_worker_when_no_run_is_active(tmp_path: Path) -> None:
+    (tmp_path / ".dmx").mkdir()
+    _VALIDATION_TASKS["orphan"] = _LiveWorker()  # type: ignore[assignment]
+    try:
+        message = loop_status_message(tmp_path)
+    finally:
+        _VALIDATION_TASKS.pop("orphan", None)
+    assert message.startswith("Validators are running")

@@ -53,6 +53,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import frontmatter
 from fastmcp import (
@@ -732,21 +733,24 @@ def _start_loop(
     else:
         job_id = resolve_job_id(root)
 
-    write_initial_state(
-        workspace_root=root,
-        loop_name=name,
-        job_id=job_id,
-        task_id=task_id,
-        skills=config.skills,
-    )
-    updates: dict[str, object] = {"status": LoopStatus.running.value}
+    # One write. A pending file, then a second write that marks the run in
+    # progress, is visible to loop_status in between: the next loop looks
+    # like it is waiting on its first skill, or no run exists at all.
+    updates: dict[str, Any] = {"status": LoopStatus.running.value}
     if pending_finish:
         # The outcome message is published a moment later. Until then this
         # run must still look like validation in progress, or loop_status
         # reports a bare skill instruction instead of the chain result.
         updates["validation_started_at"] = _now_iso()
         updates["finish_message"] = None
-    write_state(root, job_id, name, task_id, updates)
+    write_initial_state(
+        workspace_root=root,
+        loop_name=name,
+        job_id=job_id,
+        task_id=task_id,
+        skills=config.skills,
+        updates=updates,
+    )
 
     logger.info("start_loop: name=%s job=%s task=%s", name, job_id, task_id)
 
@@ -1490,6 +1494,10 @@ def loop_status_message(root: Path) -> str:
             )
         if latest.get("finish_message"):
             return str(latest["finish_message"])
+    # The finishing run is already terminal and the next run does not exist
+    # yet. A live worker is still between those two writes.
+    if any(not task.done() for task in _VALIDATION_TASKS.values()):
+        return _VALIDATORS_RUNNING
     return (
         "No active loop run found. "
         "Start a loop with `run_loop` or check if the previous loop completed."
@@ -1864,6 +1872,7 @@ def register_loop_tools(app: FastMCP) -> None:
             found = _find_active(root)
         except AmbiguousActiveRun:
             found = None
-        if found:
-            await _wait_for_validation(found[2])
+        # Also wait when nothing is active yet: chaining marks the old run
+        # terminal before the next run's file exists.
+        await _wait_for_validation(found[2] if found else "")
         return loop_status_message(root)
