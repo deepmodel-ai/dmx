@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-49)** The release loop's state file is no longer merged as `running`. `create-pr` calls `snapshot_loop_for_pr` before it commits `.dmx/`, which records that run as `complete` with empty validator results, and only when the current skill is `create-pr`. A later `create-pr` on the same ticket closes the earlier unfinished snapshot. `loop_continue` still runs `check_pr_ready`. The finish commit is pushed only when it is the sole unpushed commit on a branch with an open PR; otherwise the developer is warned and nothing else is pushed. `_commit_dmx_state` does not commit while `branch_base` or `production_branch` is checked out. The loop-mode rule looks at the current ticket and any `_pending-*` spec run. On a feature branch, a `complete` file with no outcome is waiting for `/loop-continue`.
+
 ## [0.4.2] — 2026-09-11
 
 ### Fixed

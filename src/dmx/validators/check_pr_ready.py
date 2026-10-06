@@ -16,8 +16,8 @@ fall back to checking whether the latest commit touched ``.dmx/*.md``.
 
 ``.dmx/jobs/`` is excluded, not just narrowed to ``*.md``, because it's the
 loop runtime's own bookkeeping (see GH-23), not a skill's uncommitted
-edit — it's routinely dirty mid-loop (e.g. the paused state ``loop_advance``
-writes right after ``create-pr``, before ``_commit_dmx_state`` runs).
+edit — it's routinely dirty mid-loop (e.g. the release snapshot ``loop_advance``
+updates right after ``create-pr``, before ``_commit_dmx_state`` runs).
 Grading it here produced a false failure on an otherwise-good PR (see
 GH-37). Everything else under ``.dmx/`` — memory bank files, config,
 ``shared-sources.yaml``, any future top-level file — is still checked.

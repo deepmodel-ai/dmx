@@ -576,3 +576,97 @@ class TestGetSkillDefinitionFolderShaped:
 
         assert msg.strip() == "Just do the thing."
         assert "Skill root:" not in msg
+
+
+class TestReleaseSnapshot:
+    """GH-49: create-pr records the release run as complete, and a second
+    release on the same ticket can still advance."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_then_merge_before_continue_leaves_a_complete_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_passing_validators(tmp_path)
+        _write_config(tmp_path)
+        _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
+        _write_spec_md(tmp_path, "GH-1")
+        app = create_app()
+
+        async with Client(app) as client:
+
+            async def call(tool: str, **kwargs: str) -> str:
+                return await _call(client, tool, tmp_path, **kwargs)
+
+            await call("run_loop", name="release")
+            await call("snapshot_loop_for_pr")
+            message = await call("loop_advance", output="opened PR #42")
+
+        assert "paused" in message.lower()
+        assert not message.startswith("Error:")
+        state = _read_json(next((tmp_path / ".dmx" / "jobs" / "GH-1").glob("release-*.json")))
+        assert state["status"] == "complete"
+        assert state["outcome"] is None
+        assert state["validator_results"] == []
+        assert state["skills_completed"] == ["create-pr"]
+
+    @pytest.mark.asyncio
+    async def test_loop_continue_records_check_pr_ready(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_passing_validators(tmp_path)
+        _write_config(tmp_path)
+        _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
+        _write_spec_md(tmp_path, "GH-1")
+        app = create_app()
+
+        async with Client(app) as client:
+
+            async def call(tool: str, **kwargs: str) -> str:
+                return await _call(client, tool, tmp_path, **kwargs)
+
+            await call("run_loop", name="release")
+            await call("snapshot_loop_for_pr")
+            await call("loop_advance", output="opened PR #42")
+            message = await call("loop_continue")
+
+        assert "release loop — complete" in message.lower()
+        state = _read_json(next((tmp_path / ".dmx" / "jobs" / "GH-1").glob("release-*.json")))
+        assert state["status"] == "complete"
+        assert state["outcome"] == "success"
+        assert state["validator_results"]
+
+    @pytest.mark.asyncio
+    async def test_second_release_after_a_skipped_continue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_passing_validators(tmp_path)
+        _write_config(tmp_path)
+        _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
+        _write_spec_md(tmp_path, "GH-1")
+        app = create_app()
+
+        async with Client(app) as client:
+
+            async def call(tool: str, **kwargs: str) -> str:
+                return await _call(client, tool, tmp_path, **kwargs)
+
+            await call("run_loop", name="release")
+            await call("snapshot_loop_for_pr")
+            await call("loop_advance", output="opened PR #42")
+
+            await call("run_loop", name="validate")
+            await call("loop_advance", output="all checks green")
+            chained = await call("loop_continue")
+            assert "create-pr" in chained
+
+            await call("snapshot_loop_for_pr")
+            message = await call("loop_advance", output="opened PR #43")
+
+        assert not message.startswith("Error:")
+        snapshots = [
+            _read_json(path)
+            for path in (tmp_path / ".dmx" / "jobs" / "GH-1").glob("release-*.json")
+            if _read_json(path).get("outcome") is None
+        ]
+        assert len(snapshots) == 1
+        assert snapshots[0]["status"] == "complete"

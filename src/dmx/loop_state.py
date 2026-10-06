@@ -315,6 +315,100 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
     return candidates[0]
 
 
+def is_pr_snapshot(state: dict[str, Any]) -> bool:
+    """True when *state* is the pre-validator record committed with a PR.
+
+    ``create-pr`` marks the active loop ``complete`` before it commits
+    ``.dmx/``, so the merged file does not stay ``running``. ``outcome`` is
+    still null and ``validator_results`` is still empty — ``loop_continue``
+    fills those in by running the loop's validators. A genuinely finished
+    loop has an outcome, so it does not match.
+    """
+    results = state.get("validator_results")
+    empty_results = results is None or results == []
+    return (
+        state.get("status") == LoopStatus.complete.value
+        and state.get("outcome") is None
+        and empty_results
+    )
+
+
+def find_pr_snapshot_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None:
+    """Find a PR snapshot under *job_id*, if any.
+
+    Same shape as :func:`find_active_run`, but matches :func:`is_pr_snapshot`
+    instead of a non-terminal status. When more than one snapshot is still
+    unfinished, the one with the latest ``updated_at`` wins so a doubled job
+    does not stop ``loop_advance``. ``complete`` is terminal for the
+    loop-mode rule, so this lookup is separate and callers decide whether
+    the current branch should still resume the run.
+    """
+    job_dir = _job_dir(workspace_root, job_id)
+    if not job_dir.exists():
+        return None
+
+    candidates: list[tuple[str, str, str]] = []
+    for path in sorted(job_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict) or not {"loop_name", "task_id", "status"} <= data.keys():
+            continue
+        if not is_pr_snapshot(data):
+            continue
+        candidates.append(
+            (data.get("loop_name", ""), data.get("task_id", ""), str(data.get("updated_at", "")))
+        )
+
+    if not candidates:
+        return None
+    # A second create-pr on the same ticket leaves the earlier snapshot in
+    # place until it is superseded. The newest one is the run to resume.
+    loop_name, task_id, _updated = max(candidates, key=lambda item: item[2])
+    return loop_name, task_id
+
+
+def supersede_pr_snapshots(workspace_root: Path, job_id: str, *, keep_task_id: str) -> None:
+    """Close every PR snapshot in *job_id* except *keep_task_id*.
+
+    A later ``create-pr`` replaces an unfinished one. The closed file stays
+    ``complete`` and gains an outcome, so it is no longer a snapshot and
+    :func:`find_pr_snapshot_run` will not treat it as the active run.
+    """
+    job_dir = _job_dir(workspace_root, job_id)
+    if not job_dir.exists():
+        return
+    for path in sorted(job_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict) or not is_pr_snapshot(data):
+            continue
+        task_id = str(data.get("task_id", ""))
+        if task_id == keep_task_id:
+            continue
+        write_state(
+            workspace_root,
+            job_id,
+            str(data.get("loop_name", "")),
+            task_id,
+            {
+                "outcome": LoopOutcome.warning.value,
+                "validator_results": [
+                    {
+                        "tool": "check_pr_ready",
+                        "pass": False,
+                        "message": (
+                            "Superseded by a later create-pr before check_pr_ready finished."
+                        ),
+                    }
+                ],
+            },
+        )
+
+
 def find_pending_run(workspace_root: Path) -> tuple[str, str, str] | None:
     """Find a non-terminal run under a temp/pending job id, if any.
 

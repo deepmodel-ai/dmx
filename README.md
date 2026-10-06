@@ -57,7 +57,7 @@ Bundled loops for the SDLC pipeline:
 | `validate` | validate | `release` |
 | `release` | create-pr | — |
 
-Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` — there's no separate active-run pointer; the active run is derived by scanning a job's state files for the one non-terminal (`pending`/`running`/`paused`/`iterating`) entry, keyed off the current branch/ticket. This keeps loop state isolated per branch: pausing work on one branch and running a loop on another can't corrupt or lose either one's state.
+Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` — there's no separate active-run pointer; the active run is derived by scanning a job's state files for the one non-terminal (`pending`/`running`/`paused`/`iterating`) entry, keyed off the current branch/ticket. On a feature branch, a release snapshot (`complete` with `outcome` still null, written by `create-pr` before `check_pr_ready`) is also the active run until that check finishes. This keeps loop state isolated per branch: pausing work on one branch and running a loop on another can't corrupt or lose either one's state.
 
 Validators are plain Python functions at `validators/{name}.py` in the app repo (bundled fallbacks ship with dmx). The orchestrator invokes them via subprocess after all skills complete — the coding agent runs skills; validators run deterministically.
 

@@ -102,12 +102,14 @@ Update each file with targeted additions only. Do not rewrite. Do not delete exi
 
 ## Step 5 — Commit memory changes
 
+If the loop runtime started this skill, call `snapshot_loop_for_pr` on `user-dmx` before staging. That records the active loop as `complete` so this commit does not leave a `running` job file in the PR. Validator results stay empty until `loop_continue`. A standalone `/dmx/create-pr` with no active loop gets "Nothing to snapshot" and continues.
+
 Run:
 ```
 git status --short .dmx/
 ```
 
-If any files under `.dmx/` were modified in Step 4:
+If that prints anything (memory-bank edits from Step 4, or the job file `snapshot_loop_for_pr` just updated):
 ```
 git add .dmx/
 git commit -m "chore: sync memory bank for {ticket_ref or branch name}"

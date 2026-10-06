@@ -59,12 +59,15 @@ from dmx.loop_state import (
     current_branch,
     find_active_run,
     find_pending_run,
+    find_pr_snapshot_run,
     is_pending_job_id,
+    is_pr_snapshot,
     make_pending_job_id,
     make_task_id,
     read_state,
     rename_job,
     resolve_job_id,
+    supersede_pr_snapshots,
     write_initial_state,
     write_state,
 )
@@ -257,11 +260,11 @@ def _strip_frontmatter(content: str) -> str:
 # Branch guard (require_branch: base)
 # ---------------------------------------------------------------------------
 
-_BRANCH_BASE_RE = re.compile(r"^branch_base\s*:\s*([^\s#]+)", re.MULTILINE)
+_CONFIG_VALUE_RE = re.compile(r"^([A-Za-z0-9_]+)\s*:\s*([^\s#]+)", re.MULTILINE)
 
 
-def _read_branch_base(workspace_root: Path) -> str | None:
-    """Read ``branch_base`` from ``.dmx/config.md``, or None if unavailable.
+def _read_config_value(workspace_root: Path, key: str) -> str | None:
+    """Read one ``key: value`` line from ``.dmx/config.md``, or None.
 
     Mirrors the "fall back to reading .dmx/config.md" convention every
     skill uses when project config isn't injected into agent context —
@@ -271,11 +274,37 @@ def _read_branch_base(workspace_root: Path) -> str | None:
     config_path = workspace_root / ".dmx" / "config.md"
     if not config_path.exists():
         return None
-    match = _BRANCH_BASE_RE.search(config_path.read_text(encoding="utf-8"))
-    if not match:
-        return None
-    value = match.group(1).strip()
-    return value if value and value != "{REQUIRED}" else None
+    for match in _CONFIG_VALUE_RE.finditer(config_path.read_text(encoding="utf-8")):
+        if match.group(1) != key:
+            continue
+        value = match.group(2).strip()
+        return value if value and value != "{REQUIRED}" else None
+    return None
+
+
+def _read_branch_base(workspace_root: Path) -> str | None:
+    """Read ``branch_base`` from ``.dmx/config.md``, or None if unavailable."""
+    return _read_config_value(workspace_root, "branch_base")
+
+
+def _on_protected_branch(root: Path) -> bool:
+    """True when HEAD is ``branch_base`` or ``production_branch``.
+
+    Those branches receive loop state through a merged PR. A direct commit
+    here would land the run's bookkeeping without review.
+    """
+    branch = current_branch(root)
+    if not branch:
+        return False
+    protected = {
+        value
+        for value in (
+            _read_config_value(root, "branch_base"),
+            _read_config_value(root, "production_branch"),
+        )
+        if value
+    }
+    return branch in protected
 
 
 def _repo_has_no_commits(root: Path) -> bool:
@@ -372,6 +401,14 @@ def _find_active(root: Path) -> tuple[str, str, str] | None:
     if active is not None:
         loop_name, task_id = active
         return job_id, loop_name, task_id
+    # A PR snapshot is ``complete`` so the merged file is not a live loop.
+    # On the feature branch it still needs ``loop_continue`` to run
+    # validators. On the integration branch it is history.
+    if not _on_protected_branch(root):
+        snapshot = find_pr_snapshot_run(root, job_id)
+        if snapshot is not None:
+            loop_name, task_id = snapshot
+            return job_id, loop_name, task_id
     return find_pending_run(root)
 
 
@@ -657,14 +694,26 @@ def _commit_dmx_state(root: Path, message: str) -> str | None:
     (e.g. a pre-commit hook prompting for input, or GPG signing waiting on
     a passphrase) can't hang the whole MCP tool call indefinitely.
 
+    Does nothing on ``branch_base`` or ``production_branch`` — those branches
+    receive this state through a merged PR, not a direct commit.     After a
+    successful commit on any other branch, pushes that commit when it is the
+    only commit ahead of an upstream that has an open PR. Other unpushed
+    commits are left for the developer. Push failures are warnings; the
+    local commit stands.
+
     Returns:
         ``None`` if there was nothing to commit or the commit succeeded.
         A short, user-facing warning string if a commit was *attempted*
-        but failed (e.g. a pre-commit hook rejected it) — silently
-        swallowing that would defeat the entire point of this call, so
-        callers should surface it in the loop's response rather than only
-        logging it server-side.
+        but failed (e.g. a pre-commit hook rejected it), or if the commit
+        was skipped because the branch is protected, or if the follow-up
+        push failed. Callers should surface it in the loop's response
+        rather than only logging it server-side.
     """
+    if _on_protected_branch(root):
+        return (
+            "⚠️ Did not commit `.dmx/` state because the current branch is the integration "
+            "or production branch. Loop state stays local."
+        )
     try:
         status = subprocess.run(
             ["git", "status", "--short", "--", ".dmx/"],
@@ -701,7 +750,193 @@ def _commit_dmx_state(root: Path, message: str) -> str | None:
             "⚠️ Could not auto-commit the loop's final `.dmx/` state (see server logs for "
             "details) — run `git status .dmx/` and commit manually if needed."
         )
+    return _push_open_pr(root)
+
+
+def _has_upstream(root: Path) -> bool:
+    """True when HEAD tracks a remote branch."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _has_open_pr(root: Path) -> bool:
+    """True when ``gh`` reports an open PR for HEAD.
+
+    A missing ``gh``, no PR, or any error means there is nothing to push
+    onto. The local commit from :func:`_commit_dmx_state` still stands.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", "--json", "state", "-q", ".state"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "OPEN"
+
+
+def _commits_ahead_of_upstream(root: Path) -> int | None:
+    """How many commits HEAD is ahead of its upstream, or None if unknown."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "@{upstream}..HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _upstream_push_target(root: Path) -> tuple[str, str] | None:
+    """Return ``(remote, ref)`` for HEAD's upstream, or None.
+
+    ``ref`` is the remote branch name (``refs/heads/...`` stripped to the
+    branch). Pushing ``HEAD:ref`` avoids depending on ``push.default``.
+    """
+    try:
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+        if branch.returncode != 0 or not branch.stdout.strip() or branch.stdout.strip() == "HEAD":
+            return None
+        name = branch.stdout.strip()
+        remote = subprocess.run(
+            ["git", "config", "--get", f"branch.{name}.remote"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+        merge = subprocess.run(
+            ["git", "config", "--get", f"branch.{name}.merge"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if remote.returncode != 0 or merge.returncode != 0:
+        return None
+    remote_name = remote.stdout.strip()
+    ref = merge.stdout.strip().removeprefix("refs/heads/")
+    if not remote_name or not ref:
+        return None
+    return remote_name, ref
+
+
+def _push_open_pr(root: Path) -> str | None:
+    """Push the loop-state commit when it is the only unpushed commit.
+
+    A bare ``git push`` would also send earlier unpushed work and can
+    dismiss review approvals. This pushes ``HEAD`` to the upstream branch
+    only when exactly one commit is ahead. Otherwise it warns and leaves
+    the push to the developer.
+
+    Returns:
+        ``None`` when there is nothing to push or the push succeeded.
+        A short warning when a push was skipped or failed.
+    """
+    if not _has_upstream(root) or not _has_open_pr(root):
+        return None
+    ahead = _commits_ahead_of_upstream(root)
+    if ahead != 1:
+        return (
+            "⚠️ Committed the loop's final `.dmx/` state but did not push it, because this "
+            "branch has other unpushed commits. Push manually if the open PR should include "
+            "this update."
+        )
+    target = _upstream_push_target(root)
+    if target is None:
+        return (
+            "⚠️ Committed the loop's final `.dmx/` state but could not determine its upstream. "
+            "Push this branch so the open PR picks up the update."
+        )
+    remote, ref = target
+    try:
+        result = subprocess.run(
+            ["git", "push", remote, f"HEAD:{ref}"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not push loop state: %s", exc)
+        return (
+            "⚠️ Committed the loop's final `.dmx/` state but could not push it. "
+            "Push this branch so the open PR picks up the update."
+        )
+    if result.returncode != 0:
+        logger.warning(
+            "could not push loop state: %s", result.stderr.strip() or result.stdout.strip()
+        )
+        return (
+            "⚠️ Committed the loop's final `.dmx/` state but could not push it. "
+            "Push this branch so the open PR picks up the update."
+        )
     return None
+
+
+def snapshot_loop_for_pr(root: Path) -> str:
+    """Mark the active loop ``complete`` so a PR commit does not record ``running``.
+
+    ``create-pr`` calls this before ``git add .dmx/``. ``outcome`` and
+    ``validator_results`` stay empty; ``loop_continue`` fills them in after
+    the PR is open. No active loop is a no-op so a standalone ``/dmx/create-pr``
+    still works.
+    """
+    try:
+        found = _find_active(root)
+    except AmbiguousActiveRun as exc:
+        return f"Error: {exc}"
+    if not found:
+        return "No active loop run. Nothing to snapshot."
+    job_id, loop_name, task_id = found
+    state = read_state(root, job_id, loop_name, task_id)
+    if is_pr_snapshot(state):
+        return f"Loop `{loop_name}` is already recorded as complete for the PR."
+    skills = state.get("skills")
+    index = state.get("current_skill_index")
+    if (
+        not isinstance(skills, list)
+        or not isinstance(index, int)
+        or index < 0
+        or index >= len(skills)
+        or skills[index] != "create-pr"
+    ):
+        return "The active loop is not on create-pr. Nothing to snapshot."
+    supersede_pr_snapshots(root, job_id, keep_task_id=task_id)
+    write_state(root, job_id, loop_name, task_id, {"status": LoopStatus.complete.value})
+    return (
+        f"Recorded `{loop_name}` as complete in "
+        f"`.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` so the PR commit does not "
+        "leave it running. Validator results stay empty until `loop_continue`."
+    )
 
 
 def _finish_loop(
@@ -868,7 +1103,7 @@ def _finish_loop(
 
 
 def register_loop_tools(app: FastMCP) -> None:
-    """Register run_loop, get_skill_definition, loop_advance, and loop_continue on *app*."""
+    """Register the loop runtime tools on *app*."""
 
     @app.tool
     async def run_loop(
@@ -947,6 +1182,30 @@ def register_loop_tools(app: FastMCP) -> None:
             prefix += deps_note + "\n"
         return prefix + "\n" + body
 
+    @app.tool(name="snapshot_loop_for_pr")
+    async def snapshot_loop_for_pr_tool(
+        ctx: Context,
+        workspace_root: str | None = None,
+    ) -> str:
+        """Mark the active loop complete before ``create-pr`` commits ``.dmx/``.
+
+        The release loop's state file is still ``running`` when that skill
+        commits. This records it as ``complete`` with empty validator results
+        so the merged PR does not show a live loop. ``loop_continue`` fills
+        in ``check_pr_ready`` afterwards. No active loop is a no-op.
+
+        Args:
+            workspace_root: Repo root path override.  Auto-detected if omitted.
+
+        Returns:
+            Plain-English result for the agent.
+        """
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
+        return snapshot_loop_for_pr(root)
+
     @app.tool
     async def loop_advance(
         ctx: Context,
@@ -981,6 +1240,7 @@ def register_loop_tools(app: FastMCP) -> None:
         job_id = _maybe_promote_pending_job(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
+        was_snapshot = is_pr_snapshot(state)
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
         completed_skill = skills[idx]
@@ -1014,7 +1274,7 @@ def register_loop_tools(app: FastMCP) -> None:
 
         if next_idx < len(skills):
             # More skills remain.
-            if config.human_gate:
+            if config.human_gate and not was_snapshot:
                 write_state(
                     root,
                     job_id,
@@ -1025,24 +1285,27 @@ def register_loop_tools(app: FastMCP) -> None:
                     },
                 )
                 return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
-            else:
-                # human_gate: false — return next skill instruction immediately.
-                next_skill = skills[next_idx]
-                return _skill_instruction(
-                    next_skill, loop_name, next_idx, len(skills), job_id, task_id
-                )
+            if config.human_gate:
+                # PR snapshot stays complete so a later commit cannot put
+                # `paused` back into the open PR.
+                return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
+            # human_gate: false — return next skill instruction immediately.
+            next_skill = skills[next_idx]
+            return _skill_instruction(next_skill, loop_name, next_idx, len(skills), job_id, task_id)
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
             # running validators and chaining. loop_continue triggers the final step.
-            write_state(
-                root,
-                job_id,
-                loop_name,
-                task_id,
-                {
-                    "status": LoopStatus.paused.value,
-                },
-            )
+            # A PR snapshot is already complete; leave it that way.
+            if not was_snapshot:
+                write_state(
+                    root,
+                    job_id,
+                    loop_name,
+                    task_id,
+                    {
+                        "status": LoopStatus.paused.value,
+                    },
+                )
             return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
         else:
             # All skills complete — run validators and apply policy.
@@ -1082,8 +1345,9 @@ def register_loop_tools(app: FastMCP) -> None:
         job_id = _maybe_promote_pending_job(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
+        snapshot = is_pr_snapshot(state)
 
-        if state["status"] != LoopStatus.paused.value:
+        if state["status"] != LoopStatus.paused.value and not snapshot:
             if state["status"] == LoopStatus.running.value:
                 return (
                     f"The {loop_name} loop is currently running. "
@@ -1097,15 +1361,19 @@ def register_loop_tools(app: FastMCP) -> None:
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
 
-        write_state(
-            root,
-            job_id,
-            loop_name,
-            task_id,
-            {
-                "status": LoopStatus.running.value,
-            },
-        )
+        # A PR snapshot stays complete until validators fill in the outcome.
+        # Flipping it to running here would be the next commit's status if
+        # the finish step were interrupted.
+        if not snapshot:
+            write_state(
+                root,
+                job_id,
+                loop_name,
+                task_id,
+                {
+                    "status": LoopStatus.running.value,
+                },
+            )
 
         if idx >= len(skills):
             # All skills already complete — human approved (or a previous
