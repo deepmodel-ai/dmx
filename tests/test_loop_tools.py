@@ -180,7 +180,7 @@ class TestFinishLoopWithRepeatUntil:
         assert "implement-next-phase" in message
         assert find_active_run(tmp_path, "J") is not None
         state = read_state(tmp_path, "J", "dev", "T")
-        assert state["status"] == LoopStatus.iterating.value
+        assert state["status"] == LoopStatus.running.value
         assert state["iteration_count"] == 1
         assert state["current_skill_index"] == 0
         assert state["skills_completed"] == []

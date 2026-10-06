@@ -1056,8 +1056,9 @@ def _apply_loop_outcome(
 
     If validators pass (success or warning) and the loop declares
     ``repeat_until``, the condition is evaluated before finishing. If not
-    yet met, the loop transitions to ``iterating`` and restarts from the
-    first skill — this is not recorded as a failure.
+    yet met, the loop restarts from the first skill with status ``running``
+    and an incremented ``iteration_count``. ``iterating`` is not left on
+    while those skills execute. This is not recorded as a failure.
 
     If ``on_complete`` declares a ``trigger_loop`` for this outcome
     (success, failure, or warning), the next loop starts automatically —
@@ -1114,7 +1115,7 @@ def _apply_loop_outcome(
             loop_name,
             task_id,
             {
-                "status": LoopStatus.iterating.value,
+                "status": LoopStatus.running.value,
                 "iteration_count": iteration,
                 "current_skill_index": 0,
                 "skills_completed": [],
@@ -1193,6 +1194,10 @@ def _apply_loop_outcome(
 
 _VALIDATORS_RUNNING = "Validators are running. Call `loop_status` to see the result."
 _VALIDATION_INTERRUPTED = "Validation was interrupted; call `loop_continue` to re-run it."
+_FINISH_PENDING = (
+    "All skills for this run are complete; the finish step did not complete. "
+    "Call `loop_continue` to re-run validators."
+)
 _STATUS_WAIT_SECONDS = 25.0
 _VALIDATION_TASKS: dict[str, asyncio.Task[None]] = {}
 
@@ -1356,6 +1361,17 @@ async def _wait_for_validation(task_id: str) -> None:
         return
 
 
+def _skills_are_complete(state: dict[str, object]) -> bool:
+    """True when every skill is recorded and the finish step has not consumed them.
+
+    ``current_skill_index`` is written before validators start. A restart in
+    that gap leaves a non-terminal run with the index past the last skill.
+    """
+    skills = state.get("skills")
+    index = state.get("current_skill_index")
+    return isinstance(skills, list) and isinstance(index, int) and index >= len(skills)
+
+
 def _rejected_advance(state: dict[str, object], skill: str) -> str | None:
     """Return a no-op message when *skill* is not the run's current skill.
 
@@ -1441,6 +1457,11 @@ def loop_status_message(root: Path) -> str:
             )
         if state.get("finish_message"):
             return str(state["finish_message"])
+        if _skills_are_complete(state) and state.get("status") in {
+            LoopStatus.running.value,
+            LoopStatus.iterating.value,
+        }:
+            return _FINISH_PENDING
         skills = state.get("skills")
         index = state.get("current_skill_index")
         if isinstance(skills, list) and isinstance(index, int) and 0 <= index < len(skills):
@@ -1629,6 +1650,11 @@ def register_loop_tools(app: FastMCP) -> None:
             if _validation_worker_alive(task_id):
                 return _VALIDATORS_RUNNING
             return _VALIDATION_INTERRUPTED
+        if _skills_are_complete(state) and state.get("status") in {
+            LoopStatus.running.value,
+            LoopStatus.iterating.value,
+        }:
+            return _FINISH_PENDING
         rejected = _rejected_advance(state, skill)
         if rejected:
             return rejected
@@ -1713,7 +1739,8 @@ def register_loop_tools(app: FastMCP) -> None:
         """Resume a paused loop.
 
         Finds the active run and returns the next skill instruction. Call
-        this after reviewing output at a human gate.
+        this after reviewing output at a human gate. Also re-runs validators
+        when every skill is already recorded but the finish step never started.
 
         Args:
             workspace_root: Repo root path override.  Auto-detected if omitted.
@@ -1754,7 +1781,14 @@ def register_loop_tools(app: FastMCP) -> None:
             skill_outputs: dict[str, str] = state.get("skill_outputs", {})
             return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
 
-        if state["status"] != LoopStatus.paused.value and not snapshot:
+        # Skills were recorded and the process stopped before ``validating``.
+        # ``running`` and ``iterating`` would otherwise refuse to continue.
+        finish_pending = _skills_are_complete(state) and state.get("status") in {
+            LoopStatus.running.value,
+            LoopStatus.iterating.value,
+        }
+
+        if not finish_pending and state["status"] != LoopStatus.paused.value and not snapshot:
             if state["status"] == LoopStatus.running.value:
                 return (
                     f"The {loop_name} loop is currently running. "
