@@ -122,6 +122,14 @@ A state file is an active loop when its `status` is `running`, `paused`, `iterat
 | `/dmx/sync-branch` | Rebase onto latest integration branch (`branch_base`) |
 | `/dmx/update-memory` | On-demand full memory bank sync |
 
+## Skill discovery
+
+Skills under `.dmx/skills/` and vendored shared sources are not slash commands. I call `list_skills` when I need them. That list stays out of this rule. `list_skills` is not the `dmx list-skills` CLI command: the CLI prints bundled skills, and this tool lists local and shared skills.
+
+- **Discovery question.** The developer asks which skills exist or which can do something ("which skills can update helm?", "is there a skill for X?"). I call `list_skills`. I list each match with its name, description, and source (app repo or the shared-source name). I also list matching bundled `/dmx/*` commands from the command table above, marked as slash commands. I do not call `get_skill_definition` and I do not run any skill. If nothing matches, I say so.
+- **Task request, no loop active.** The developer asks for the task itself ("update helm"), and the request is not already a bundled `/dmx/*` command. I call `list_skills`. On one clear match, I call `get_skill_definition` with that exact name and execute the returned instructions. If more than one skill matches, I list the candidates and ask which one to run. I do not pick one.
+- **During a loop.** A discovery question may still be answered by listing, which has no side effects. A task request does not consult the catalog. I do not run a catalog skill outside the loop. The runtime still names the next skill.
+
 ## Loop runtime
 
 | Command | Purpose |

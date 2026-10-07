@@ -1,4 +1,4 @@
-"""Loop runtime MCP tools: run_loop, loop_advance, loop_continue, get_skill_definition.
+"""Loop runtime MCP tools: run_loop, loop_advance, loop_continue, get_skill_definition, list_skills.
 
 These three tools expose the dmx loop runtime through the existing MCP server.
 The agent is always the executor — dmx never runs skills directly.  Each tool
@@ -41,6 +41,11 @@ Tool contracts
     - Finds the active run the same way as ``loop_advance``.
     - Advances ``current_skill_index`` past the last completed skill.
     - Returns the next skill instruction.
+
+``list_skills()``
+    - Read-only. Lists local and shared skills by the name
+      ``get_skill_definition`` accepts, with the description and the source
+      that won. Bundled skills are omitted.
 """
 
 from __future__ import annotations
@@ -234,6 +239,115 @@ def _resolve_skill(name: str, workspace_root: Path) -> ResolvedSkill | None:
 
     bundled = _bundled_skills_dir()
     return _find_skill_in_dir(bundled, candidates, workspace_root, recursive=True)
+
+
+def list_skills(workspace_root: Path) -> str:
+    """List local and shared skills the loader would run.
+
+    One line per logical name, sorted by name:
+    ``name (source): description``. ``source`` is ``app repo`` or the
+    shared-source name. The description is last, so a description that
+    contains `` — `` stays one field. The first tier that has the name
+    wins, using the same flat-then-folder and ``dmx-`` prefix rules as
+    :func:`_resolve_skill`. Bundled skills are omitted. A name that also
+    exists as a bundled skill is marked as an override. A missing
+    description is empty.
+
+    This is not the ``dmx list-skills`` CLI command, which prints bundled
+    skills only.
+
+    Returns the shared-sources error string when ``.dmx/shared-sources.yaml``
+    is malformed, and one line when nothing is listed.
+    """
+    try:
+        entries = _skill_catalog(workspace_root)
+    except SharedSourceError as exc:
+        return f"Error reading .dmx/shared-sources.yaml: {exc}"
+    if not entries:
+        return "No local or shared skills."
+    bundled = _bundled_logical_names()
+    lines = [
+        _skill_line(name, description, source, bundled) for name, description, source in entries
+    ]
+    return "\n".join(lines)
+
+
+def _skill_line(name: str, description: str, source: str, bundled: set[str]) -> str:
+    note = ""
+    if name in bundled:
+        note = f" (overrides bundled /dmx/{name} for loops and get_skill_definition)"
+    if description:
+        return f"{name} ({source}){note}: {description}"
+    return f"{name} ({source}){note}:"
+
+
+def _skill_catalog(workspace_root: Path) -> list[tuple[str, str, str]]:
+    # sync_runner imports this module at load time, so this import stays here.
+    from dmx.sync_runner import _skill_names
+
+    tiers: list[tuple[str, Path]] = [("app repo", workspace_root / ".dmx" / "skills")]
+    for source in read_shared_sources(workspace_root):
+        tiers.append((source.name, source_root(workspace_root, source) / "skills"))
+
+    seen: set[str] = set()
+    found: list[tuple[str, str, str]] = []
+    for source_label, skills_dir in tiers:
+        for name in _skill_names(skills_dir):
+            if name in seen or not _SKILL_NAME_RE.match(name):
+                continue
+            resolved = _find_skill_in_dir(
+                skills_dir,
+                [name, f"dmx-{name}"],
+                workspace_root,
+                recursive=False,
+            )
+            if resolved is None:
+                continue
+            seen.add(name)
+            found.append((name, _frontmatter_description(resolved.raw), source_label))
+    found.sort(key=lambda item: item[0])
+    return found
+
+
+def _bundled_logical_names() -> set[str]:
+    """Logical names of bundled skills.
+
+    The bundled tree nests skills under category directories, so this walks
+    those directories. Within each one it uses the same rules as
+    ``sync_runner._skill_names``: a flat ``{name}.md`` or ``dmx-{name}.md``,
+    or a ``{name}/SKILL.md`` folder, collapsed to one logical name.
+    """
+    names: set[str] = set()
+
+    def walk(directory: Path) -> None:
+        if not directory.is_dir():
+            return
+        for entry in directory.iterdir():
+            if entry.is_file() and entry.suffix == ".md":
+                logical = entry.stem.removeprefix("dmx-")
+            elif entry.is_dir() and (entry / "SKILL.md").is_file():
+                logical = entry.name.removeprefix("dmx-")
+            elif entry.is_dir():
+                walk(entry)
+                continue
+            else:
+                continue
+            if _SKILL_NAME_RE.match(logical):
+                names.add(logical)
+
+    walk(_bundled_skills_dir())
+    return names
+
+
+def _frontmatter_description(raw: str) -> str:
+    try:
+        post = frontmatter.loads(raw)
+    except Exception:  # noqa: BLE001 — a bad header still leaves the skill findable by name
+        return ""
+    description = post.metadata.get("description", "")
+    if description is None:
+        return ""
+    return " ".join(str(description).split())
 
 
 def _dependencies_note(raw: str) -> str | None:
@@ -1588,6 +1702,34 @@ def register_loop_tools(app: FastMCP) -> None:
         if deps_note:
             prefix += deps_note + "\n"
         return prefix + "\n" + body
+
+    @app.tool(name="list_skills")
+    async def list_skills_tool(
+        ctx: Context,
+        workspace_root: str | None = None,
+    ) -> str:
+        """List local and shared skills, not bundled slash commands.
+
+        One line per skill: ``name (source): description``. The description
+        is last. The name is what ``get_skill_definition`` accepts. A
+        shadowed skill is omitted. A name that matches a bundled skill is
+        marked as an override: loops and ``get_skill_definition`` load this
+        copy, while ``/dmx/{name}`` stays the bundled prompt.
+
+        This is not the ``dmx list-skills`` CLI command, which prints
+        bundled skills only.
+
+        Args:
+            workspace_root: Repo root path override.  Auto-detected if omitted.
+
+        Returns:
+            The list, a line saying there are none, or the shared-sources error.
+        """
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
+        return list_skills(root)
 
     @app.tool(name="snapshot_loop_for_pr")
     async def snapshot_loop_for_pr_tool(
