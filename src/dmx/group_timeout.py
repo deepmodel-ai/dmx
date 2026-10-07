@@ -1,8 +1,8 @@
 """Run a command and, on timeout, stop the processes it started.
 
-POSIX starts the command in its own session and signals that process group:
-SIGTERM, then SIGKILL after a short grace period. Windows stops the tree
-with ``taskkill /T /F``.
+POSIX starts the command in its own session. On timeout the group gets
+SIGTERM. If any process in the group is still there after a short grace
+period, the group gets SIGKILL. Windows stops the tree with ``taskkill /T /F``.
 
 A process that starts its own session or process group, which some Docker
 and ``docker compose`` test setups do, is not in this group and keeps running.
@@ -15,6 +15,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 GRACE_SECONDS = 5.0
 
@@ -39,7 +40,7 @@ def run_with_group_timeout(
         stdout, stderr = proc.communicate(input=input, timeout=timeout)
     except subprocess.TimeoutExpired:
         _stop_group(proc, grace_seconds)
-        stdout, stderr = _drain(proc)
+        stdout, stderr = _drain(proc, grace_seconds)
         raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr) from None
     return subprocess.CompletedProcess(cmd, _returncode(proc), stdout or "", stderr or "")
 
@@ -74,40 +75,85 @@ def _popen(
 
 def _stop_group(proc: subprocess.Popen[str], grace_seconds: float) -> None:
     if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-            capture_output=True,
-            check=False,
-        )
+        _taskkill(proc.pid)
         return
+    # Wait for the group, not only the leader. make, npm and sh exit on
+    # SIGTERM at once, which used to skip SIGKILL and leave a child that
+    # ignores SIGTERM running.
+    # Reap a leader that has already exited. On macOS a group that contains
+    # only that zombie raises PermissionError for SIGTERM and SIGKILL.
+    proc.poll()
     _signal_group(proc.pid, signal.SIGTERM)
+    if _group_empties(proc, grace_seconds):
+        return
+    _signal_group(proc.pid, signal.SIGKILL)
+    _group_empties(proc, grace_seconds)
+
+
+def _group_empties(proc: subprocess.Popen[str], grace_seconds: float) -> bool:
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        proc.poll()
+        if not _group_alive(proc.pid):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.1, remaining))
+
+
+def _group_alive(pgid: int) -> bool:
     try:
-        proc.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
-        _signal_group(proc.pid, signal.SIGKILL)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=grace_seconds)
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS can return EPERM for signal 0 once the group leader has
+        # exited, including when the group is already empty.
+        return _ps_has_pgid(pgid)
+    return True
+
+
+def _ps_has_pgid(pgid: int) -> bool:
+    result = subprocess.run(
+        ["ps", "-ax", "-o", "pgid="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    target = str(pgid)
+    return any(line.strip() == target for line in result.stdout.splitlines())
+
+
+def _taskkill(pid: int) -> None:
+    subprocess.run(
+        ["taskkill", "/T", "/F", "/PID", str(pid)],
+        capture_output=True,
+        check=False,
+    )
 
 
 def _signal_group(pid: int, sig: int) -> None:
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(pid)],
-            capture_output=True,
-            check=False,
-        )
-        return
-    with contextlib.suppress(ProcessLookupError):
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pid, sig)
 
 
-def _drain(proc: subprocess.Popen[str]) -> tuple[str, str]:
+def _force_stop(proc: subprocess.Popen[str]) -> None:
+    if sys.platform == "win32":
+        _taskkill(proc.pid)
+        return
+    _signal_group(proc.pid, signal.SIGKILL)
+
+
+def _drain(proc: subprocess.Popen[str], grace_seconds: float) -> tuple[str, str]:
+    # The last wait is at most 1 second. With the default grace, cleanup is
+    # 2 * GRACE_SECONDS + GRACE_SECONDS + 1, which stays under run_tests' margin.
     try:
-        stdout, stderr = proc.communicate(timeout=GRACE_SECONDS)
+        stdout, stderr = proc.communicate(timeout=grace_seconds)
     except subprocess.TimeoutExpired:
-        _signal_group(proc.pid, signal.SIGKILL)
+        _force_stop(proc)
         try:
-            stdout, stderr = proc.communicate(timeout=1)
+            stdout, stderr = proc.communicate(timeout=min(1.0, grace_seconds))
         except subprocess.TimeoutExpired:
             stdout, stderr = "", ""
             for stream in (proc.stdout, proc.stderr, proc.stdin):

@@ -79,9 +79,10 @@ class ValidatorCheck(BaseModel):
 class ValidatorConfig(BaseModel):
     tool: str  # validator name — resolved to validators/{tool}.py
     checks: list[ValidatorCheck] = Field(default_factory=list)
-    # Absent means the runner's default. Bundled run_tests sets this above
-    # its own inner limit so the runner does not kill the test command first.
-    timeout_seconds: StrictInt | None = Field(default=None, gt=0)
+    # Absent means the runner's default. At least 60 so run_tests keeps the
+    # 30 second cleanup gap. Bundled run_tests sets this above its own inner
+    # limit so the runner does not kill the test command first.
+    timeout_seconds: StrictInt | None = Field(default=None, ge=60)
 
     @field_validator("tool")
     @classmethod
