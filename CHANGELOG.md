@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-07
+
 ### Added
 
 - **(GH-70)** `/dmx/upgrade` refreshes IDE rule files to workflow version 0.5.0. It does not change `.dmx/config.md`, the memory bank, or `.dmx/jobs/`. Summary files keep one dmx block, and content outside that block stays as it was. A summary file whose dmx block has no end marker is left unchanged. `run_loop`, `loop_status`, and `list_skills` add one line when the copied rules are older than this version or have no version line. Existing repos should run `/dmx/upgrade` once.
