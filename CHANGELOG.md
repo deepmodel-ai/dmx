@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **(GH-79)** The README leads with the bundled loops instead of slash commands, links to the docs at https://dmx.deepmodel.ai, and drops internal milestone status and implementation detail now covered by the docs. Links are absolute, so the README also renders on PyPI. `pyproject.toml` adds `[project.urls]` (Homepage, Documentation, Source, Changelog, Issues), so PyPI links to the docs.
+
 ## [0.5.0] — 2026-10-07
 
 ### Added

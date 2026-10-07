@@ -2,399 +2,126 @@
 
 [![PyPI](https://img.shields.io/pypi/v/deepmodel-dmx)](https://pypi.org/project/deepmodel-dmx/)
 [![Test](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml/badge.svg)](https://github.com/deepmodel-ai/dmx/actions/workflows/test.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-dmx.deepmodel.ai-2563eb)](https://dmx.deepmodel.ai)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/deepmodel-ai/dmx/blob/main/LICENSE)
 
-**The missing orchestrator for AI-native engineering.**
+**The harness for AI-native engineering teams.**
+
+**[Read the docs →](https://dmx.deepmodel.ai)**
 
 Most teams building with AI run into the same problems:
 
 - Workflow lives in chat history. No process, nothing that persists, nothing you can hand off.
-- Every developer is using AI differently. Different tools, different prompts, different output.
+- Every developer uses AI differently. Different tools, different prompts, different output.
 - Results are unpredictable. Brilliant one session, wrong the next.
-- No shared context. Every session starts from scratch, every developer builds their own mental model.
-- Missing context causes drift. The same problem solved three ways in the same codebase.
+- No shared context. Every session starts from scratch.
 
-The [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) is the framework we built to fix this: start with a spec, build in phases, verify output, keep context in the repo. dmx is the orchestrator that makes the AI SDLC executable.
+dmx fixes the process, not the model. It runs as an MCP server inside Cursor, Claude Code, GitHub Copilot, and Antigravity, and turns your engineering workflow into **loops**: ordered skills your agent runs, validators that check the result, and a human gate before anything moves forward. It implements the [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc), an open framework for spec-first, phase-by-phase AI development.
 
-dmx runs as an MCP server inside Cursor, Claude Code, GitHub Copilot, and Antigravity. It gives you AI skills that govern the full engineering lifecycle — from first spec to production release — as structured loops. Each loop has a skill sequence, a shared memory context, and a validator. A loop without a validator is just a script.
+## How it works
 
-```
-/dmx/create-ticket         # describe the work → spec → branch
-/dmx/plan                  # spec → phased task list
-/dmx/implement-next-phase  # build next phase, stop, wait for review
-/dmx/validate              # quality gate: spec, security, coverage
-/dmx/create-pr             # sync memory, draft PR body, open PR
-/dmx/create-release        # tag and publish the release
-```
-
-Every command stops and waits. You review, decide, and move forward. Project context lives in `.dmx/` — committed to the repo, read by every AI session.
-
-When a skill sequence is trusted, formalize it as a **loop** — declarative YAML config, automated validators, and persisted state:
+Every piece of work runs through five loops, from first spec to open PR:
 
 ```
-/run-loop spec             # start the spec loop (ticket → branch → spec)
-/loop-continue             # resume after a human gate
+spec  →  plan  →  dev  →  validate  →  release
 ```
 
-## Loop runtime
-
-Loops are declarative configs that run an ordered skill sequence with durable state and automated validation. Default configs ship with dmx; teams override via `.dmx/loops/{name}.yaml`.
-
-**Foreground** is running `/dmx/*` skills manually — you are the orchestrator. **Background** is the loop runtime: you define the sequence, write validators that encode your judgment, and review the artifact. Trust is earned by validators, not a config flag.
-
-| Command | What it does |
-|---|---|
-| `/run-loop` | Start a loop by name — loads config, writes state, runs the first skill |
-| `/loop-continue` | Resume a paused loop after human review at a gate |
-
-Bundled loops for the SDLC pipeline:
-
-| Loop | Skills | Chains to |
+| Loop | What happens | Validators check |
 |---|---|---|
-| `spec` | create-ticket | `plan` |
-| `plan` | plan | `dev` |
-| `dev` | implement-next-phase, commit | `validate` |
-| `validate` | validate | `release` |
-| `release` | create-pr | — |
+| **spec** | Creates the ticket and branch, drafts `spec.md`, asks clarifying questions | Q&A answered, approach and scope defined |
+| **plan** | Turns the spec into a phased `tasks.md` | The plan has phases and real tasks |
+| **dev** | Implements one phase at a time and commits it, until every phase is done | Tests pass |
+| **validate** | Reviews the change for completeness, code quality, and security | Tests pass, the change matches the spec, no regressions |
+| **release** | Syncs the memory bank and opens the PR | The PR exists and memory is committed |
 
-Each loop config defines a goal state, optional `repeat_until` condition, validators, human gate policy, and `on_complete` chaining. Run state is written to `.dmx/jobs/{job_id}/{loop_name}-{task_id}.json` — there's no separate active-run pointer; the active run is derived by scanning a job's state files for the one non-terminal (`pending`/`running`/`paused`/`iterating`) entry, keyed off the current branch/ticket. On a feature branch, a release snapshot (`complete` with `outcome` still null, written by `create-pr` before `check_pr_ready`) is also the active run until that check finishes. This keeps loop state isolated per branch: pausing work on one branch and running a loop on another can't corrupt or lose either one's state.
+Each loop pauses after every skill so you can review. Run `/dmx/loop-continue` to move on. Validators run deterministically, outside the model: a required check that fails stops the loop and tells you why. When a loop passes, the next one starts on its own.
 
-Validators are plain Python functions at `validators/{name}.py` in the app repo (bundled fallbacks ship with dmx). The orchestrator invokes them via subprocess after all skills complete — the coding agent runs skills; validators run deterministically. A validator entry can set `timeout_seconds`. When it is omitted the runner allows 630 seconds, and that limit is passed to the validator as `loop_context.timeout_seconds`. `run_tests` stops the test command 30 seconds sooner. A configured `timeout_seconds` must be at least 60 seconds, so that gap is always there. To raise the limit, set `timeout_seconds` on this validator in the loop's YAML: your `.dmx/loops/{name}.yaml` if you have one, otherwise the shared source that provides the loop. If you use the bundled loop, copy it to `.dmx/loops/{name}.yaml` first; that file replaces it. On timeout, dmx stops that command and the processes it started: `SIGTERM`, then `SIGKILL` after 5 seconds. Windows stops the tree with `taskkill /T /F`. A process that starts its own session, such as some Docker-based test setups, is not stopped.
+Loops are YAML in your repo. Override any default in `.dmx/loops/`, add your own, and review changes in PRs like any other code. [Loops →](https://dmx.deepmodel.ai/core-concepts/loops)
 
-**Status:** M1 is complete ([#5](https://github.com/deepmodel-ai/dmx/issues/5)) — config, state persistence, MCP orchestration (`run_loop`, `loop_advance`, `loop_continue`, `loop_status`), human-gate sequencing, validator execution, the policy engine, `repeat_until` iteration, `on_complete` auto-chaining, and loop-level memory hooks are all implemented and covered by an end-to-end integration test suite that runs the full `spec → plan → dev → validate → release` pipeline through the real MCP tools.
+## Quick start
 
-Loop-level memory hooks: before the first skill runs, the runtime surfaces `activeContext.md`'s Open Learnings / Open Decisions to the agent; when a loop finishes (complete, paused for validator review, or iterating), it appends a one-line breadcrumb to Session Notes. This is a deterministic log entry, not judgment — promoting it into durable knowledge is still `/dmx/update-memory`'s job.
-
-## Shared sources
-
-An organization can define loops, skills, and validators once in a dedicated git repo and have every app repo in the org pull from them, instead of copy-pasting the same files into each one and letting them drift. This adds a third resolution tier, in between the app repo and dmx's own bundled defaults:
-
-```
-app repo (.dmx/loops/, .dmx/skills/, validators/)         ← highest precedence
-        ↓
-.dmx/vendor/{name}/{loops,skills,validators}/               ← declared shared sources,
-        ↓                                                      checked in declared order
-.dmx/vendor/{name-2}/{loops,skills,validators}/
-        ↓
-bundled with dmx (src/dmx/{loops,skills,validators}/)      ← lowest precedence
-```
-
-Declare one or more sources in `.dmx/shared-sources.yaml`, pinned to a tag, branch, or commit SHA (same `git::<url>//<subdir>?ref=<ref>` addressing Terraform uses for module sources):
-
-```yaml
-shared_sources:
-  - name: org-wide
-    source: "git::https://github.com/acme/dmx-shared.git//?ref=v1.4.0"
-  - name: team-frontend
-    source: "git::https://github.com/acme/dmx-frontend-skills.git//?ref=v2.1.0"
-```
-
-Then run `/dmx/sync` to clone each source at its pinned ref and vendor it into `.dmx/vendor/{name}/`, committed to the repo like any other `.dmx/` state. Re-run it whenever a source's ref changes. `/dmx/sync`:
-
-- Is blocked on `branch_base` — like every other write path in dmx, it produces a commit that belongs on a reviewed branch, not straight on `main`.
-- Fails clearly (not silently) if a source can't be cloned, its ref doesn't exist, the resolved directory doesn't look like a dmx shared source (no `loops/`, `skills/`, or `validators/` at the resolved path), or an entry under its `skills/` doesn't match either supported shape.
-- Warns — without failing the sync — about same-name collisions across the app repo and every declared source, e.g. two sources both defining `spec.yaml`, so an unintended shadow never goes unnoticed.
-
-Skills support two shapes, in every tier that resolves them (a project's own `.dmx/skills/`, a shared source's `skills/`, and dmx's bundled skills): dmx's own flat `{name}.md`, or the [agentskills.io](https://agentskills.io) / Claude Code / Cursor convention of a `{name}/SKILL.md` folder with optional `scripts/`, `references/`, and `assets/` — so a shared source (or a project directly) can point straight at an org's existing standards-shaped skills repo with zero dmx-specific restructuring. When a folder-shaped skill resolves, dmx tells the agent its on-disk root path so it can resolve those `scripts/`/`references/`/`assets/` paths directly, and surfaces any `dependencies:` declared in its frontmatter as an explicit note (dmx has no auto-install step of its own).
-
-`list_skills` lists those local and vendored skills: one line per name, `name (source): description`, using the name `get_skill_definition` accepts. It does not list bundled skills. The CLI command `dmx list-skills` does the opposite and prints bundled skills only. A listed skill whose name matches a bundled command is marked on the line, because loops and `get_skill_definition` load the override while `/dmx/{name}` still runs the bundled prompt. A discovery question ("which skills can update helm?") calls `list_skills`, lists the matches, and runs nothing. A task request with no loop active runs the one clear match through `get_skill_definition`, and asks which to run when several match.
-
-Because everything is vendored and committed rather than fetched live at resolve time, network and git credentials are only needed at `/dmx/sync` time — infrequent and human-reviewed — not on every loop run. `/dmx/sync` shells out to plain `git`, so it inherits whatever credentials the invoking environment's git already has (SSH agent, `gh auth`, a CI deploy key or machine-user PAT) — nothing dmx-specific to configure, and it works the same way against GitHub, GitHub Enterprise, GitLab, or any other git host. See [#27](https://github.com/deepmodel-ai/dmx/issues/27) for the full design.
-
-## Roadmap
-
-- [x] Full lifecycle workflow — spec, plan, build, validate, release
-- [x] `.dmx/` memory bank — shared project context committed to the repo
-- [x] Loop runtime — background execution engine with validators, policy, `repeat_until`, and autonomous chaining ([#5](https://github.com/deepmodel-ai/dmx/issues/5))
-- [x] Org-wide shared sources — vendor shared loops/skills/validators from a central git repo ([#27](https://github.com/deepmodel-ai/dmx/issues/27))
-- [ ] Team server — hosted MCP endpoint, shared loops and rules across the team
-- [ ] Gateway — model governance, cost visibility, autonomous background execution
-
-## Get started
+**1. Add dmx to your IDE.** There's nothing to install: `uvx` fetches dmx on demand. Every IDE uses the same config:
 
 ```json
 {
   "mcpServers": {
     "dmx": {
       "command": "uvx",
-      "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
+      "args": ["--from", "deepmodel-dmx@latest", "dmx", "serve"]
     }
   }
 }
 ```
 
-Add to your IDE config ([Claude Code, Copilot, Antigravity ↓](#step-1--add-the-mcp-server)). Then follow [Your first project](#your-first-project) to initialize and run the full loop on a new repo.
+Save it to the file for your IDE, then restart the IDE:
 
-## Your first project
+| IDE | For all your projects | For one project, shared with your team |
+|---|---|---|
+| Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+| Claude Code desktop app | `~/Library/Application Support/Claude/claude_desktop_config.json` | `.mcp.json` |
+| Claude Code in the terminal | — | `.mcp.json` |
+| VS Code (GitHub Copilot) | `~/.copilot/mcp-config.json` | `.mcp.json` |
 
-A brand-new repo, from `/dmx/init` through the first merged PR. You review at every gate; `/dmx/loop-continue` is how you move forward.
+Commit the project file and everyone on the team gets dmx. The [MCP setup guide](https://dmx.deepmodel.ai/mcp-setup) covers the Claude Code CLI across all projects, Windows paths, deploying with Jamf or Intune, and other IDEs.
 
-### Before you start
-
-- A GitHub repo cloned locally with an `origin` remote. The spec loop creates the feature branch on GitHub from `origin/{branch_base}` (usually `main` or `master`), even if you track work in Jira or use no ticketing system.
-- The dmx MCP server added to your IDE ([install guide](#step-1--add-the-mcp-server)).
-- The GitHub MCP server (`user-github`) authenticated. `/dmx/init` probes it before writing any files.
-- The Atlassian MCP server only if you will choose Jira at init.
-
-### 1. Initialize
-
-On the integration branch (`main` or `master`):
+**2. Initialize your repo.** On your integration branch, run:
 
 ```
 /dmx/init
 ```
 
-Choose a workflow — **sdlc** (this walkthrough) or **freestyle** (no process enforced) — and a ticketing system: `none`, `github-issues`, or `jira`. Re-run `/dmx/init` at any time to switch workflow or ticketing; existing memory bank files with content are left intact.
+Pick the `sdlc` workflow and your ticketing system (GitHub Issues, Jira, or none). Then open a new chat so the rules take effect.
 
-Init writes `.dmx/config.md` and the memory bank (`projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`, `activeContext.md`). Open a **new chat** so the IDE rules take effect.
+**3. Commit and push** what `/dmx/init` wrote. The spec loop branches from what's on `origin`.
 
-If you already have a `docs/` folder, init reads it when populating the memory bank. Writing the requirement first is slightly better; either order works.
-
-### 2. Write the product requirement
-
-Create `docs/requirements.md` at the repo root and put the product or feature description there. You can paste the requirement into chat later instead, but a file is easier to review and reuse.
-
-`docs/requirements.md` is a convention, not a dmx artifact. The spec loop uses whatever you point it at.
-
-### 3. Commit and push
-
-The spec loop must start from the configured integration branch, and it creates the remote feature branch from whatever is already on origin. Commit `.dmx/`, `docs/`, and any files init wrote, then push:
-
-```
-git add .
-git commit -m "chore: initialize dmx and capture product requirements"
-git push -u origin HEAD
-```
-
-Stay on `main` or `master`.
-
-### 4. Start the spec loop
-
-In the same message as the command, point at the requirement file or paste it:
+**4. Start your first loop:**
 
 ```
 /dmx/run-loop spec
 
-See docs/requirements.md
+Add rate limiting to the public inference endpoint.
 ```
 
-This creates a GitHub issue or Jira ticket (if you configured one), cuts a feature branch from `origin/{branch_base}`, checks it out, and writes `.dmx/spec.md`. Then it pauses.
+Answer the spec's questions, then `/dmx/loop-continue` at each gate. When the PR merges, `/dmx/close-ticket` closes the ticket and deletes the branch.
 
-### 5. Answer the spec
+The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step.
 
-Open `.dmx/spec.md`. Fill in Technical Approach if it is incomplete, and answer every question. Empty answers or placeholders (`TBD`, `TODO`) fail the spec validator.
+## What you get
 
-```
-/dmx/loop-continue
-```
+**Validators with policy.** Required checks block; optional checks warn. Write your own in `validators/` as plain Python. [Validators →](https://dmx.deepmodel.ai/validators)
 
-On success the runtime auto-chains to the `plan` loop.
+**A memory bank.** `.dmx/` holds project context, the current spec and plan, and loop state, committed to the repo. Every session and every developer starts from the same understanding. [Memory bank →](https://dmx.deepmodel.ai/configuration/memory-bank)
 
-### 6. Review the plan
+**Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and vendor them into every project with `/dmx/sync`. Layer team config over an org baseline; each repo can still override what it needs. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)
 
-`plan` writes `.dmx/tasks.md` with phases and tasks, then pauses. Edit freely — this is the implementation contract.
+**Skill discovery.** Ask your agent "which skills can update helm?" and it finds matching skills from your repo and every shared source. Ask for the task and it runs the right one. [Custom skills →](https://dmx.deepmodel.ai/configuration/custom-skills)
 
-```
-/dmx/loop-continue
-```
+**Every skill on its own, too.** Each step is also a `/dmx/*` command (`/dmx/plan`, `/dmx/implement-next-phase`, `/dmx/validate`, `/dmx/create-pr`, …) for when you want to drive by hand. [Command reference →](https://dmx.deepmodel.ai/reference/commands)
 
-That starts the `dev` loop.
+## Upgrading
 
-### 7. Build phase by phase
+Pin a version in your MCP config (`deepmodel-dmx==0.5.0`) or use `@latest`, restart your IDE, then run `/dmx/upgrade` once in each repo and commit the refreshed rule files. [Upgrading dmx →](https://dmx.deepmodel.ai/upgrading)
 
-Each `dev` cycle:
+## Roadmap
 
-1. Implements the next unchecked phase in `tasks.md`, then pauses.
-2. Review the diff.
-3. `/dmx/loop-continue` runs **commit only**. It does not push.
-4. Review the commit.
-5. `/dmx/loop-continue` again — validators run, then either the next phase starts or the loop chains to `validate`.
-
-Repeat until every phase is checked off.
-
-### 8. Validate and open the PR
-
-After the last phase, `validate` runs the quality gate and pauses. Review the report, then `/dmx/loop-continue`. On success the `release` loop runs `create-pr`: it pushes the feature branch and opens the pull request.
-
-### 9. Merge and close
-
-Review the PR and merge it. Then:
-
-```
-/dmx/close-ticket
-```
-
-That closes the ticket, comments the PR link, and deletes the feature branch locally and on origin. `/dmx/loop-continue` after merge is not a close path — the release loop ends when the PR exists.
-
-You can run the same steps by hand (`/dmx/create-ticket`, `/dmx/plan`, `/dmx/implement-next-phase`, …) instead of loops. See the skill catalog below.
+- [x] Full lifecycle loops: spec, plan, build, validate, release
+- [x] Validators, human gates, and persistent loop state
+- [x] `.dmx/` memory bank, committed to the repo
+- [x] Org-wide and team shared sources, with skill discovery
+- [ ] Team server: a hosted MCP endpoint with shared loops and rules across the team
+- [ ] Gateway: model governance, cost visibility, and autonomous background execution
 
 ## Learn more
 
-- [When Is a Loop Ready to Run Without You?](https://himakara.hashnode.dev/when-is-a-loop-ready-to-run-without-you) — the thinking behind dmx
-- [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc) — the open framework dmx implements
+- [Documentation](https://dmx.deepmodel.ai): concepts, loops, configuration, and reference
+- [Changelog](https://dmx.deepmodel.ai/changelog)
+- [AI SDLC](https://github.com/deepmodel-ai/ai-sdlc): the open framework dmx implements
+- [When Is a Loop Ready to Run Without You?](https://himakara.hashnode.dev/when-is-a-loop-ready-to-run-without-you): the thinking behind dmx
 
-<details>
-<summary>Full install guide</summary>
+## Contributing
 
-### Step 1 — Add the MCP server
+Contributions are welcome. See [CONTRIBUTING.md](https://github.com/deepmodel-ai/dmx/blob/main/CONTRIBUTING.md) for development setup and the [Contributor License Agreement](https://github.com/deepmodel-ai/dmx/blob/main/CLA.md). To report a vulnerability, see [SECURITY.md](https://github.com/deepmodel-ai/dmx/blob/main/SECURITY.md).
 
-Add to your Cursor MCP config (`~/.cursor/mcp.json`) and restart:
+## License
 
-```json
-{
-  "mcpServers": {
-    "dmx": {
-      "command": "uvx",
-      "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
-    }
-  }
-}
-```
-
-<details>
-<summary>Claude Code, Copilot, Antigravity</summary>
-
-**Claude Code** — `~/.claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "dmx": {
-      "command": "uvx",
-      "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
-    }
-  }
-}
-```
-
-**GitHub Copilot** — `.vscode/settings.json`
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "dmx": {
-        "command": "uvx",
-        "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
-      }
-    }
-  }
-}
-```
-
-**Antigravity** — `~/.gemini/config/mcp_config.json`
-
-```json
-{
-  "mcpServers": {
-    "dmx": {
-      "command": "uvx",
-      "args": ["--from", "deepmodel-dmx", "dmx", "serve"]
-    }
-  }
-}
-```
-
-</details>
-
-### Step 2 — Run `/dmx/init` in your IDE
-
-Open any chat and run `/dmx/init`. It will:
-
-- Write always-apply engineering rules into your project (`.cursor/rules/`, `CLAUDE.md`, etc.)
-- Scaffold the `.dmx/` memory bank — durable core files plus an `activeContext.md` learning inbox
-- Configure your workflow mode (feature branches or trunk) and ticketing system
-
-Safe to re-run. Updates config without overwriting memory bank files that already have content.
-
-After you upgrade the dmx package, run `/dmx/upgrade` once, then commit the changed rule files. It refreshes the rules copied into the repo and does not change `.dmx/config.md`, the memory bank, or `.dmx/jobs/`.
-
-### Step 3 — Start your first ticket
-
-On a new repo, follow [Your first project](#your-first-project) (`/dmx/run-loop spec` through `/dmx/close-ticket`).
-
-To start a ticket by hand instead:
-
-```
-/dmx/create-ticket
-```
-
-Describe what you want to build. dmx scaffolds the spec, asks clarifying questions, and waits for your answers before writing a line of code.
-
-</details>
-
-<details>
-<summary>Full skill catalog </summary>
-
-### Workflow
-
-| Skill | What it does |
-|---|---|
-| `/dmx/init` | One-time project setup: rules, memory bank, IDE config |
-| `/dmx/upgrade` | Refresh IDE rule files after upgrading the dmx package |
-| `/dmx/create-ticket` | Idea → ticket → branch → spec in one command |
-| `/dmx/derive-ticket` | Uncommitted changes → ticket → branch → derived spec |
-| `/dmx/plan` | Answered spec → phased `tasks.md` |
-| `/dmx/implement-next-phase` | Execute the next phase in `tasks.md`, stop |
-| `/dmx/implement-next-task` | Execute the next single task, stop |
-| `/dmx/validate` | Pre-PR quality gate: ticket, code, security |
-| `/dmx/create-branch` | Create a properly named branch, scaffold spec |
-| `/dmx/commit` | Conventional commit from staged diff |
-| `/dmx/create-pr` | Open PR with correct title + description |
-| `/dmx/draft-pr-description` | Generate PR body without opening the PR |
-| `/dmx/close-ticket` | Post-merge: close ticket, delete branch |
-
-### Release
-
-| Skill | What it does |
-|---|---|
-| `/dmx/hotfix` | Create hotfix branch from `production_branch` |
-| `/dmx/draft-release-note` | Generate release notes from merged PRs |
-| `/dmx/release-merge` | Open integration → production release gate PR |
-| `/dmx/create-release` | Tag production branch and publish GitHub release |
-
-### Utilities
-
-| Skill | What it does |
-|---|---|
-| `/dmx/status` | Snapshot of in-progress tickets and open PRs |
-| `/dmx/sync-branch` | Rebase/merge integration branch onto current branch |
-| `/dmx/sync` | Vendor org-wide shared loops/skills/validators into `.dmx/vendor/` |
-| `/dmx/update-memory` | Deep sync: promote inbox learnings, reconcile contradictions |
-| `/dmx/review` | Code review: clarity, correctness, maintainability |
-| `/dmx/test` | Write tests that enable change |
-| `/dmx/docs` | Write clear, human-first documentation |
-| `/dmx/secure` | Security analysis — thinks like an attacker |
-
-### Loop
-
-| Skill | What it does |
-|---|---|
-| `/run-loop` | Start a loop by name — reads loop config, initialises state, runs first skill |
-| `/loop-continue` | Resume a paused loop after human review at a gate |
-
-</details>
-
-<details>
-<summary>Memory bank (.dmx/) </summary>
-
-The `.dmx/` directory is the project's shared memory — committed to the repo so every developer and every AI session starts from the same understanding.
-
-| File | Role | Lifetime |
-|---|---|---|
-| `config.md` | Project settings — ticketing, integration/production branches, credentials; injected as always-apply rule | Updated by `/dmx/init` |
-| `projectbrief.md` | Goals, scope, non-negotiables | Durable — updated rarely |
-| `productContext.md` | User-facing behaviour and flows | Durable — updated when features ship |
-| `systemPatterns.md` | Architecture, patterns, component relationships | Durable — updated when design changes |
-| `techContext.md` | Stack, dependencies, constraints | Durable — updated when tooling changes |
-| `activeContext.md` | Learning inbox: open learnings, decisions, session notes | Branch-local — promoted to durable files on commit/PR |
-| `spec.md` | What is being built and why — YAML frontmatter + scope + Q&A | Branch-scoped — created by `create-ticket`, committed with the PR |
-| `tasks.md` | Phased implementation plan | Branch-scoped — created by `plan`, committed with the PR |
-| `loops/` | Loop config overrides (YAML) | Optional — overrides bundled defaults from dmx |
-| `jobs/` | Per-run loop state (skill progress, validator results); also doubles as the active-run pointer — no separate pointer file exists | Branch-scoped — committed with the PR when present |
-
-**Branch-as-identity model**: each branch holds exactly one unit of work. `spec.md` and `tasks.md` live directly in `.dmx/` on the feature branch. When a PR merges, they go with it — but `close-ticket` doesn't delete them, so `main` (and any branch cut from it afterward) keeps the last-merged ticket's `spec.md`/`tasks.md` as a stale leftover rather than truly starting fresh. The `spec` loop guards against this explicitly: it only starts from the configured integration branch and never trusts a pre-existing `spec.md` for its own job identity, so a leftover file can't get a new ticket's state written into the previous ticket's job folder.
-
-**Three-tier memory sync**: learnings accumulate in `activeContext.md` during implementation. `/dmx/commit` promotes qualifying items (light sync), `/dmx/create-pr` promotes all remaining items (full sync), and `/dmx/update-memory` does a deep reconciliation on demand.
-
-</details>
+[AGPL-3.0](https://github.com/deepmodel-ai/dmx/blob/main/LICENSE)

@@ -28,6 +28,13 @@ dependencies = [
     "starlette>=0.40",
 ]
 
+[project.urls]
+Homepage = "https://dmx.deepmodel.ai"
+Documentation = "https://dmx.deepmodel.ai"
+Source = "https://github.com/deepmodel-ai/dmx"
+Changelog = "https://dmx.deepmodel.ai/changelog"
+Issues = "https://github.com/deepmodel-ai/dmx/issues"
+
 [project.optional-dependencies]
 watch = ["watchfiles>=0.21"]
 dev = [
