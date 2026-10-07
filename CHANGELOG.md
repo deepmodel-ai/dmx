@@ -11,6 +11,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **(GH-66)** A timed-out validator or test command no longer leaves the processes it started running. The command runs in its own session; on timeout the group gets `SIGTERM`, then `SIGKILL` after 5 seconds. Windows stops the tree with `taskkill /T /F`. A process that starts its own session, such as some Docker-based test setups, is still left running.
+
 - **(GH-46)** A loop can set `timeout_seconds` on a validator. `run_validator` uses it, and uses 630 seconds when the field is absent, so a loop file written before this field still gives `run_tests` 600 seconds for the suite. The effective limit is passed to the validator as `loop_context.timeout_seconds`. The test command stops 30 seconds sooner, so a suite that finishes within 600 seconds is not killed by the runner. A timeout names the limit that fired and says to edit the app repo's loop file or the shared source, copying the bundled loop only when neither exists.
 
 - **(GH-48)** A run whose skills are all recorded but whose finish step never started can be resumed. `loop_continue` re-runs the validators when the status is still `running` or `iterating` and `current_skill_index` is past the last skill. `loop_advance` and `loop_status` tell the agent to call `loop_continue` and do not record another skill. A new `repeat_until` round is `running` while its skills execute, so `iterating` is not left on for the whole round. Chaining writes the next run once, already in progress, and `loop_status` waits for a live worker even when no run is active yet, so a poll during the chain cannot report the next loop as pending or report that no run exists.

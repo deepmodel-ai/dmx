@@ -243,7 +243,7 @@ class TestRunValidator:
                 args, 0, stdout='{"pass": true, "checks": []}', stderr=""
             )
 
-        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+        monkeypatch.setattr("dmx.validator_runner.run_with_group_timeout", fake_run)
 
         run_validator(
             "v",
@@ -271,7 +271,7 @@ class TestRunValidator:
                 args, 0, stdout='{"pass": true, "checks": []}', stderr=""
             )
 
-        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+        monkeypatch.setattr("dmx.validator_runner.run_with_group_timeout", fake_run)
 
         run_validator("v", tmp_path, {}, "goal", {"job_id": "J"})
 
@@ -306,7 +306,7 @@ class TestRunValidator:
         def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             raise subprocess.TimeoutExpired(cmd="validator", timeout=int(str(kwargs["timeout"])))
 
-        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+        monkeypatch.setattr("dmx.validator_runner.run_with_group_timeout", fake_run)
 
         config = LoopConfig.model_validate(
             {

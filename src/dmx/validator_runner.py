@@ -50,6 +50,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dmx.group_timeout import run_with_group_timeout
 from dmx.loop_schema import FailureHandling, LoopConfig, OnOptionalFailure
 from dmx.loop_state import LoopOutcome, LoopStatus
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
@@ -177,13 +178,11 @@ def run_validator(
     }
 
     try:
-        proc = subprocess.run(
+        proc = run_with_group_timeout(
             [sys.executable, str(path)],
-            input=json.dumps(contract),
-            capture_output=True,
-            text=True,
             timeout=limit,
-            cwd=workspace_root,
+            input=json.dumps(contract),
+            cwd=str(workspace_root),
         )
     except subprocess.TimeoutExpired as exc:
         raise ValidatorRunError(

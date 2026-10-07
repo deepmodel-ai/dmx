@@ -48,6 +48,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dmx.group_timeout import run_with_group_timeout
+
 TEST_TIMEOUT_SECONDS = 600
 # Leave the runner time to receive this validator's own timeout result.
 TIMEOUT_MARGIN_SECONDS = 30
@@ -149,12 +151,10 @@ def run(
     cmd_str = " ".join(cmd)
     inner = _inner_timeout(timeout_seconds)
     try:
-        proc = subprocess.run(
+        proc = run_with_group_timeout(
             cmd,
-            cwd=workspace_root,
-            capture_output=True,
-            text=True,
             timeout=inner,
+            cwd=str(workspace_root),
         )
     except FileNotFoundError:
         return {
