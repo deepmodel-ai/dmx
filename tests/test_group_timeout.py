@@ -130,14 +130,18 @@ def test_sigterm_is_sent_before_sigkill(tmp_path: Path) -> None:
     assert marker.read_text() == "term"
 
 
-def test_run_tests_timeout_stops_the_child(tmp_path: Path) -> None:
+def test_run_tests_timeout_stops_the_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pidfile = tmp_path / "child.pid"
-    # The shell writes the pid before anything else. A Python startup here
-    # can lose the race against a short timeout on a slow macOS runner.
-    # Make turns $$! into $!, the PID of the background sleep.
-    (tmp_path / "Makefile").write_text(
-        "test:\n\tsh -c 'sleep 120 & echo $$! > child.pid; sleep 120'\n",
-        encoding="utf-8",
+    # /usr/bin/make is an xcrun shim on macOS. Its first call on a CI runner
+    # can take seconds, longer than this timeout. Detection is covered elsewhere.
+    monkeypatch.setattr(
+        run_tests,
+        "_detect_test_command",
+        lambda _root: [
+            "sh",
+            "-c",
+            f"sleep 120 & echo $! > {shlex.quote(str(pidfile))}; sleep 120",
+        ],
     )
     child_pid = 0
     try:
