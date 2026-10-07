@@ -32,10 +32,14 @@ Tool contracts
       interrupted; ``loop_continue`` runs the validators again.
 
 ``loop_status()``
-    - Read-only. Waits up to 25 seconds for a live validator worker and
-      returns as soon as it finishes. If the worker is still going, reports
-      that. If the run is ``validating`` but this process has no worker,
-      tells the agent to call ``loop_continue``.
+    - Read-only, except one adoption: a single in-progress run left in
+      ``.dmx/jobs/none/`` or ``unknown/`` by dmx 0.4.2 is moved into the
+      branch folder. A file already committed on ``branch_base`` or its
+      upstream stays put.
+    - Waits up to 25 seconds for a live validator worker and returns as soon
+      as it finishes. If the worker is still going, reports that. If the run
+      is ``validating`` but this process has no worker, tells the agent to
+      call ``loop_continue``.
 
 ``loop_continue()``
     - Finds the active run the same way as ``loop_advance``.
@@ -51,6 +55,7 @@ Tool contracts
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import importlib.resources as pkg
 import json
 import logging
@@ -81,8 +86,10 @@ from dmx.loop_state import (
     is_pending_job_id,
     is_pr_snapshot,
     job_has_loop_runs,
+    list_open_runs,
     make_pending_job_id,
     make_task_id,
+    move_one_run,
     read_spec_identity,
     read_state,
     rename_job,
@@ -100,6 +107,22 @@ from dmx.workspace import resolve_workspace_root
 __all__ = ["register_loop_tools"]
 
 logger = logging.getLogger(__name__)
+
+# Set when a 0.4.2 run is moved into the branch job folder during this call.
+_LEGACY_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dmx_legacy_job_move", default=None
+)
+
+
+def _with_legacy_note(message: str) -> str:
+    """Append the job-move line once, then clear it."""
+    note = _LEGACY_MOVE_NOTE.get()
+    if not note:
+        return message
+    _LEGACY_MOVE_NOTE.set(None)
+    if note in message:
+        return message
+    return f"{message}\n\n{note}"
 
 
 def _with_rules_reminder(root: Path, message: str) -> str:
@@ -535,23 +558,171 @@ def _find_active(root: Path) -> tuple[str, str, str] | None:
     establishes a new ticket identity (``require_branch``) has started but
     hasn't yet completed the skill that makes its real job_id resolvable.
 
+    When that still finds nothing, one in-progress run left in
+    ``.dmx/jobs/none/`` or ``.dmx/jobs/unknown/`` by dmx 0.4.2 is moved into
+    the branch folder, unless that file is already committed on
+    ``branch_base`` or its upstream. See :func:`_adopt_legacy_job`.
+
     Returns:
         ``(job_id, loop_name, task_id)``, or ``None`` if nothing is active.
     """
     job_id = resolve_job_id(root)
+    found = _lookup_job_run(root, job_id)
+    if found is not None:
+        loop_name, task_id = found
+        return job_id, loop_name, task_id
+    pending = find_pending_run(root)
+    if pending is not None:
+        return pending
+    adopted = _adopt_legacy_job(root, job_id)
+    if adopted is None:
+        return None
+    loop_name, task_id = adopted
+    return job_id, loop_name, task_id
+
+
+def _lookup_job_run(root: Path, job_id: str) -> tuple[str, str] | None:
+    """Non-terminal run under *job_id*, or a PR snapshot off a protected branch."""
     active = find_active_run(root, job_id)
     if active is not None:
-        loop_name, task_id = active
-        return job_id, loop_name, task_id
+        return active
     # A PR snapshot is ``complete`` so the merged file is not a live loop.
     # On the feature branch it still needs ``loop_continue`` to run
     # validators. On the integration branch it is history.
-    if not _on_protected_branch(root):
-        snapshot = find_pr_snapshot_run(root, job_id)
-        if snapshot is not None:
-            loop_name, task_id = snapshot
-            return job_id, loop_name, task_id
-    return find_pending_run(root)
+    if _on_protected_branch(root):
+        return None
+    return find_pr_snapshot_run(root, job_id)
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+    """Run git in *root*. ``None`` when the command cannot be run."""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=_COMMIT_DMX_STATE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _ref_exists(root: Path, ref: str) -> bool | None:
+    """Whether *ref* resolves. ``None`` when git cannot answer."""
+    result = _run_git(root, "rev-parse", "--verify", "--quiet", ref)
+    if result is None:
+        return None
+    return result.returncode == 0
+
+
+def _merged_history_refs(root: Path, branch_base: str) -> list[str] | None:
+    """Local *branch_base* plus its upstream, or ``origin/<branch_base>``.
+
+    ``None`` when git cannot answer. An empty list means none of those refs
+    exist. ``create-ticket`` branches from the remote, and the local
+    integration branch is often left behind.
+    """
+    refs: list[str] = []
+    local = _ref_exists(root, branch_base)
+    if local is None:
+        return None
+    if local:
+        refs.append(branch_base)
+
+    upstream = _run_git(root, "rev-parse", "--abbrev-ref", f"{branch_base}@{{upstream}}")
+    if upstream is None:
+        return None
+    remote = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    if not remote or remote == branch_base:
+        fallback = f"origin/{branch_base}"
+        exists = _ref_exists(root, fallback)
+        if exists is None:
+            return None
+        remote = fallback if exists else ""
+    if remote and remote not in refs:
+        refs.append(remote)
+    return refs
+
+
+def _committed_legacy_paths(root: Path, ticket: str) -> set[str] | None:
+    """Paths under ``.dmx/jobs/<ticket>/`` that are merged history.
+
+    Merged history is the union of the local ``branch_base`` and its
+    upstream (``origin/<branch_base>`` when no upstream is set). ``None``
+    when git cannot answer or none of those refs exist: callers then adopt
+    nothing. A ref that exists but cannot be listed also adopts nothing.
+    An in-progress run is absent from all of them.
+    """
+    branch_base = _read_branch_base(root)
+    if not branch_base:
+        return None
+    refs = _merged_history_refs(root, branch_base)
+    if not refs:
+        return None
+    found: set[str] = set()
+    prefix = f".dmx/jobs/{ticket}"
+    for ref in refs:
+        result = _run_git(root, "ls-tree", "-r", "--name-only", ref, "--", prefix)
+        if result is None or result.returncode != 0:
+            return None
+        found.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return found
+
+
+def _adopt_legacy_job(root: Path, job_id: str) -> tuple[str, str] | None:
+    """Move one 0.4.2 run from ``none`` or ``unknown`` into *job_id*.
+
+    The raw ``ticket`` must be a value :func:`usable_ticket` rejects, and
+    the spec ``branch`` must be the current branch. Completed and failed
+    runs stay in the old folder. A run whose state file is already committed
+    on ``branch_base`` or its upstream stays too: before job ids changed, a
+    release merged to the integration branch could still be marked
+    ``running``. Only one remaining candidate is moved. A PR snapshot is a
+    candidate only off a protected branch. If git cannot say what those refs
+    contain, nothing is moved.
+
+    Sets :data:`_LEGACY_MOVE_NOTE` when a file moves.
+    """
+    ticket, spec_branch = read_spec_identity(root)
+    branch = current_branch(root)
+    if not ticket or not branch or not spec_branch or spec_branch != branch:
+        return None
+    if usable_ticket(ticket) is not None or ticket == job_id:
+        return None
+    if ticket.lower() not in {"none", "unknown"}:
+        return None
+    try:
+        if find_active_run(root, job_id) is not None:
+            return None
+    except AmbiguousActiveRun:
+        return None
+    committed = _committed_legacy_paths(root, ticket)
+    if committed is None:
+        return None
+    candidates = [
+        (loop_name, task_id)
+        for loop_name, task_id in list_open_runs(
+            root, ticket, include_snapshots=not _on_protected_branch(root)
+        )
+        if f".dmx/jobs/{ticket}/{loop_name}-{task_id}.json" not in committed
+    ]
+    if len(candidates) != 1:
+        return None
+    loop_name, task_id = candidates[0]
+    if not move_one_run(root, ticket, job_id, loop_name, task_id):
+        return None
+    logger.info(
+        "moved in-progress %s run from jobs/%s to jobs/%s",
+        loop_name,
+        ticket,
+        job_id,
+    )
+    _LEGACY_MOVE_NOTE.set(
+        f"Moved the in-progress `{loop_name}` run from `.dmx/jobs/{ticket}/` "
+        f"to `.dmx/jobs/{job_id}/` (job ids changed in 0.5.0)."
+    )
+    return loop_name, task_id
 
 
 class PendingJobPromotionError(Exception):
@@ -801,6 +972,11 @@ def _validating_start_refusal(root: Path) -> str | None:
     except (json.JSONDecodeError, OSError):
         return None
     if state.get("status") != LoopStatus.validating.value:
+        if _LEGACY_MOVE_NOTE.get() and state.get("status") != LoopStatus.complete.value:
+            return (
+                f"A `{loop_name}` loop is already in progress "
+                f"(job `{job_id}`). Call `loop_continue`."
+            )
         return None
     return (
         f"Cannot start a new loop: `{loop_name}` is still validating "
@@ -1664,7 +1840,9 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
-        return _with_rules_reminder(root, _start_loop(root, name, description).message)
+        return _with_rules_reminder(
+            root, _with_legacy_note(_start_loop(root, name, description).message)
+        )
 
     @app.tool
     async def get_skill_definition(
@@ -1796,31 +1974,34 @@ def register_loop_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
 
+        def finish(message: str) -> str:
+            return _with_legacy_note(message)
+
         try:
             found = _find_active(root)
         except AmbiguousActiveRun as exc:
-            return f"Error: {exc}"
+            return finish(f"Error: {exc}")
         if not found:
-            return "No active loop run found. Start a loop with `run_loop` first."
+            return finish("No active loop run found. Start a loop with `run_loop` first.")
         job_id, loop_name, task_id = found
         try:
             job_id = _maybe_promote_pending_job(root, job_id)
         except PendingJobPromotionError as exc:
-            return f"Error: {exc}"
+            return finish(f"Error: {exc}")
 
         state = read_state(root, job_id, loop_name, task_id)
         if state.get("status") == LoopStatus.validating.value:
             if _validation_worker_alive(task_id):
-                return _VALIDATORS_RUNNING
-            return _VALIDATION_INTERRUPTED
+                return finish(_VALIDATORS_RUNNING)
+            return finish(_VALIDATION_INTERRUPTED)
         if _skills_are_complete(state) and state.get("status") in {
             LoopStatus.running.value,
             LoopStatus.iterating.value,
         }:
-            return _FINISH_PENDING
+            return finish(_FINISH_PENDING)
         rejected = _rejected_advance(state, skill)
         if rejected:
-            return rejected
+            return finish(rejected)
         was_snapshot = is_pr_snapshot(state)
         skills: list[str] = state["skills"]
         idx: int = state["current_skill_index"]
@@ -1838,7 +2019,7 @@ def register_loop_tools(app: FastMCP) -> None:
         try:
             config = _resolve_loop(loop_name, root)
         except Exception as exc:  # noqa: BLE001
-            return f"Error reloading loop config: {exc}"
+            return finish(f"Error reloading loop config: {exc}")
 
         # Persist output and completed list regardless of branch taken below.
         write_state(
@@ -1867,14 +2048,16 @@ def register_loop_tools(app: FastMCP) -> None:
                         "status": LoopStatus.paused.value,
                     },
                 )
-                return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
+                return finish(_pause_message(loop_name, job_id, task_id, next_idx, len(skills)))
             if config.human_gate:
                 # PR snapshot stays complete so a later commit cannot put
                 # `paused` back into the open PR.
-                return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
+                return finish(_pause_message(loop_name, job_id, task_id, next_idx, len(skills)))
             # human_gate: false — return next skill instruction immediately.
             next_skill = skills[next_idx]
-            return _skill_instruction(next_skill, loop_name, next_idx, len(skills), job_id, task_id)
+            return finish(
+                _skill_instruction(next_skill, loop_name, next_idx, len(skills), job_id, task_id)
+            )
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
             # running validators and chaining. loop_continue triggers the final step.
@@ -1889,10 +2072,12 @@ def register_loop_tools(app: FastMCP) -> None:
                         "status": LoopStatus.paused.value,
                     },
                 )
-            return _pause_message(loop_name, job_id, task_id, next_idx, len(skills))
+            return finish(_pause_message(loop_name, job_id, task_id, next_idx, len(skills)))
         else:
             # All skills complete — validators run off this request.
-            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            return finish(
+                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            )
 
     @app.tool
     async def loop_continue(
@@ -1916,12 +2101,15 @@ def register_loop_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
 
+        def finish(message: str) -> str:
+            return _with_legacy_note(message)
+
         try:
             found = _find_active(root)
         except AmbiguousActiveRun as exc:
-            return f"Error: {exc}"
+            return finish(f"Error: {exc}")
         if not found:
-            return (
+            return finish(
                 "No active loop run found. "
                 "Start a loop with `run_loop` or check if the previous loop completed."
             )
@@ -1929,20 +2117,22 @@ def register_loop_tools(app: FastMCP) -> None:
         try:
             job_id = _maybe_promote_pending_job(root, job_id)
         except PendingJobPromotionError as exc:
-            return f"Error: {exc}"
+            return finish(f"Error: {exc}")
 
         state = read_state(root, job_id, loop_name, task_id)
         snapshot = is_pr_snapshot(state)
 
         if state.get("status") == LoopStatus.validating.value:
             if _validation_worker_alive(task_id):
-                return _VALIDATORS_RUNNING
+                return finish(_VALIDATORS_RUNNING)
             try:
                 config = _resolve_loop(loop_name, root)
             except Exception as exc:  # noqa: BLE001
-                return f"Error reloading loop config: {exc}"
+                return finish(f"Error reloading loop config: {exc}")
             skill_outputs: dict[str, str] = state.get("skill_outputs", {})
-            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            return finish(
+                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            )
 
         # Skills were recorded and the process stopped before ``validating``.
         # ``running`` and ``iterating`` would otherwise refuse to continue.
@@ -1953,11 +2143,11 @@ def register_loop_tools(app: FastMCP) -> None:
 
         if not finish_pending and state["status"] != LoopStatus.paused.value and not snapshot:
             if state["status"] == LoopStatus.running.value:
-                return (
+                return finish(
                     f"The {loop_name} loop is currently running. "
                     "Wait for the skill to finish before calling loop_continue."
                 )
-            return (
+            return finish(
                 f"Loop '{loop_name}' is not paused (status: {state['status']}). "
                 "Nothing to continue."
             )
@@ -1974,10 +2164,12 @@ def register_loop_tools(app: FastMCP) -> None:
             try:
                 config = _resolve_loop(loop_name, root)
             except Exception as exc:  # noqa: BLE001
-                return f"Error reloading loop config: {exc}"
+                return finish(f"Error reloading loop config: {exc}")
 
             skill_outputs = state.get("skill_outputs", {})
-            return _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            return finish(
+                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+            )
 
         # A PR snapshot stays complete until validators fill in the outcome.
         # Flipping it to running here would be the next commit's status if
@@ -1998,7 +2190,7 @@ def register_loop_tools(app: FastMCP) -> None:
         )
 
         next_skill = skills[idx]
-        return _skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id)
+        return finish(_skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id))
 
     @app.tool
     async def loop_status(
@@ -2006,6 +2198,10 @@ def register_loop_tools(app: FastMCP) -> None:
         workspace_root: str | None = None,
     ) -> str:
         """Report the active loop without changing it.
+
+        One exception: a single in-progress run left in ``.dmx/jobs/none/``
+        or ``unknown/`` by dmx 0.4.2 is moved into the branch folder. A file
+        already committed on ``branch_base`` or its upstream is not moved.
 
         While validators run, this waits up to 25 seconds and returns as
         soon as they finish. If they are still running, it says so. If the
@@ -2030,4 +2226,4 @@ def register_loop_tools(app: FastMCP) -> None:
         # Also wait when nothing is active yet: chaining marks the old run
         # terminal before the next run's file exists.
         await _wait_for_validation(found[2] if found else "")
-        return _with_rules_reminder(root, loop_status_message(root))
+        return _with_rules_reminder(root, _with_legacy_note(loop_status_message(root)))

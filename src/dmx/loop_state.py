@@ -455,6 +455,43 @@ def find_pr_snapshot_run(workspace_root: Path, job_id: str) -> tuple[str, str] |
     return loop_name, task_id
 
 
+def list_open_runs(
+    workspace_root: Path,
+    job_id: str,
+    *,
+    include_snapshots: bool = False,
+) -> list[tuple[str, str]]:
+    """Every non-terminal run under *job_id*, plus PR snapshots when asked.
+
+    A folder with several open runs returns all of them. This does not raise
+    :class:`AmbiguousActiveRun`. A snapshot is ``complete``, so it is not
+    also listed as non-terminal.
+    """
+    job_dir = _job_dir(workspace_root, job_id)
+    if not job_dir.exists():
+        return []
+
+    found: list[tuple[str, str]] = []
+    for path in sorted(job_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict) or not {"loop_name", "task_id", "status"} <= data.keys():
+            continue
+        loop_name = data.get("loop_name", "")
+        task_id = data.get("task_id", "")
+        if not isinstance(loop_name, str) or not isinstance(task_id, str):
+            continue
+        if not loop_name or not task_id:
+            continue
+        if data.get("status") not in _TERMINAL_STATUSES or (
+            include_snapshots and is_pr_snapshot(data)
+        ):
+            found.append((loop_name, task_id))
+    return found
+
+
 def supersede_pr_snapshots(workspace_root: Path, job_id: str, *, keep_task_id: str) -> None:
     """Close every PR snapshot in *job_id* except *keep_task_id*.
 
@@ -563,3 +600,33 @@ def rename_job(workspace_root: Path, old_job_id: str, new_job_id: str) -> None:
     # Non-empty (unexpected leftover file) — leave it for inspection.
     with contextlib.suppress(OSError):
         old_dir.rmdir()
+
+
+def move_one_run(
+    workspace_root: Path,
+    old_job_id: str,
+    new_job_id: str,
+    loop_name: str,
+    task_id: str,
+) -> bool:
+    """Move one state file and set its ``job_id`` to *new_job_id*.
+
+    Other files in the old job directory stay where they are. Returns
+    ``False`` when the source is missing or the destination already exists.
+    """
+    source = state_path(workspace_root, old_job_id, loop_name, task_id)
+    if not source.is_file():
+        return False
+    destination = state_path(workspace_root, new_job_id, loop_name, task_id)
+    if destination.exists():
+        return False
+    data = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return False
+    data["job_id"] = new_job_id
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _replace_json(destination, data)
+    source.unlink()
+    with contextlib.suppress(OSError):
+        source.parent.rmdir()
+    return True
