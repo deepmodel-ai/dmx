@@ -90,15 +90,16 @@ class TestLoopConfigValidation:
         assert cfg.on_complete.on_failure.trigger_loop is None
 
     def test_validator_timeout_parses(self) -> None:
-        data = {
-            **FULL_LOOP,
-            "validators": [{**FULL_LOOP["validators"][0], "timeout_seconds": 1800}],
-        }
-        cfg = LoopConfig.model_validate(data)
-        assert cfg.validators[0].timeout_seconds == 1800
+        for good in (60, 1800):
+            data = {
+                **FULL_LOOP,
+                "validators": [{**FULL_LOOP["validators"][0], "timeout_seconds": good}],
+            }
+            cfg = LoopConfig.model_validate(data)
+            assert cfg.validators[0].timeout_seconds == good
 
-    def test_validator_timeout_must_be_positive(self) -> None:
-        for bad in (0, -1, True):
+    def test_validator_timeout_must_be_at_least_60(self) -> None:
+        for bad in (0, 1, 59, -1, True):
             data = {
                 **FULL_LOOP,
                 "validators": [{**FULL_LOOP["validators"][0], "timeout_seconds": bad}],

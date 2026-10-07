@@ -457,7 +457,7 @@ class TestRunTests:
             captured["timeout"] = timeout
             raise subprocess.TimeoutExpired(cmd, timeout)
 
-        monkeypatch.setattr(run_tests.subprocess, "run", fake_run)
+        monkeypatch.setattr(run_tests, "run_with_group_timeout", fake_run)
 
         result = run_tests.run(tmp_path, timeout_seconds=630, loop_name="validate")
 
@@ -484,7 +484,7 @@ class TestRunTests:
             captured["timeout"] = timeout
             raise subprocess.TimeoutExpired(cmd, timeout)
 
-        monkeypatch.setattr(run_tests.subprocess, "run", fake_run)
+        monkeypatch.setattr(run_tests, "run_with_group_timeout", fake_run)
 
         result = run_tests.run(tmp_path)
 

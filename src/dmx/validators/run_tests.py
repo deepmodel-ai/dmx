@@ -48,6 +48,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Bundled validators run under dmx's interpreter and may import dmx. See #12.
+from dmx.group_timeout import run_with_group_timeout
+from dmx.validator_runner import _where_to_set_timeout
+
 TEST_TIMEOUT_SECONDS = 600
 # Leave the runner time to receive this validator's own timeout result.
 TIMEOUT_MARGIN_SECONDS = 30
@@ -99,21 +103,7 @@ def _timeout_result(
     timeout_seconds: int | None,
     loop_name: str | None,
 ) -> dict[str, Any]:
-    if loop_name:
-        path = f".dmx/loops/{loop_name}.yaml"
-        where = (
-            "Set `timeout_seconds` on this validator in the loop's YAML: "
-            f"your `{path}` if you have one, otherwise the shared source that "
-            "provides the loop. If you use the bundled loop, copy it to "
-            f"`{path}` first; that file replaces it."
-        )
-    else:
-        where = (
-            "Set `timeout_seconds` on this validator in the loop YAML: "
-            "your `.dmx/loops/` copy if you have one, otherwise the shared source "
-            "that provides the loop. If you use the bundled loop, copy it into "
-            "`.dmx/loops/` first; that file replaces it."
-        )
+    where = _where_to_set_timeout(loop_name)
     if timeout_seconds is None:
         detail = f"Test command `{cmd_str}` timed out after {inner}s."
     else:
@@ -149,12 +139,10 @@ def run(
     cmd_str = " ".join(cmd)
     inner = _inner_timeout(timeout_seconds)
     try:
-        proc = subprocess.run(
+        proc = run_with_group_timeout(
             cmd,
-            cwd=workspace_root,
-            capture_output=True,
-            text=True,
             timeout=inner,
+            cwd=str(workspace_root),
         )
     except FileNotFoundError:
         return {
