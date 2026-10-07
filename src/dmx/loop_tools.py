@@ -67,6 +67,7 @@ from fastmcp import (
 )
 
 from dmx.exceptions import AmbiguousActiveRun, WorkspaceRootInvalid
+from dmx.ide.rules_refresh import rules_reminder
 from dmx.loop_memory import append_session_note, read_memory_context
 from dmx.loop_schema import LoopConfig, RequireBranch, load_loop, load_loops_dir
 from dmx.loop_state import (
@@ -99,6 +100,18 @@ from dmx.workspace import resolve_workspace_root
 __all__ = ["register_loop_tools"]
 
 logger = logging.getLogger(__name__)
+
+
+def _with_rules_reminder(root: Path, message: str) -> str:
+    """Append the stale-rules line once. A read error leaves *message* as it is."""
+    try:
+        reminder = rules_reminder(root)
+    except OSError:
+        return message
+    if not reminder or reminder in message:
+        return message
+    return f"{message}\n\n{reminder}"
+
 
 # ---------------------------------------------------------------------------
 # Bundled loops directory
@@ -1651,7 +1664,7 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
-        return _start_loop(root, name, description).message
+        return _with_rules_reminder(root, _start_loop(root, name, description).message)
 
     @app.tool
     async def get_skill_definition(
@@ -1729,7 +1742,7 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
-        return list_skills(root)
+        return _with_rules_reminder(root, list_skills(root))
 
     @app.tool(name="snapshot_loop_for_pr")
     async def snapshot_loop_for_pr_tool(
@@ -2017,4 +2030,4 @@ def register_loop_tools(app: FastMCP) -> None:
         # Also wait when nothing is active yet: chaining marks the old run
         # terminal before the next run's file exists.
         await _wait_for_validation(found[2] if found else "")
-        return loop_status_message(root)
+        return _with_rules_reminder(root, loop_status_message(root))

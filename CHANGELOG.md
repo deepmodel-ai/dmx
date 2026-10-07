@@ -11,6 +11,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **(GH-70)** `/dmx/upgrade` refreshes IDE rule files to workflow version 0.5.0. It does not change `.dmx/config.md`, the memory bank, or `.dmx/jobs/`. Summary files keep one dmx block, and content outside that block stays as it was. A summary file whose dmx block has no end marker is left unchanged. `run_loop`, `loop_status`, and `list_skills` add one line when the copied rules are older than this version or have no version line. Existing repos should run `/dmx/upgrade` once.
+
 - **(GH-52)** `list_skills` lists local and vendored skills by the name `get_skill_definition` accepts, with the source beside the name and the frontmatter description last. A shadowed skill is omitted. Bundled `/dmx/*` commands stay out of the list; a local or shared skill with the same name is marked as an override. The always-apply rule says when to list those skills and when to run one match. The `dmx list-skills` CLI command still prints bundled skills only.
 
 ### Fixed

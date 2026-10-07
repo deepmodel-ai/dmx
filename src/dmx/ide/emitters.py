@@ -11,15 +11,22 @@ from dmx._workflow_version import WORKFLOW_VERSION
 from dmx.catalog import RuleDefinition  # noqa: TCH001 — used at runtime in emitter logic
 from dmx.exceptions import EmitterError
 
-__all__ = ["DMX_MARKER_END", "DMX_MARKER_START", "IdeRuleFile", "emit_ide_rule_files"]
+__all__ = [
+    "DMX_MARKER_END",
+    "DMX_MARKER_START",
+    "WORKFLOW_VERSION_LINE",
+    "IdeRuleFile",
+    "emit_ide_rule_files",
+]
 
 logger = logging.getLogger(__name__)
 
-# Markers used to wrap dmx-managed content in merged summary files.
-# The start marker embeds the workflow version so staleness can be detected
-# by comparing it against WORKFLOW_VERSION on a future re-init.
-DMX_MARKER_START = f"<!-- deepmodel:dmx:start {WORKFLOW_VERSION} -->"
+# The start marker never includes the version. A line that starts with it,
+# including ``<!-- deepmodel:dmx:start 0.4.0 -->``, is the same block.
+# The version sits on its own line inside the block and in every per-rule file.
+DMX_MARKER_START = "<!-- deepmodel:dmx:start -->"
 DMX_MARKER_END = "<!-- deepmodel:dmx:end -->"
+WORKFLOW_VERSION_LINE = f"<!-- dmx-workflow-version: {WORKFLOW_VERSION} -->"
 
 
 @dataclass(frozen=True)
@@ -155,7 +162,7 @@ def _cursor_mdc_content(rule: RuleDefinition) -> str:
     ).rstrip("\n")
 
     body = rule.body.rstrip("\n")
-    return f"---\n{fm_body}\n---\n\n{body}\n"
+    return f"---\n{fm_body}\n---\n\n{WORKFLOW_VERSION_LINE}\n\n{body}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +179,7 @@ def _emit_claude(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, ...]:
     per_rule_files = tuple(
         IdeRuleFile(
             path=f".claude/rules/{rule.name}.md",
-            content=rule.body.rstrip("\n") + "\n",
+            content=_versioned_markdown(rule.body),
             ide="claude",
         )
         for rule in rules
@@ -219,7 +226,7 @@ def _emit_antigravity(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, .
     return tuple(
         IdeRuleFile(
             path=f".agents/rules/{rule.name}.md",
-            content=rule.body.rstrip("\n") + "\n",
+            content=_versioned_markdown(rule.body),
             ide="antigravity",
         )
         for rule in rules
@@ -261,4 +268,9 @@ def _marker_summary(rules: tuple[RuleDefinition, ...]) -> str:
     """
     rule_lines = "\n".join(f"- **{rule.name}**: {rule.description}" for rule in rules)
     body = f"# dmx — Active Rules\n\n{rule_lines}\n"
-    return f"{DMX_MARKER_START}\n{body}{DMX_MARKER_END}\n"
+    return f"{DMX_MARKER_START}\n{WORKFLOW_VERSION_LINE}\n{body}{DMX_MARKER_END}\n"
+
+
+def _versioned_markdown(body: str) -> str:
+    """Plain Markdown body with the workflow version on the first line."""
+    return f"{WORKFLOW_VERSION_LINE}\n\n{body.rstrip(chr(10))}\n"

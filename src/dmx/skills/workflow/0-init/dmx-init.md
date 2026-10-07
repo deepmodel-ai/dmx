@@ -207,12 +207,13 @@ If `ides` is empty, call `setup_ide_rules` with `ides="cursor"` as a fallback (C
 
 Otherwise, call `setup_ide_rules` with the detected `ides` list.
 
-The tool returns a `files` list and a `notes` field. Always follow the `notes` instructions exactly when writing files. The general rules are:
+The tool returns a `files` list and a `notes` field. Always follow the `notes` instructions exactly when writing files.
 
-- **Per-rule files** (`.cursor/rules/*.mdc`, `.claude/rules/*.md`, `.agents/rules/*.md`): write `<workspace_root>/<path>` directly, creating parent directories as needed.
-- **Summary/merged files** (`.cursor/AGENTS.md`, `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`): if the file already exists, replace the content between `<!-- deepmodel:dmx:start -->` and `<!-- deepmodel:dmx:end -->` markers with the new block. If those markers are absent, append the block to the end of the file.
+Write each returned file as the complete file at <workspace_root>/<path>, creating parent directories as needed. Per-rule files (.cursor/rules/*.mdc, .claude/rules/*.md, .agents/rules/*.md) and summary files (.cursor/AGENTS.md, CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) are both complete file contents. A dmx block runs from any line that starts with `<!-- deepmodel:dmx:start` to the next `<!-- deepmodel:dmx:end -->`. The returned summary file already has every old dmx block removed and the new block written once, where the first old block was. If there was no dmx block, the block is appended. Content outside dmx blocks is never changed. Do not splice markers yourself. After writing, open a new chat for the rules to take effect.
 
 After writing, tell the developer: "IDE rules written. Open a new chat for the rules to take effect."
+
+If `notes` lists files that could not be read or have no end to their dmx block, tell the developer which files were not changed and that they need to be fixed by hand before re-running `/dmx/upgrade`.
 
 If `setup_ide_rules` returns an empty `files` list (e.g. unsupported IDE), note it in the output and continue — the memory bank setup in the next step is still valuable.
 

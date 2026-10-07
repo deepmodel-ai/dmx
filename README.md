@@ -307,6 +307,8 @@ Open any chat and run `/dmx/init`. It will:
 
 Safe to re-run. Updates config without overwriting memory bank files that already have content.
 
+After you upgrade the dmx package, run `/dmx/upgrade` once, then commit the changed rule files. It refreshes the rules copied into the repo and does not change `.dmx/config.md`, the memory bank, or `.dmx/jobs/`.
+
 ### Step 3 — Start your first ticket
 
 On a new repo, follow [Your first project](#your-first-project) (`/dmx/run-loop spec` through `/dmx/close-ticket`).
@@ -329,6 +331,7 @@ Describe what you want to build. dmx scaffolds the spec, asks clarifying questio
 | Skill | What it does |
 |---|---|
 | `/dmx/init` | One-time project setup: rules, memory bank, IDE config |
+| `/dmx/upgrade` | Refresh IDE rule files after upgrading the dmx package |
 | `/dmx/create-ticket` | Idea → ticket → branch → spec in one command |
 | `/dmx/derive-ticket` | Uncommitted changes → ticket → branch → derived spec |
 | `/dmx/plan` | Answered spec → phased `tasks.md` |
