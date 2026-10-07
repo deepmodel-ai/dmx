@@ -8,6 +8,7 @@ goal_state: "All phases implemented and committed, no unchecked tasks remaining"
 repeat_until: all_phases_complete
 validators:
   - tool: run_tests
+    timeout_seconds: 630
     checks:
       - name: tests_pass
         required: true

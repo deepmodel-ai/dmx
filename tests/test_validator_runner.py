@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import textwrap
 from typing import TYPE_CHECKING
 
@@ -13,12 +15,14 @@ if TYPE_CHECKING:
 from dmx.loop_schema import LoopConfig
 from dmx.loop_state import LoopOutcome, LoopStatus
 from dmx.validator_runner import (
+    VALIDATOR_TIMEOUT_SECONDS,
     ValidatorRunError,
     evaluate_validator_results,
     resolve_validator_path,
     run_validator,
     run_validators,
 )
+from dmx.validators.run_tests import _inner_timeout
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -224,6 +228,106 @@ class TestRunValidator:
         assert received["goal_state"] == "my goal"
         assert received["loop_context"]["job_id"] == "J"
         assert received["loop_context"]["workspace_root"] == str(tmp_path)
+        assert received["loop_context"]["timeout_seconds"] == VALIDATOR_TIMEOUT_SECONDS
+
+    def test_configured_timeout_is_the_subprocess_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_validator(tmp_path / "validators" / "v.py", PASSING_VALIDATOR)
+        captured: dict[str, object] = {}
+
+        def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            captured["timeout"] = kwargs["timeout"]
+            captured["contract"] = json.loads(str(kwargs["input"]))
+            return subprocess.CompletedProcess(
+                args, 0, stdout='{"pass": true, "checks": []}', stderr=""
+            )
+
+        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+
+        run_validator(
+            "v",
+            tmp_path,
+            {},
+            "goal",
+            {"loop_name": "validate"},
+            timeout_seconds=630,
+        )
+
+        assert captured["timeout"] == 630
+        contract = captured["contract"]
+        assert isinstance(contract, dict)
+        assert contract["loop_context"]["timeout_seconds"] == 630
+
+    def test_omitted_timeout_uses_the_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_validator(tmp_path / "validators" / "v.py", PASSING_VALIDATOR)
+        captured: dict[str, object] = {}
+
+        def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            captured["timeout"] = kwargs["timeout"]
+            return subprocess.CompletedProcess(
+                args, 0, stdout='{"pass": true, "checks": []}', stderr=""
+            )
+
+        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+
+        run_validator("v", tmp_path, {}, "goal", {"job_id": "J"})
+
+        assert captured["timeout"] == VALIDATOR_TIMEOUT_SECONDS
+
+    def test_omitted_timeout_gives_run_tests_at_least_the_previous_budget(
+        self, tmp_path: Path
+    ) -> None:
+        _write_validator(tmp_path / "validators" / "run_tests.py", ECHO_CONTRACT_VALIDATOR)
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["s"],
+                "validators": [
+                    {"tool": "run_tests", "checks": [{"name": "tests_pass", "required": True}]}
+                ],
+            }
+        )
+
+        results = run_validators(config, tmp_path, {}, {"loop_name": "dev"})
+
+        limit = results[0]["received"]["loop_context"]["timeout_seconds"]
+        inner = _inner_timeout(limit)
+        assert inner >= 120
+        assert inner < limit
+
+    def test_timeout_names_the_limit_and_the_loop_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_validator(tmp_path / "validators" / "run_tests.py", PASSING_VALIDATOR)
+
+        def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            raise subprocess.TimeoutExpired(cmd="validator", timeout=int(str(kwargs["timeout"])))
+
+        monkeypatch.setattr("dmx.validator_runner.subprocess.run", fake_run)
+
+        config = LoopConfig.model_validate(
+            {
+                "name": "validate",
+                "skills": ["s"],
+                "validators": [
+                    {
+                        "tool": "run_tests",
+                        "timeout_seconds": 630,
+                        "checks": [{"name": "tests_pass", "required": True}],
+                    }
+                ],
+            }
+        )
+        results = run_validators(config, tmp_path, {}, {"loop_name": "validate"})
+
+        message = results[0]["message"]
+        assert "`run_tests` exceeded `timeout_seconds` (630)" in message
+        assert "your `.dmx/loops/validate.yaml` if you have one" in message
+        assert "shared source that provides the loop" in message
+        assert "If you use the bundled loop, copy it to `.dmx/loops/validate.yaml` first" in message
 
 
 # ---------------------------------------------------------------------------

@@ -85,8 +85,26 @@ class TestLoopConfigValidation:
         assert cfg.validators[0].checks[0].name == "tests_pass"
         assert cfg.validators[0].checks[0].required is True
         assert cfg.validators[0].checks[1].required is False
+        assert cfg.validators[0].timeout_seconds is None
         assert cfg.on_complete.on_success.trigger_loop == "validate"
         assert cfg.on_complete.on_failure.trigger_loop is None
+
+    def test_validator_timeout_parses(self) -> None:
+        data = {
+            **FULL_LOOP,
+            "validators": [{**FULL_LOOP["validators"][0], "timeout_seconds": 1800}],
+        }
+        cfg = LoopConfig.model_validate(data)
+        assert cfg.validators[0].timeout_seconds == 1800
+
+    def test_validator_timeout_must_be_positive(self) -> None:
+        for bad in (0, -1, True):
+            data = {
+                **FULL_LOOP,
+                "validators": [{**FULL_LOOP["validators"][0], "timeout_seconds": bad}],
+            }
+            with pytest.raises(ValidationError):
+                LoopConfig.model_validate(data)
 
     def test_empty_skills_raises(self) -> None:
         with pytest.raises(ValidationError):

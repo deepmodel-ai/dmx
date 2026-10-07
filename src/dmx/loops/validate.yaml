@@ -6,6 +6,7 @@ trigger:
 goal_state: "All required checks pass, code reviewed, ready for PR"
 validators:
   - tool: run_tests
+    timeout_seconds: 630
     checks:
       - name: tests_pass
         required: true

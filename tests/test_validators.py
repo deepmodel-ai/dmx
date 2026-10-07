@@ -8,11 +8,14 @@ bundled scripts on disk.
 
 from __future__ import annotations
 
+import importlib.resources as pkg
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dmx.loop_schema import load_loop
 from dmx.validator_runner import run_validator
 from dmx.validators import (
     check_plan_complete,
@@ -441,6 +444,69 @@ class TestRunTests:
 
     def test_no_markers_detects_nothing(self, tmp_path: Path) -> None:
         assert run_tests._detect_test_command(tmp_path) is None
+
+    def test_inner_timeout_stays_under_the_runner_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\ttrue\n", encoding="utf-8")
+        captured: dict[str, int] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, int)
+            captured["timeout"] = timeout
+            raise subprocess.TimeoutExpired(cmd, timeout)
+
+        monkeypatch.setattr(run_tests.subprocess, "run", fake_run)
+
+        result = run_tests.run(tmp_path, timeout_seconds=630, loop_name="validate")
+
+        assert captured["timeout"] == run_tests.TEST_TIMEOUT_SECONDS
+        assert "timed out after 600s" in result["message"]
+        assert "`timeout_seconds` (630)" in result["message"]
+        assert "your `.dmx/loops/validate.yaml` if you have one" in result["message"]
+        assert "shared source that provides the loop" in result["message"]
+        assert (
+            "If you use the bundled loop, copy it to `.dmx/loops/validate.yaml` first"
+            in result["message"]
+        )
+        assert result["checks"][0]["pass"] is False
+
+    def test_inner_timeout_defaults_to_600_without_a_contract_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\ttrue\n", encoding="utf-8")
+        captured: dict[str, int] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, int)
+            captured["timeout"] = timeout
+            raise subprocess.TimeoutExpired(cmd, timeout)
+
+        monkeypatch.setattr(run_tests.subprocess, "run", fake_run)
+
+        result = run_tests.run(tmp_path)
+
+        assert captured["timeout"] == run_tests.TEST_TIMEOUT_SECONDS
+        assert "timed out after 600s" in result["message"]
+        assert "in the loop YAML" in result["message"]
+        assert "shared source that provides the loop" in result["message"]
+        assert "copy it into `.dmx/loops/` first" in result["message"]
+
+    def test_bool_timeout_is_not_one_second(self) -> None:
+        assert run_tests._inner_timeout(True) == run_tests.TEST_TIMEOUT_SECONDS
+
+    def test_bundled_run_tests_inner_limit_is_under_the_runner(self) -> None:
+        loops = Path(str(pkg.files("dmx") / "loops"))
+        for name in ("dev", "validate"):
+            cfg = load_loop(loops / f"{name}.yaml")
+            validator = next(item for item in cfg.validators if item.tool == "run_tests")
+            assert validator.timeout_seconds == 630
+            inner = run_tests._inner_timeout(validator.timeout_seconds)
+            assert inner == run_tests.TEST_TIMEOUT_SECONDS
+            assert validator.timeout_seconds is not None
+            assert inner < validator.timeout_seconds
 
 
 # ---------------------------------------------------------------------------
