@@ -132,25 +132,19 @@ def test_sigterm_is_sent_before_sigkill(tmp_path: Path) -> None:
 
 def test_run_tests_timeout_stops_the_child(tmp_path: Path) -> None:
     pidfile = tmp_path / "child.pid"
-    script = tmp_path / "hold.py"
-    script.write_text(
-        "import subprocess, time\n"
-        "from pathlib import Path\n"
-        "child = subprocess.Popen(['sleep', '120'])\n"
-        f"Path({str(pidfile)!r}).write_text(str(child.pid))\n"
-        "time.sleep(120)\n",
-        encoding="utf-8",
-    )
-    executable = str(sys.executable)
+    # The shell writes the pid before anything else. A Python startup here
+    # can lose the race against a short timeout on a slow macOS runner.
+    # Make turns $$! into $!, the PID of the background sleep.
     (tmp_path / "Makefile").write_text(
-        f'test:\n\t"{executable}" "{script}"\n',
+        "test:\n\tsh -c 'sleep 120 & echo $$! > child.pid; sleep 120'\n",
         encoding="utf-8",
     )
     child_pid = 0
     try:
-        result = run_tests.run(tmp_path, timeout_seconds=2, loop_name="dev")
+        result = run_tests.run(tmp_path, timeout_seconds=3, loop_name="dev")
         assert result["pass"] is False
-        assert "timed out after 1s" in result["message"]
+        assert "timed out after 2s" in result["message"]
+        assert pidfile.exists(), "test command did not start before the timeout"
         child_pid = int(pidfile.read_text())
         assert _not_running(child_pid)
     finally:
@@ -180,15 +174,16 @@ def test_runner_timeout_stops_the_validators_child(tmp_path: Path) -> None:
     pidfile = tmp_path / "child.pid"
     child_pid = 0
     try:
-        with pytest.raises(ValidatorRunError, match="exceeded `timeout_seconds` \\(1\\)"):
+        with pytest.raises(ValidatorRunError, match="exceeded `timeout_seconds` \\(3\\)"):
             run_validator(
                 "slow",
                 tmp_path,
                 {},
                 "goal",
                 {"loop_name": "validate"},
-                timeout_seconds=1,
+                timeout_seconds=3,
             )
+        assert pidfile.exists(), "test command did not start before the timeout"
         child_pid = int(pidfile.read_text())
         assert _not_running(child_pid)
     finally:
