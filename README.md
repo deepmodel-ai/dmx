@@ -58,10 +58,11 @@ Save it to the file for your IDE, then restart the IDE:
 | IDE | For all your projects | For one project, shared with your team |
 |---|---|---|
 | Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
-| Claude Code | — | `.mcp.json` |
+| Claude Code desktop app | `~/Library/Application Support/Claude/claude_desktop_config.json` | `.mcp.json` |
+| Claude Code in the terminal | — | `.mcp.json` |
 | VS Code (GitHub Copilot) | `~/.copilot/mcp-config.json` | `.mcp.json` |
 
-Commit the project file and everyone on the team gets dmx. The [MCP setup guide](https://dmx.deepmodel.ai/mcp-setup) covers Claude Code across all projects, deploying with Jamf or Intune, and other IDEs.
+Commit the project file and everyone on the team gets dmx. The [MCP setup guide](https://dmx.deepmodel.ai/mcp-setup) covers the Claude Code CLI across all projects, Windows paths, deploying with Jamf or Intune, and other IDEs.
 
 **2. Initialize your repo.** On your integration branch, run:
 
