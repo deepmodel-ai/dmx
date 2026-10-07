@@ -34,10 +34,8 @@ Writes JSON to stdout::
     }
 
 Note: this validator does not measure coverage, so it never reports a
-``coverage_threshold`` check. Loops that declare ``coverage_threshold`` as
-an optional check will treat the missing result as a soft failure — apply
-the loop's ``on_optional_failure`` policy (typically ``warn``). Override
-this validator if coverage measurement is required.
+``coverage_threshold`` check. A team that measures coverage should override
+this validator and declare that check in its own loop YAML.
 """
 
 from __future__ import annotations
