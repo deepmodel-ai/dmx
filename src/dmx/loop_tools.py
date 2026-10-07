@@ -889,18 +889,272 @@ def _complete_message(
     return f"**{loop_name} loop — complete {icon}**\n\nJob: `{job_id}` | Outcome: `{outcome}`"
 
 
+_WHY_LIMIT = 2000
+_WHY_MARK = "…"
+
+
+def _failed_check_names(
+    config: LoopConfig,
+    validator_results: list[dict[str, Any]],
+    *,
+    required: bool,
+) -> list[str]:
+    """Declared checks that failed, required or optional as asked."""
+    declared = {
+        check.name: check.required
+        for validator_cfg in config.validators
+        for check in validator_cfg.checks
+    }
+    reported: dict[str, bool] = {}
+    for result in validator_results:
+        checks = result.get("checks")
+        if not isinstance(checks, list):
+            continue
+        for check in checks:
+            if isinstance(check, dict) and isinstance(check.get("name"), str):
+                reported[check["name"]] = bool(check.get("pass"))
+    return sorted(
+        name
+        for name, is_required in declared.items()
+        if is_required is required and not reported.get(name, False)
+    )
+
+
+def _not_reported_line(tool: str, check_name: str) -> str:
+    return (
+        f"`{check_name}`: not reported by `{tool}`. "
+        "It is declared in the loop config, so it counts as failed."
+    )
+
+
+def _shorten_line(line: str, budget: int) -> str:
+    """Keep the end of one line within *budget*, marked when it is cut."""
+    if budget <= 0:
+        return ""
+    if len(line) <= budget:
+        return line
+    mark = _WHY_MARK
+    content = line.removeprefix(mark)
+    room = budget - len(mark)
+    if room <= 0:
+        return mark[:budget]
+    return mark + content[-room:]
+
+
+def _drop_one(lines: list[str], *, keep_first: bool) -> list[str] | None:
+    """Drop the earliest trimmable line. The last line, and a kept first line, stay."""
+    if keep_first:
+        if len(lines) <= 2:
+            return None
+        if lines[1] == _WHY_MARK:
+            if len(lines) <= 3:
+                return None
+            return [lines[0], lines[1], *lines[3:]]
+        return [lines[0], _WHY_MARK, *lines[2:]]
+    if len(lines) <= 1:
+        return None
+    if lines[0] == _WHY_MARK:
+        if len(lines) <= 2:
+            return None
+        return [lines[0], *lines[2:]]
+    return [_WHY_MARK, *lines[1:]]
+
+
+def _cap_section(text: str, limit: int) -> str:
+    """Cut *text* to *limit*, keeping its start and its last line."""
+    if len(text) <= limit:
+        return text
+    last = text.splitlines()[-1] if text.splitlines() else ""
+    mark = _WHY_MARK
+    if len(last) + len(mark) + 1 > limit:
+        return _shorten_line(last or text, limit)
+    tail = f"\n{mark}\n{last}"
+    head = text[: limit - len(tail)].rstrip("\n")
+    if not head:
+        fitted = f"{mark}\n{last}"
+        return fitted if len(fitted) <= limit else _shorten_line(last, limit)
+    return f"{head}{tail}"
+
+
+def _why_groups(
+    config: LoopConfig,
+    validator_results: list[dict[str, Any]],
+    failed: list[str],
+) -> list[tuple[str, str, list[tuple[str, bool, str]]]]:
+    """Failed checks grouped by validator, sorted by validator then check."""
+    tool_for = {
+        check.name: validator_cfg.tool
+        for validator_cfg in config.validators
+        for check in validator_cfg.checks
+    }
+    result_for: dict[str, dict[str, Any]] = {}
+    for result in validator_results:
+        tool = result.get("tool")
+        if isinstance(tool, str):
+            result_for[tool] = result
+    grouped: dict[str, list[tuple[str, bool, str]]] = {}
+    messages: dict[str, str] = {}
+    for name in failed:
+        tool = tool_for.get(name, "validator")
+        result = result_for.get(tool, {})
+        raw_message = result.get("message")
+        messages[tool] = raw_message if isinstance(raw_message, str) else ""
+        reported = False
+        check_message = ""
+        checks = result.get("checks")
+        if isinstance(checks, list):
+            for check in checks:
+                if isinstance(check, dict) and check.get("name") == name:
+                    reported = True
+                    raw = check.get("message")
+                    check_message = raw if isinstance(raw, str) else ""
+                    break
+        grouped.setdefault(tool, []).append((name, reported, check_message))
+    return [(tool, messages.get(tool, ""), sorted(grouped[tool])) for tool in sorted(grouped)]
+
+
+def _validator_body(tool: str, message: str) -> tuple[list[str], bool]:
+    """Lines for one validator. The first line is kept when later lines are cut."""
+    if not message:
+        return [f"`{tool}`"], True
+    parts = message.splitlines() or [message]
+    return [f"`{tool}`: {parts[0]}", *parts[1:]], True
+
+
+def _assemble_why(
+    groups: list[tuple[str, str, list[tuple[str, bool, str]]]],
+    bodies: dict[str, list[str]],
+) -> str:
+    lines = ["Why:"]
+    for tool, _validator_message, checks in groups:
+        lines.extend(bodies[f"v:{tool}"])
+        for name, reported, message in checks:
+            if not reported:
+                lines.append(_not_reported_line(tool, name))
+                continue
+            if not message:
+                lines.append(f"`{name}`")
+                continue
+            lines.append(f"`{name}`:")
+            lines.extend(bodies[f"c:{tool}:{name}"])
+    return "\n".join(lines)
+
+
+def _largest_droppable(
+    bodies: dict[str, list[str]],
+    keep_first: set[str],
+) -> str | None:
+    candidates = [
+        key
+        for key, lines in bodies.items()
+        if _drop_one(lines, keep_first=key in keep_first) is not None
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda key: len("\n".join(bodies[key])))
+
+
+def _shorten_longest(bodies: dict[str, list[str]], overflow: int) -> bool:
+    """Shorten the longest line from the start. Returns whether it changed."""
+    where: tuple[str, int] | None = None
+    longest = 0
+    for key, lines in bodies.items():
+        for index, line in enumerate(lines):
+            if len(line) > longest:
+                longest = len(line)
+                where = (key, index)
+    if where is None or longest <= len(_WHY_MARK):
+        return False
+    key, index = where
+    lines = list(bodies[key])
+    target = max(len(_WHY_MARK), len(lines[index]) - max(1, overflow))
+    shortened = _shorten_line(lines[index], target)
+    if shortened == lines[index]:
+        return False
+    lines[index] = shortened
+    bodies[key] = lines
+    return True
+
+
+def _bounded_why(groups: list[tuple[str, str, list[tuple[str, bool, str]]]]) -> str:
+    """Render *groups* and keep the section within ``_WHY_LIMIT`` characters."""
+    bodies: dict[str, list[str]] = {}
+    keep_first: set[str] = set()
+    for tool, validator_message, checks in groups:
+        lines, first = _validator_body(tool, validator_message)
+        bodies[f"v:{tool}"] = lines
+        if first:
+            keep_first.add(f"v:{tool}")
+        for name, _reported, message in checks:
+            if not message:
+                continue
+            bodies[f"c:{tool}:{name}"] = message.splitlines() or [message]
+    rendered = _assemble_why(groups, bodies)
+    while len(rendered) > _WHY_LIMIT:
+        key = _largest_droppable(bodies, keep_first)
+        if key is not None:
+            updated = _drop_one(bodies[key], keep_first=key in keep_first)
+            if updated is None:
+                break
+            bodies[key] = updated
+            rendered = _assemble_why(groups, bodies)
+            continue
+        if _shorten_longest(bodies, len(rendered) - _WHY_LIMIT):
+            rendered = _assemble_why(groups, bodies)
+            continue
+        return _cap_section(rendered, _WHY_LIMIT)
+    return rendered
+
+
+def _validation_why(
+    config: LoopConfig,
+    validator_results: list[dict[str, Any]],
+    decision: dict[str, str],
+) -> str:
+    """Why a required check paused the loop, or an optional check warned.
+
+    The validator's message is shown once, then every failed check by name.
+    A check the validator did not report says so. Long text is cut from the
+    start, at a line boundary when it has more than one line, and marked.
+    The validator's first line stays when it fits, and the end of the text
+    stays, including the end of a single long line. The section never
+    exceeds ``_WHY_LIMIT`` characters. Empty when the outcome is not a
+    pause or a warning.
+    """
+    if decision.get("next_status") == LoopStatus.paused.value:
+        required = True
+    elif decision.get("outcome") == LoopOutcome.warning.value:
+        required = False
+    else:
+        return ""
+    failed = _failed_check_names(config, validator_results, required=required)
+    if not failed:
+        return ""
+    groups = _why_groups(config, validator_results, failed)
+    return _bounded_why(groups)
+
+
+def _with_why(message: str, why: str) -> str:
+    """Append *why* when a pause or warning has something to explain."""
+    if not why:
+        return message
+    return f"{message.rstrip()}\n\n{why}"
+
+
 def _validator_failure_message(
     loop_name: str,
     job_id: str,
     task_id: str,
     message: str,
+    why: str = "",
 ) -> str:
     """Return the pause message shown when required validator checks fail."""
     short_task = task_id[:8]
+    body = _with_why(message, why)
     return (
         f"**{loop_name} loop — paused (validation failed)** ⚠️\n\n"
         f"Job: `{job_id}` | Task: `{short_task}`\n\n"
-        f"{message}\n\n"
+        f"{body}\n\n"
         f"Before calling `loop_continue`: if any failing check depends on an artifact a "
         f"skill produced (e.g. `validate`'s report), re-run that skill via "
         f"`get_skill_definition` first to regenerate it. Calling `loop_continue` without "
@@ -1389,6 +1643,7 @@ def _apply_loop_outcome(
     decision = evaluate_validator_results(config, validator_results)
     outcome = decision["outcome"]
     next_status = decision["next_status"]
+    why = _validation_why(config, validator_results, decision)
 
     write_state(
         root,
@@ -1411,7 +1666,7 @@ def _apply_loop_outcome(
             f"{loop_name} loop paused for validator review (job `{job_id}`, "
             f"task `{short_task}`): {decision['message']}",
         )
-        return _validator_failure_message(loop_name, job_id, task_id, decision["message"])
+        return _validator_failure_message(loop_name, job_id, task_id, decision["message"], why)
 
     if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root):
         current_state = read_state(root, job_id, loop_name, task_id)
@@ -1467,10 +1722,11 @@ def _apply_loop_outcome(
                 f"{loop_name} loop completed (outcome: {outcome}) — chaining to "
                 f"{next_loop} was configured but blocked: {chain_guard_error}",
             )
-            message = (
+            message = _with_why(
                 f"{_complete_message(loop_name, job_id, outcome)}\n\n"
                 f"Configured to chain to **{next_loop}**, but it couldn't start: "
-                f"{chain_guard_error}"
+                f"{chain_guard_error}",
+                why,
             )
             return _store_outcome(root, job_id, loop_name, task_id, message)
 
@@ -1489,13 +1745,17 @@ def _apply_loop_outcome(
         )
         if commit_warning:
             chain_header += f"{commit_warning}\n\n"
-        message = chain_header + started.message
+        message = _with_why(chain_header + started.message, why)
         _publish_finish_message(root, job_id, loop_name, task_id, message, chained=started.chained)
         return message
 
     append_session_note(root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`).")
     return _store_outcome(
-        root, job_id, loop_name, task_id, _complete_message(loop_name, job_id, outcome)
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        _with_why(_complete_message(loop_name, job_id, outcome), why),
     )
 
 
