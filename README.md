@@ -40,9 +40,7 @@ Loops are YAML in your repo. Override any default in `.dmx/loops/`, add your own
 
 ## Quick start
 
-**1. Add dmx to your IDE.** There's nothing to install: `uvx` fetches dmx on demand.
-
-**Cursor:** add this to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in your project) and restart Cursor:
+**1. Add dmx to your IDE.** There's nothing to install: `uvx` fetches dmx on demand. Every IDE uses the same config:
 
 ```json
 {
@@ -55,31 +53,15 @@ Loops are YAML in your repo. Override any default in `.dmx/loops/`, add your own
 }
 ```
 
-**Claude Code:** run this in your terminal:
+Save it to the file for your IDE, then restart the IDE:
 
-```bash
-claude mcp add --scope user dmx -- uvx --from deepmodel-dmx@latest dmx serve
-```
+| IDE | For all your projects | For one project, shared with your team |
+|---|---|---|
+| Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+| Claude Code | — | `.mcp.json` |
+| VS Code (GitHub Copilot) | `~/.copilot/mcp-config.json` | `.mcp.json` |
 
-`--scope user` makes dmx available in all your projects. Use `--scope project` instead to write a `.mcp.json` your team can commit.
-
-**VS Code (GitHub Copilot):** add this to `.vscode/mcp.json` in your project:
-
-```json
-{
-  "servers": {
-    "dmx": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "deepmodel-dmx@latest", "dmx", "serve"]
-    }
-  }
-}
-```
-
-To use dmx in every workspace, run **MCP: Open User Configuration** from the Command Palette and add the same entry there.
-
-For Antigravity and other MCP-compatible IDEs, see the [MCP setup guide](https://dmx.deepmodel.ai/mcp-setup).
+Commit the project file and everyone on the team gets dmx. The [MCP setup guide](https://dmx.deepmodel.ai/mcp-setup) covers Claude Code across all projects, deploying with Jamf or Intune, and other IDEs.
 
 **2. Initialize your repo.** On your integration branch, run:
 
