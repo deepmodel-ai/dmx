@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **(GH-52)** `list_skills` lists local and vendored skills by the name `get_skill_definition` accepts, with the source beside the name and the frontmatter description last. A shadowed skill is omitted. Bundled `/dmx/*` commands stay out of the list; a local or shared skill with the same name is marked as an override. The always-apply rule says when to list those skills and when to run one match. The `dmx list-skills` CLI command still prints bundled skills only.
+
 ### Fixed
 
 - **(GH-66)** A timed-out validator or test command no longer leaves the processes it started running. The command runs in its own session; on timeout the group gets `SIGTERM`, and `SIGKILL` after 5 seconds if anything in the group is still running. A group that contains only a zombie does not raise `PermissionError` on macOS. Windows stops the tree with `taskkill /T /F`. A process that starts its own session, such as some Docker-based test setups, is still left running.
