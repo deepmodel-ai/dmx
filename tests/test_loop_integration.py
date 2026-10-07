@@ -56,7 +56,7 @@ _STUB_CHECKS = {
         "phases_defined",
         "tasks_have_descriptions",
     ],
-    "run_tests": ["tests_pass", "coverage_threshold"],
+    "run_tests": ["tests_pass"],
     "spec_adherence": ["scope_matches_spec", "edge_cases_addressed", "no_regressions"],
     "check_pr_ready": ["pr_exists", "ticket_transitioned", "memory_updated"],
 }
