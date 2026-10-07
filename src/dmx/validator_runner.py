@@ -19,7 +19,8 @@ The input contract is written to stdin as JSON::
         "goal_state": "...",
         "loop_context": {
             "job_id": "...", "task_id": "...", "loop_name": "...",
-            "branch": "...", "ticket_ref": "...", "workspace_root": "..."
+            "branch": "...", "ticket_ref": "...", "workspace_root": "...",
+            "timeout_seconds": 630
         }
     }
 
@@ -63,7 +64,10 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-VALIDATOR_TIMEOUT_SECONDS = 120
+# At least the bundled run_tests inner limit (600s) plus its 30s margin.
+# A loop file that omits timeout_seconds must not give the suite less time
+# than the old 120s runner cap.
+VALIDATOR_TIMEOUT_SECONDS = 630
 
 
 class ValidatorRunError(Exception):
@@ -108,14 +112,49 @@ def resolve_validator_path(name: str, workspace_root: Path) -> Path:
     raise ValidatorRunError(f"Validator '{name}' not found at {locations}")
 
 
+def _effective_timeout(timeout_seconds: int | None) -> int:
+    """The runner limit: the loop's ``timeout_seconds``, or the default."""
+    if timeout_seconds is None:
+        return VALIDATOR_TIMEOUT_SECONDS
+    return timeout_seconds
+
+
+def _where_to_set_timeout(loop_name: object) -> str:
+    """Where to edit ``timeout_seconds``, without assuming which file won."""
+    if isinstance(loop_name, str) and loop_name:
+        path = f".dmx/loops/{loop_name}.yaml"
+        return (
+            "Set `timeout_seconds` on this validator in the loop's YAML: "
+            f"your `{path}` if you have one, otherwise the shared source that "
+            "provides the loop. If you use the bundled loop, copy it to "
+            f"`{path}` first; that file replaces it."
+        )
+    return (
+        "Set `timeout_seconds` on this validator in the loop YAML: "
+        "your `.dmx/loops/` copy if you have one, otherwise the shared source "
+        "that provides the loop. If you use the bundled loop, copy it into "
+        "`.dmx/loops/` first; that file replaces it."
+    )
+
+
+def _timeout_message(name: str, limit: int, loop_name: object) -> str:
+    return f"`{name}` exceeded `timeout_seconds` ({limit}). {_where_to_set_timeout(loop_name)}"
+
+
 def run_validator(
     name: str,
     workspace_root: Path,
     skill_outputs: dict[str, str],
     goal_state: str,
     loop_context: dict[str, Any],
+    timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Resolve and run a single validator via subprocess.
+
+    ``timeout_seconds`` is the limit from the loop YAML. When it is omitted
+    the runner uses :data:`VALIDATOR_TIMEOUT_SECONDS`. The effective limit
+    is also written to ``loop_context.timeout_seconds`` so a validator that
+    starts its own subprocess can finish first and report its own timeout.
 
     Returns:
         The validator's parsed output: ``{"pass", "message", "checks"}``,
@@ -125,11 +164,16 @@ def run_validator(
         ValidatorRunError: If resolution, execution, or parsing fails.
     """
     path = resolve_validator_path(name, workspace_root)
+    limit = _effective_timeout(timeout_seconds)
 
     contract = {
         "skill_outputs": skill_outputs,
         "goal_state": goal_state,
-        "loop_context": {**loop_context, "workspace_root": str(workspace_root)},
+        "loop_context": {
+            **loop_context,
+            "workspace_root": str(workspace_root),
+            "timeout_seconds": limit,
+        },
     }
 
     try:
@@ -138,12 +182,12 @@ def run_validator(
             input=json.dumps(contract),
             capture_output=True,
             text=True,
-            timeout=VALIDATOR_TIMEOUT_SECONDS,
+            timeout=limit,
             cwd=workspace_root,
         )
     except subprocess.TimeoutExpired as exc:
         raise ValidatorRunError(
-            f"Validator '{name}' timed out after {VALIDATOR_TIMEOUT_SECONDS}s"
+            _timeout_message(name, limit, loop_context.get("loop_name"))
         ) from exc
 
     if proc.returncode not in (0, 1):
@@ -191,6 +235,7 @@ def run_validators(
                 skill_outputs,
                 config.goal_state,
                 loop_context,
+                timeout_seconds=validator_cfg.timeout_seconds,
             )
         except ValidatorRunError as exc:
             logger.warning("validator '%s' failed to run: %s", validator_cfg.tool, exc)

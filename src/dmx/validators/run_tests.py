@@ -16,7 +16,12 @@ stdin as JSON::
     {
       "skill_outputs": {...},
       "goal_state": "...",
-      "loop_context": {..., "workspace_root": "/path/to/repo"}
+      "loop_context": {
+        ...,
+        "workspace_root": "/path/to/repo",
+        "timeout_seconds": 630,
+        "loop_name": "validate"
+      }
     }
 
 Exits 0 on pass, 1 on failure.
@@ -44,6 +49,8 @@ from pathlib import Path
 from typing import Any
 
 TEST_TIMEOUT_SECONDS = 600
+# Leave the runner time to receive this validator's own timeout result.
+TIMEOUT_MARGIN_SECONDS = 30
 
 
 def _detect_test_command(workspace_root: Path) -> list[str] | None:
@@ -68,7 +75,66 @@ def _detect_test_command(workspace_root: Path) -> list[str] | None:
     return None
 
 
-def run(workspace_root: Path) -> dict[str, Any]:
+def _inner_timeout(timeout_seconds: int | None) -> int:
+    """Seconds for the test command.
+
+    When the runner passed ``timeout_seconds``, stay strictly under it so
+    this timeout is the one that gets reported. With no contract limit,
+    keep :data:`TEST_TIMEOUT_SECONDS`.
+    """
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or timeout_seconds < 1
+    ):
+        return TEST_TIMEOUT_SECONDS
+    if timeout_seconds > TIMEOUT_MARGIN_SECONDS:
+        return timeout_seconds - TIMEOUT_MARGIN_SECONDS
+    return max(1, timeout_seconds - 1)
+
+
+def _timeout_result(
+    cmd_str: str,
+    inner: int,
+    timeout_seconds: int | None,
+    loop_name: str | None,
+) -> dict[str, Any]:
+    if loop_name:
+        path = f".dmx/loops/{loop_name}.yaml"
+        where = (
+            "Set `timeout_seconds` on this validator in the loop's YAML: "
+            f"your `{path}` if you have one, otherwise the shared source that "
+            "provides the loop. If you use the bundled loop, copy it to "
+            f"`{path}` first; that file replaces it."
+        )
+    else:
+        where = (
+            "Set `timeout_seconds` on this validator in the loop YAML: "
+            "your `.dmx/loops/` copy if you have one, otherwise the shared source "
+            "that provides the loop. If you use the bundled loop, copy it into "
+            "`.dmx/loops/` first; that file replaces it."
+        )
+    if timeout_seconds is None:
+        detail = f"Test command `{cmd_str}` timed out after {inner}s."
+    else:
+        detail = (
+            f"Test command `{cmd_str}` timed out after {inner}s, "
+            f"under `timeout_seconds` ({timeout_seconds})."
+        )
+    return {
+        "pass": False,
+        "message": f"{detail} {where}",
+        "checks": [{"name": "tests_pass", "pass": False}],
+    }
+
+
+def run(
+    workspace_root: Path,
+    timeout_seconds: int | None = None,
+    loop_name: str | None = None,
+) -> dict[str, Any]:
+    if isinstance(timeout_seconds, bool):
+        timeout_seconds = None
     cmd = _detect_test_command(workspace_root)
     if cmd is None:
         return {
@@ -81,13 +147,14 @@ def run(workspace_root: Path) -> dict[str, Any]:
         }
 
     cmd_str = " ".join(cmd)
+    inner = _inner_timeout(timeout_seconds)
     try:
         proc = subprocess.run(
             cmd,
             cwd=workspace_root,
             capture_output=True,
             text=True,
-            timeout=TEST_TIMEOUT_SECONDS,
+            timeout=inner,
         )
     except FileNotFoundError:
         return {
@@ -96,11 +163,7 @@ def run(workspace_root: Path) -> dict[str, Any]:
             "checks": [{"name": "tests_pass", "pass": False}],
         }
     except subprocess.TimeoutExpired:
-        return {
-            "pass": False,
-            "message": f"Test command `{cmd_str}` timed out after {TEST_TIMEOUT_SECONDS}s",
-            "checks": [{"name": "tests_pass", "pass": False}],
-        }
+        return _timeout_result(cmd_str, inner, timeout_seconds, loop_name)
 
     passed = proc.returncode == 0
     tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
@@ -117,7 +180,14 @@ def run(workspace_root: Path) -> dict[str, Any]:
 
 if __name__ == "__main__":
     contract = json.loads(sys.stdin.read() or "{}")
-    workspace_root = contract.get("loop_context", {}).get("workspace_root") or "."
-    result = run(Path(workspace_root))
+    loop_context = contract.get("loop_context") or {}
+    workspace_root = loop_context.get("workspace_root") or "."
+    timeout_seconds = loop_context.get("timeout_seconds")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+        timeout_seconds = None
+    loop_name = loop_context.get("loop_name")
+    if not isinstance(loop_name, str) or not loop_name:
+        loop_name = None
+    result = run(Path(workspace_root), timeout_seconds=timeout_seconds, loop_name=loop_name)
     print(json.dumps(result))
     sys.exit(0 if result["pass"] else 1)
