@@ -13,6 +13,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **(GH-79)** The README leads with the bundled loops instead of slash commands, links to the docs at https://dmx.deepmodel.ai, and drops internal milestone status and implementation detail now covered by the docs. Links are absolute, so the README also renders on PyPI. `pyproject.toml` adds `[project.urls]` (Homepage, Documentation, Source, Changelog, Issues), so PyPI links to the docs.
 
+### Fixed
+
+- **(GH-83)** A tool call that points at a subfolder of the repo, such as one package of a monorepo, uses the repo's `.dmx/`. dmx walks up from the folder, within the same git repository, to the nearest `.dmx/` that has a `config.md`. This applies to an explicit `workspace_root`, an MCP root, and the cwd fallback, so a loop started from `packages/billing` no longer writes `packages/billing/.dmx/jobs/`, and an MCP root at a subfolder is no longer rejected. A `.dmx/` without `config.md` below the repo's `.dmx/`, such as one an earlier version left in a package folder, is skipped. `run_loop`, `list_skills`, and `loop_status` name it once per server, with a line saying to delete it. When no `.dmx/` has a `config.md`, the nearest `.dmx/` is used. A nested dmx project with its own `config.md` and each git worktree still resolve to themselves, and nothing is walked outside a git repository. In a multi-root workspace, the first root whose walk-up finds a `.dmx/` is used. `setup_ide_rules`, which `/dmx/init` calls before `.dmx/` exists, keeps the exact folder.
+
 ## [0.5.0] — 2026-10-07
 
 ### Added

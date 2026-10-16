@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from dmx import workspace
 from dmx.exceptions import WorkspaceRootInvalid
-from dmx.workspace import resolve_workspace_root, validate_workspace_root
+from dmx.workspace import (
+    find_dmx_root,
+    ide_folder,
+    resolve_workspace_root,
+    validate_workspace_root,
+)
 
 # ---------------------------------------------------------------------------
 # resolve_workspace_root — resolution chain
@@ -256,3 +263,206 @@ class TestValidateWorkspaceRoot:
         sub.mkdir()
         (sub / ".dmx").mkdir()
         validate_workspace_root(sub, explicit=False)  # no raise
+
+
+# ---------------------------------------------------------------------------
+# A tool call pointed at a subfolder of the repo (GH-83)
+# ---------------------------------------------------------------------------
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _monorepo(tmp_path: Path) -> Path:
+    """A git repo with `.dmx/config.md` at the root and a `packages/billing` folder."""
+    repo = tmp_path / "mono"
+    (repo / "packages" / "billing").mkdir(parents=True)
+    (repo / ".dmx").mkdir()
+    (repo / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+    (repo / "packages" / "billing" / "README.md").write_text("billing\n", encoding="utf-8")
+    _git(repo, "init", "-b", "main", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    _git(repo, "checkout", "-q", "-b", "feature-gh-83")
+    return repo
+
+
+class TestToolCallFromASubfolder:
+    @pytest.mark.asyncio
+    async def test_run_loop_from_a_package_folder_uses_the_repo_dmx(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+
+        from fastmcp import Client
+
+        from dmx.server import create_app
+
+        async with Client(create_app()) as client:
+            started = await client.call_tool(
+                "run_loop", {"name": "dev", "workspace_root": str(billing)}
+            )
+
+        assert not (billing / ".dmx").exists(), started.data
+        assert list((repo / ".dmx" / "jobs").rglob("dev-*.json")), started.data
+
+    @pytest.mark.asyncio
+    async def test_stray_dmx_is_reported_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(workspace, "_REPORTED_SKIPPED_DMX", set())
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+        (billing / ".dmx" / "jobs" / "unknown").mkdir(parents=True)
+        note = (
+            "Ignored `packages/billing/.dmx/`: it has no `config.md`, and this repo's "
+            f"`.dmx/` is at `{repo}`. Delete that folder."
+        )
+
+        from fastmcp import Client
+
+        from dmx.server import create_app
+
+        async with Client(create_app()) as client:
+            first = await client.call_tool("list_skills", {"workspace_root": str(billing)})
+            second = await client.call_tool("list_skills", {"workspace_root": str(billing)})
+            status = await client.call_tool("loop_status", {"workspace_root": str(billing)})
+
+        assert first.data == f"No local or shared skills.\n\n{note}"
+        assert second.data == "No local or shared skills."
+        assert note not in str(status.data)
+
+
+class TestFindDmxRoot:
+    def test_subfolder_resolves_to_the_repo_dmx(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        assert find_dmx_root(repo / "packages" / "billing") == (repo, ())
+
+    def test_repo_root_resolves_to_itself(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        assert find_dmx_root(repo) == (repo, ())
+
+    def test_stray_dmx_without_config_is_skipped(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+        (billing / ".dmx" / "jobs" / "unknown").mkdir(parents=True)
+        assert find_dmx_root(billing / "src") == (repo, (billing,))
+
+    def test_nested_project_with_its_own_config_resolves_to_itself(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+        (billing / ".dmx").mkdir()
+        (billing / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        assert find_dmx_root(billing) == (billing, ())
+
+    def test_without_any_config_the_nearest_dmx_wins(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        (repo / ".dmx" / "config.md").unlink()
+        billing = repo / "packages" / "billing"
+        assert find_dmx_root(billing) == (repo, ())
+        (billing / ".dmx").mkdir()
+        assert find_dmx_root(billing) == (billing, ())
+
+    def test_folder_without_dmx_above_is_unchanged(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        (repo / "src").mkdir(parents=True)
+        _git(repo, "init", "-q")
+        assert find_dmx_root(repo / "src") == (repo / "src", ())
+
+    def test_outside_a_git_repo_nothing_is_walked(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir()
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        assert find_dmx_root(sub) == (sub, ())
+
+    def test_walk_stops_at_the_git_repo(self, tmp_path: Path) -> None:
+        (tmp_path / ".dmx").mkdir()
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        repo = tmp_path / "repo"
+        (repo / "src").mkdir(parents=True)
+        _git(repo, "init", "-q")
+        assert find_dmx_root(repo / "src") == (repo / "src", ())
+
+    def test_a_worktree_resolves_to_its_own_tree(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        tree = repo / ".claude" / "worktrees" / "gh-83"
+        _git(repo, "worktree", "add", "-q", str(tree), "-b", "worktree-gh-83")
+        assert (tree / ".git").is_file()
+        assert find_dmx_root(tree / "packages" / "billing") == (tree, ())
+        (tree / ".dmx" / "config.md").unlink()
+        assert find_dmx_root(tree / "packages" / "billing") == (tree, ())
+
+
+class TestResolveFromASubfolder:
+    @pytest.mark.asyncio
+    async def test_explicit_subfolder_resolves_to_the_repo(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+
+        result = await resolve_workspace_root(MagicMock(), str(billing))
+
+        assert result == repo
+        assert ide_folder() == billing
+
+    @pytest.mark.asyncio
+    async def test_mcp_root_at_a_subfolder_resolves_to_the_repo(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        root = MagicMock()
+        root.uri = f"file://{repo}/packages/billing"
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[root])
+
+        assert await resolve_workspace_root(ctx, None) == repo
+
+    @pytest.mark.asyncio
+    async def test_cwd_at_a_subfolder_resolves_to_the_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _monorepo(tmp_path)
+        monkeypatch.chdir(repo / "packages" / "billing")
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[])
+
+        assert (await resolve_workspace_root(ctx, None)).resolve() == repo.resolve()
+
+    @pytest.mark.asyncio
+    async def test_multi_root_workspace_uses_the_root_with_dmx(self, tmp_path: Path) -> None:
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        _git(notes, "init", "-q")
+        repo = _monorepo(tmp_path)
+        first, second = MagicMock(), MagicMock()
+        first.uri = f"file://{notes}"
+        second.uri = f"file://{repo}/packages/billing"
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[first, second])
+
+        assert await resolve_workspace_root(ctx, None) == repo
+
+    @pytest.mark.asyncio
+    async def test_explicit_still_wins_over_mcp_roots(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        other = tmp_path / "other"
+        (other / ".dmx").mkdir(parents=True)
+        root = MagicMock()
+        root.uri = f"file://{other}"
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[root])
+
+        result = await resolve_workspace_root(ctx, str(repo / "packages" / "billing"))
+
+        assert result == repo
+        ctx.list_roots.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_callers_keep_the_exact_folder(self, tmp_path: Path) -> None:
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+
+        result = await resolve_workspace_root(MagicMock(), str(billing), require_markers=False)
+
+        assert result == billing
+        assert ide_folder() == billing
