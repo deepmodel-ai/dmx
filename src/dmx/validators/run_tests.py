@@ -1,10 +1,10 @@
 """Bundled validator: run_tests.
 
 Detects the project's test command from common markers (``pyproject.toml``
-+ ``uv.lock``, ``package.json`` test script, ``Makefile`` test target) and
-runs it. App repos with a non-standard test setup should override this by
-placing their own ``validators/run_tests.py`` at the repo root — detection
-here is intentionally conservative rather than guessing.
++ ``uv.lock``, ``package.json`` test script, ``Makefile`` test target,
+``go.mod``) and runs it. App repos with a non-standard test setup should
+override this by placing their own ``validators/run_tests.py`` at the repo
+root — detection here is intentionally conservative rather than guessing.
 
 Contract
 --------
@@ -74,6 +74,10 @@ def _detect_test_command(workspace_root: Path) -> list[str] | None:
     if makefile.exists() and "test:" in makefile.read_text(encoding="utf-8"):
         return ["make", "test"]
 
+    # Checked last, so a repo with one of the markers above keeps its command.
+    if (workspace_root / "go.mod").exists():
+        return ["go", "test", "./..."]
+
     return None
 
 
@@ -129,7 +133,7 @@ def run(
             "pass": False,
             "message": (
                 "No recognized test command found "
-                "(pyproject.toml, package.json test script, or Makefile test target)"
+                "(pyproject.toml, package.json test script, Makefile test target, or go.mod)"
             ),
             "checks": [{"name": "tests_pass", "pass": False}],
         }

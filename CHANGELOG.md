@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **(GH-82)** `run_tests` runs `go test ./...` when the repo root has a `go.mod`. It checks for `go.mod` after `pyproject.toml`, a `package.json` test script, and a `Makefile` test target, so a repo that already ran one of those keeps the same command. When `go` is not installed, the result says "Test command `go test ./...` not found on PATH", not that tests failed.
+
 ### Changed
 
 - **(GH-79)** The README leads with the bundled loops instead of slash commands, links to the docs at https://dmx.deepmodel.ai, and drops internal milestone status and implementation detail now covered by the docs. Links are absolute, so the README also renders on PyPI. `pyproject.toml` adds `[project.urls]` (Homepage, Documentation, Source, Changelog, Issues), so PyPI links to the docs.

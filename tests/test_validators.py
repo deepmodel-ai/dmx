@@ -11,9 +11,11 @@ from __future__ import annotations
 import importlib.resources as pkg
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from dmx.loop_schema import load_loop
 from dmx.validator_runner import run_validator
@@ -24,9 +26,6 @@ from dmx.validators import (
     run_tests,
     spec_adherence,
 )
-
-if TYPE_CHECKING:
-    import pytest
 
 # ---------------------------------------------------------------------------
 # check_spec_complete
@@ -403,6 +402,15 @@ class TestSpecAdherence:
 # ---------------------------------------------------------------------------
 
 
+def _write_go_module(root: Path, test_body: str | None = None) -> None:
+    """Write a ``go.mod``, plus one ``_test.go`` file when *test_body* is given."""
+    (root / "go.mod").write_text("module example.com/gh82\n\ngo 1.18\n", encoding="utf-8")
+    if test_body is not None:
+        (root / "x_test.go").write_text(
+            f'package gh82\n\nimport "testing"\n\n{test_body}', encoding="utf-8"
+        )
+
+
 class TestRunTests:
     def test_no_recognized_command_fails(self, tmp_path: Path) -> None:
         result = run_tests.run(tmp_path)
@@ -441,6 +449,59 @@ class TestRunTests:
         (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}', encoding="utf-8")
         cmd = run_tests._detect_test_command(tmp_path)
         assert cmd == ["npm", "test", "--silent"]
+
+    def test_detects_go_mod(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path)
+        cmd = run_tests._detect_test_command(tmp_path)
+        assert cmd == ["go", "test", "./..."]
+
+    def test_makefile_target_wins_over_go_mod(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path)
+        (tmp_path / "Makefile").write_text("test:\n\tgo test ./...\n", encoding="utf-8")
+        cmd = run_tests._detect_test_command(tmp_path)
+        assert cmd == ["make", "test"]
+
+    def test_package_json_test_script_wins_over_go_mod(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path)
+        (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}', encoding="utf-8")
+        cmd = run_tests._detect_test_command(tmp_path)
+        assert cmd == ["npm", "test", "--silent"]
+
+    def test_pyproject_wins_over_go_mod(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+        cmd = run_tests._detect_test_command(tmp_path)
+        assert cmd == ["pytest", "-q"]
+
+    def test_go_missing_from_path_is_reported_as_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_go_module(tmp_path)
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        monkeypatch.setenv("PATH", str(empty_bin))
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is False
+        assert result["message"] == "Test command `go test ./...` not found on PATH"
+        assert result["checks"] == [{"name": "tests_pass", "pass": False}]
+
+    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    def test_go_module_passing(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path, "func TestOK(t *testing.T) {}\n")
+        result = run_tests.run(tmp_path)
+        assert result["pass"] is True, result
+        assert "ran `go test ./...`" in result["message"]
+        assert result["checks"][0]["pass"] is True
+
+    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    def test_go_module_failing(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path, 'func TestFails(t *testing.T) { t.Fatal("boom") }\n')
+        result = run_tests.run(tmp_path)
+        assert result["pass"] is False
+        assert result["checks"][0]["pass"] is False
+        assert "boom" in result["checks"][0]["message"]
 
     def test_no_markers_detects_nothing(self, tmp_path: Path) -> None:
         assert run_tests._detect_test_command(tmp_path) is None
@@ -710,3 +771,11 @@ class TestBundledValidatorSubprocessContract:
         assert result["pass"] is False
         names = {c["name"] for c in result["checks"]}
         assert names == {"pr_exists", "ticket_transitioned", "memory_updated"}
+
+    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    def test_run_tests_on_a_go_module_via_subprocess(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path, "func TestOK(t *testing.T) {}\n")
+        result = run_validator("run_tests", tmp_path, {}, "goal", {"job_id": "J"})
+        assert result["pass"] is True, result
+        assert result["tool"] == "run_tests"
+        assert "ran `go test ./...`" in result["message"]
