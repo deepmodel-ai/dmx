@@ -30,6 +30,12 @@ jobs:
           go-version: "stable"
           cache: false
 
+      # The reference monorepo's pnpm package runs through run_tests (GH-89).
+      # Node and Rust come with the runner images.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Install dependencies
         run: uv sync --extra dev
 
@@ -43,4 +49,7 @@ jobs:
         run: uv run mypy src/
 
       - name: Test
+        env:
+          # Fail, rather than skip, a reference monorepo test whose toolchain is missing.
+          DMX_REQUIRE_TOOLCHAINS: "1"
         run: uv run python -m pytest --cov --cov-fail-under=75 -q

@@ -356,6 +356,7 @@ Wait for the answer.
 
 Then:
 1. Tell the developer to fill in `depends_on` in each `component.yaml` where one component uses another (for example `depends_on: [ledger]`), so its tests run when that dependency changes. dmx does not guess dependencies.
+   Also suggest a `test_command:` line in `.dmx/config.md` for changes outside every component (a root `go.mod`, a lock file, CI files), such as `test_command: make test`. Without it, those changes run every component's tests.
 2. Show the `codeowners` lines from the tool and suggest adding them to `.github/CODEOWNERS`, replacing each `@<...-team>` with the real team. `.dmx/` belongs to the platform team, each component folder to its team, and `.dmx/jobs/` has no owner, so a ticket's own files never need platform approval.
 3. Offer to move component-specific memory. Read the repo-wide memory files written in Step 8. For each new component, find the parts that are only about it (its architecture, its dependencies, its constraints). Show the move as a diff: removed from `.dmx/{file}`, added to `.dmx/components/{id}/{file}` under the same heading. Ask once for all of them. Apply only what the developer accepts. Content about more than one component stays repo-wide.
 

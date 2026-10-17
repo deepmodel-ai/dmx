@@ -6,6 +6,12 @@ Detects the project's test command from common markers (``pyproject.toml``
 override this by placing their own ``validators/run_tests.py`` at the repo
 root — detection here is intentionally conservative rather than guessing.
 
+In a repo with ``.dmx/components/`` (GH-89), it runs each touched
+component's tests and those of the components that depend on them instead,
+as :func:`dmx.component_tests.plan_tests` decides, one after another within
+the same time budget, and reports one line per run. The ``tests_pass``
+check fails when any run fails or a touched component has no test command.
+
 Contract
 --------
 Called by the orchestrator via subprocess. The input contract is written to
@@ -43,10 +49,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 # Bundled validators run under dmx's interpreter and may import dmx. See #12.
+from dmx.component_tests import TestRun, plan_tests
+from dmx.components import COMPONENT_FILE, COMPONENTS_DIR, has_components
 from dmx.group_timeout import run_with_group_timeout
 from dmx.validator_runner import _where_to_set_timeout
 
@@ -120,6 +129,95 @@ def _timeout_result(
     }
 
 
+def _tail(proc: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
+
+
+def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
+    """Run *test* within *remaining* seconds. ``status`` is passed, failed, missing or timeout."""
+    record: dict[str, Any] = {
+        "components": list(test.components),
+        "command": test.command,
+        "cwd": test.cwd,
+    }
+    try:
+        proc = run_with_group_timeout(
+            list(test.argv), timeout=max(1, int(remaining)), cwd=str(root / test.cwd)
+        )
+    except FileNotFoundError:
+        return {**record, "status": "missing", "line": f"`{test.argv[0]}` not found on PATH"}
+    except subprocess.TimeoutExpired:
+        limit = max(1, int(remaining))
+        return {**record, "status": "timeout", "line": f"{test.command} timed out after {limit}s"}
+    status = "passed" if proc.returncode == 0 else "failed"
+    where = f" in {test.cwd}" if test.cwd != "." else ""
+    return {
+        **record,
+        "status": status,
+        "exit": proc.returncode,
+        "line": f"{test.command}{where} (exit {proc.returncode})",
+        "output": "" if status == "passed" else _tail(proc),
+    }
+
+
+def run_components(
+    workspace_root: Path,
+    timeout_seconds: int | None = None,
+    loop_name: str | None = None,
+) -> dict[str, Any]:
+    """Run each touched component's tests and its dependents' (GH-89)."""
+    plan = plan_tests(workspace_root)
+    deadline = time.monotonic() + _inner_timeout(timeout_seconds)
+    runs: list[dict[str, Any]] = []
+    for test in plan.runs:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            runs.append(
+                {
+                    "components": list(test.components),
+                    "command": test.command,
+                    "cwd": test.cwd,
+                    "status": "not run",
+                    "line": f"{test.command} not run: the time budget was used up",
+                }
+            )
+            continue
+        runs.append(_run_one(workspace_root, test, remaining))
+
+    lines: list[str] = []
+    failures: list[str] = []
+    for record in runs:
+        mark = "✓" if record["status"] == "passed" else "✗"
+        label = ", ".join(record["components"])
+        lines.append(f"{mark} {label} — {record['line']}")
+        if record["status"] != "passed":
+            detail = f"{label} — {record['line']}"
+            output = record.get("output")
+            failures.append(f"{detail}:\n{output}" if output else detail)
+    for component_id in plan.unconfigured:
+        note = f"not configured: set `test` in {COMPONENTS_DIR}/{component_id}/{COMPONENT_FILE}"
+        lines.append(f"✗ {component_id} — {note}")
+        failures.append(f"{component_id} — {note}")
+
+    failed = sum(1 for record in runs if record["status"] != "passed") + len(plan.unconfigured)
+    total = len(runs) + len(plan.unconfigured)
+    passed = failed == 0 and total > 0
+    if passed:
+        header = f"Tests passed — {total} run{'' if total == 1 else 's'}"
+    elif total == 0:
+        header = "Tests failed — nothing to run"
+    else:
+        header = f"Tests failed — {failed} of {total} run{'' if total == 1 else 's'} failed"
+    if any(record["status"] == "timeout" for record in runs):
+        lines.append(_where_to_set_timeout(loop_name))
+    return {
+        "pass": passed,
+        "message": "\n".join([header, *lines]),
+        "checks": [{"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}],
+        "runs": runs,
+    }
+
+
 def run(
     workspace_root: Path,
     timeout_seconds: int | None = None,
@@ -127,6 +225,8 @@ def run(
 ) -> dict[str, Any]:
     if isinstance(timeout_seconds, bool):
         timeout_seconds = None
+    if has_components(workspace_root):
+        return run_components(workspace_root, timeout_seconds, loop_name)
     cmd = _detect_test_command(workspace_root)
     if cmd is None:
         return {

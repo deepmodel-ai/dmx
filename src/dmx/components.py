@@ -6,7 +6,9 @@ monorepo::
     description: Payment processing service      # required
     paths: ["services/payments/**"]              # required
     depends_on: [ledger]                         # optional
-    test: {cmd: make test, cwd: services/payments}   # optional (#89)
+    test: {cmd: make test, cwd: services/payments}   # optional (#89): run
+                                                 # with ``sh -c`` from cwd,
+                                                 # the repo root by default
     validators: {validate: [no_float_money]}     # optional (#90)
     ticket: {jira_project: PAY}                  # optional (#92)
 

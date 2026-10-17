@@ -29,6 +29,7 @@ from fastmcp import (
 from dmx.components import (
     COMPONENT_FILE,
     COMPONENTS_DIR,
+    Component,
     is_valid_id,
     load_components,
     path_matches,
@@ -43,12 +44,15 @@ __all__ = [
     "WORKSPACES",
     "AppliedComponents",
     "ComponentPlan",
+    "TestCommand",
     "DetectedComponent",
     "DetectedComponents",
     "Workspace",
     "add_component",
     "apply_detected_components",
     "codeowners_lines",
+    "component_folder",
+    "default_test_command",
     "detect_components",
     "plan_component",
     "register_workspace_tools",
@@ -710,3 +714,107 @@ def add_component(
         carved_from=plan.carved_from,
         written=target.relative_to(root).as_posix(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Default test commands (GH-89), one function per language
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TestCommand:
+    """A command and the folder it runs from, relative to the repo root (``.`` for the root)."""
+
+    argv: tuple[str, ...]
+    cwd: str
+
+
+def component_folder(component: Component) -> str | None:
+    """The folder a component owns: the literal leading folders of its first pattern."""
+    folders: list[str] = []
+    for segment in component.paths[0].strip().strip("/").split("/"):
+        if set(segment) & {"*", "?"}:
+            break
+        folders.append(segment)
+    return "/".join(folders) or None
+
+
+def _rel(root: Path, folder: Path) -> str:
+    rel = folder.relative_to(root).as_posix()
+    return rel or "."
+
+
+def _above(root: Path, folder: Path) -> tuple[Path, ...]:
+    """*folder*'s parents up to and including *root*."""
+    parents: list[Path] = []
+    for parent in folder.parents:
+        parents.append(parent)
+        if parent == root:
+            break
+    return tuple(parents) if root in parents else ()
+
+
+def _go_test(root: Path, folder: Path, _name: str | None) -> TestCommand | None:
+    if (folder / "go.mod").is_file():
+        return TestCommand(("go", "test", "./..."), _rel(root, folder))
+    for module_dir in _above(root, folder):
+        if (module_dir / "go.mod").is_file():
+            package = folder.relative_to(module_dir).as_posix()
+            return TestCommand(("go", "test", f"./{package}/..."), _rel(root, module_dir))
+    return None
+
+
+def _node_test(root: Path, folder: Path, name: str | None) -> TestCommand | None:
+    rel = _rel(root, folder)
+    for workspace in WORKSPACES:
+        if workspace.language != "node" or not (root / workspace.marker).is_file():
+            continue
+        if not workspace.applies(root):
+            continue
+        declared = workspace.members(root)
+        if declared is None or rel not in _expand(root, *declared, workspace.manifest):
+            continue
+        if workspace.name == "pnpm":
+            return TestCommand(("pnpm", "--filter", name or f"./{rel}", "test"), ".")
+        if workspace.name == "yarn":
+            return TestCommand(("yarn", "workspace", name, "test"), ".") if name else None
+        return TestCommand(("npm", "test", "-w", name or rel), ".")
+    scripts = (_read_json(folder / "package.json") or {}).get("scripts")
+    if isinstance(scripts, dict) and "test" in scripts:
+        return TestCommand(("npm", "test", "--silent"), rel)
+    return None
+
+
+def _python_test(root: Path, folder: Path, _name: str | None) -> TestCommand | None:
+    uses_uv = any((d / "uv.lock").is_file() for d in (folder, *_above(root, folder)))
+    argv = ("uv", "run", "pytest", "-q") if uses_uv else ("pytest", "-q")
+    return TestCommand(argv, _rel(root, folder))
+
+
+def _rust_test(root: Path, folder: Path, name: str | None) -> TestCommand | None:
+    for workspace_dir in _above(root, folder):
+        manifest = workspace_dir / "Cargo.toml"
+        if manifest.is_file() and _has_table(manifest, "workspace") and name:
+            return TestCommand(("cargo", "test", "-p", name), _rel(root, workspace_dir))
+    return TestCommand(("cargo", "test"), _rel(root, folder))
+
+
+_DEFAULT_TESTS: dict[str, Callable[[Path, Path, str | None], TestCommand | None]] = {
+    "go": _go_test,
+    "node": _node_test,
+    "python": _python_test,
+    "rust": _rust_test,
+}
+
+
+def default_test_command(root: Path, component: Component) -> TestCommand | None:
+    """The test command for *component* when it has no ``test`` entry, or None."""
+    rel = component_folder(component)
+    if rel is None:
+        return None
+    folder = root / rel
+    if not folder.is_dir():
+        return None
+    language, name, _description = _recognise(root, folder)
+    test = _DEFAULT_TESTS.get(language)
+    return test(root, folder, name) if test else None
