@@ -92,7 +92,7 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 **A memory bank.** `.dmx/` holds project context, the current spec and plan, and loop state, committed to the repo. Every session and every developer starts from the same understanding. [Memory bank →](https://dmx.deepmodel.ai/configuration/memory-bank)
 
-**Components for monorepos.** Declare each service or package in `.dmx/components/<id>/component.yaml` with a `description` and the `paths` it owns, or let `/dmx/init` find them in your pnpm, npm, yarn, `go.work`, `uv`, or Cargo workspace. Every loop message names the ticket's components, and in a repo with components the agent reads only the memory that applies to them. Teams own their component folders through `CODEOWNERS`:
+**Components for monorepos.** Declare each service or package in `.dmx/components/<id>/component.yaml` with a `description` and the `paths` it owns, or let `/dmx/init` find them in your pnpm, npm, yarn, `go.work`, `uv`, or Cargo workspace. `/dmx/add-component services/fraud` adds any other folder, such as a Go service in a single-module repo. Every loop message names the ticket's components, and in a repo with components the agent reads only the memory that applies to them. Teams own their component folders through `CODEOWNERS`:
 
 ```
 # .github/CODEOWNERS

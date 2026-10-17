@@ -105,6 +105,7 @@ A state file is an active loop when its `status` is `running`, `paused`, `iterat
 | Command | Purpose |
 |---|---|
 | `/dmx/init` | Write IDE rules + scaffold `.dmx/` memory bank |
+| `/dmx/add-component` | Make one folder of a monorepo a component |
 | `/dmx/upgrade` | Refresh IDE rule files to the current workflow version |
 | `/dmx/create-ticket` | Create a ticket in the configured provider |
 | `/dmx/derive-ticket` | Derive ticket from current context |

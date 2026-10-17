@@ -17,6 +17,7 @@ import json
 import re
 import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -25,23 +26,31 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
-from dmx.components import COMPONENT_FILE, COMPONENTS_DIR, load_components, path_matches
+from dmx.components import (
+    COMPONENT_FILE,
+    COMPONENTS_DIR,
+    is_valid_id,
+    load_components,
+    path_matches,
+)
 from dmx.exceptions import WorkspaceRootInvalid
 from dmx.workspace import resolve_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 __all__ = [
     "WORKSPACES",
     "AppliedComponents",
+    "ComponentPlan",
     "DetectedComponent",
     "DetectedComponents",
     "Workspace",
+    "add_component",
     "apply_detected_components",
     "codeowners_lines",
     "detect_components",
+    "plan_component",
     "register_workspace_tools",
 ]
 
@@ -80,8 +89,7 @@ class DetectedComponent:
         return (f"{self.path}/**",)
 
     def component_yaml(self) -> str:
-        paths = ", ".join(json.dumps(pattern) for pattern in self.paths)
-        return f"description: {_yaml_scalar(self.description)}\npaths: [{paths}]\n"
+        return _component_yaml(self.description, self.path, language=self.language)
 
 
 @dataclass(frozen=True)
@@ -401,7 +409,56 @@ def _yaml_scalar(text: str) -> str:
 
 
 def register_workspace_tools(app: FastMCP) -> None:
-    """Register ``detect_components`` on *app*."""
+    """Register ``detect_components`` and ``add_component`` on *app*."""
+
+    @app.tool(name="add_component")
+    async def add_component_tool(
+        ctx: Context,
+        path: str,
+        id: str | None = None,  # noqa: A002 — the tool argument developers see
+        description: str | None = None,
+        dry_run: bool = True,
+        workspace_root: str | None = None,
+    ) -> dict[str, Any]:
+        """Make the folder at *path* a component, for ``/dmx/add-component``.
+
+        Recognises a Go module or package, a Node package, a Python project
+        and a Rust crate, and fills in the id and description from it.
+        Anything else is named after its folder, and its ``component.yaml``
+        gets commented ``test`` lines to fill in. Call it first with
+        ``dry_run`` true (the default) to show the plan, then with
+        ``dry_run`` false to write ``.dmx/components/<id>/component.yaml``.
+        When the id is taken, nothing is written and ``suggested_id`` names
+        another. Never overwrites a file and never commits.
+
+        Args:
+            path: The folder, relative to the repo root or absolute.
+            id: The component id. Taken from the manifest or folder when omitted.
+            description: The description. Taken from the manifest when omitted.
+            dry_run: When true, change nothing.
+            workspace_root: Repo root path override. Auto-detected if omitted.
+
+        Returns:
+            ``blocked``, ``applied``, ``id``, ``path``, ``language``,
+            ``description``, ``has_default_test``, ``carved_from``,
+            ``suggested_id``, ``component_yaml``, ``codeowners`` and
+            ``written``.
+        """
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return ComponentPlan(
+                blocked=f"Could not resolve a valid workspace root: {exc}"
+            ).as_dict(applied=False)
+        if dry_run:
+            return plan_component(root, path, component_id=id, description=description).as_dict(
+                applied=False
+            )
+        try:
+            plan = add_component(root, path, component_id=id, description=description)
+        except FileExistsError:
+            plan = ComponentPlan(blocked=f"`{id or path}` already has a component.yaml.")
+        return plan.as_dict(applied=plan.written is not None)
 
     @app.tool(name="detect_components")
     async def detect_components_tool(
@@ -463,3 +520,193 @@ def register_workspace_tools(app: FastMCP) -> None:
                 codeowners=list(applied.codeowners),
             )
         return result
+
+
+# ---------------------------------------------------------------------------
+# /dmx/add-component (GH-87)
+# ---------------------------------------------------------------------------
+
+# Languages #89 has a default test command for, so `test` is left out.
+_DEFAULT_TEST_LANGUAGES = frozenset({"go", "node", "python", "rust"})
+
+
+def _component_yaml(description: str, path: str, *, language: str) -> str:
+    text = f"description: {_yaml_scalar(description)}\npaths: [{json.dumps(f'{path}/**')}]\n"
+    if language not in _DEFAULT_TEST_LANGUAGES:
+        text += (
+            "# dmx has no default test command for this folder's language. Set one:\n"
+            f"# test:\n#   cmd: <your test command>\n#   cwd: {path}\n"
+        )
+    return text
+
+
+@dataclass(frozen=True)
+class ComponentPlan:
+    """What ``/dmx/add-component`` writes for one folder, or why it can't."""
+
+    blocked: str | None
+    id: str | None = None
+    path: str | None = None
+    language: str | None = None
+    description: str | None = None
+    carved_from: str | None = None
+    suggested_id: str | None = None
+    written: str | None = None
+
+    @property
+    def has_default_test(self) -> bool:
+        return self.language in _DEFAULT_TEST_LANGUAGES
+
+    @property
+    def component_yaml(self) -> str | None:
+        if self.blocked is not None or not (self.description and self.path and self.language):
+            return None
+        return _component_yaml(self.description, self.path, language=self.language)
+
+    @property
+    def codeowners(self) -> str | None:
+        return codeowners_lines([self.id])[1] if self.id and self.blocked is None else None
+
+    def as_dict(self, *, applied: bool) -> dict[str, Any]:
+        return {
+            "blocked": self.blocked,
+            "applied": applied,
+            "id": self.id,
+            "path": self.path,
+            "language": self.language,
+            "description": self.description,
+            "has_default_test": self.has_default_test,
+            "carved_from": self.carved_from,
+            "suggested_id": self.suggested_id,
+            "component_yaml": self.component_yaml,
+            "codeowners": self.codeowners,
+            "written": self.written,
+        }
+
+
+def _has_table(manifest: Path, table: str) -> bool:
+    return isinstance((_read_toml(manifest) or {}).get(table), dict)
+
+
+def _go_package(root: Path, folder: Path) -> tuple[str | None, str | None] | None:
+    """``(folder name, "Go package <import path>")`` for Go code under a module above it."""
+    if not any(path.is_file() for path in folder.rglob("*.go")):
+        return None
+    for module_dir in (folder, *folder.parents):
+        if (module_dir / "go.mod").is_file():
+            _name, module_description = _go_identity(module_dir)
+            module = (module_description or "").removeprefix("Go module ")
+            rel = folder.relative_to(module_dir).as_posix()
+            import_path = f"{module}/{rel}" if module and rel != "." else module
+            return folder.name, f"Go package {import_path}" if import_path else None
+        if module_dir == root:
+            break
+    return None
+
+
+def _recognise(root: Path, folder: Path) -> tuple[str, str | None, str | None]:
+    """``(language, name, description)`` for what *folder* holds."""
+    if (folder / "go.mod").is_file():
+        return ("go", *_go_identity(folder))
+    if (folder / "Cargo.toml").is_file() and _has_table(folder / "Cargo.toml", "package"):
+        return ("rust", *_rust_identity(folder))
+    if (folder / "pyproject.toml").is_file() and _has_table(folder / "pyproject.toml", "project"):
+        return ("python", *_python_identity(folder))
+    if (folder / "package.json").is_file():
+        return ("node", *_node_identity(folder))
+    package = _go_package(root, folder)
+    if package is not None:
+        return ("go", *package)
+    return "other", None, None
+
+
+def _folder_rel(root: Path, path: str) -> tuple[str | None, str | None]:
+    """``(repo-relative folder, None)``, or ``(None, why it can't be a component)``."""
+    shown = path or "."
+    candidate = Path(path).expanduser()
+    folder = (candidate if candidate.is_absolute() else root / candidate).resolve()
+    try:
+        rel = folder.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None, f"`{shown}` is outside this repo."
+    if rel in ("", "."):
+        return None, "`.` can't be a component: the repo root holds the repo-wide files."
+    if rel.split("/", 1)[0] == ".dmx":
+        return None, f"`{rel}` is dmx's own folder, not code."
+    if not folder.is_dir():
+        return None, f"`{rel}` is not a folder in this repo."
+    return rel, None
+
+
+def plan_component(
+    root: Path,
+    path: str,
+    *,
+    component_id: str | None = None,
+    description: str | None = None,
+) -> ComponentPlan:
+    """Work out the component for the folder at *path*, changing nothing."""
+    rel, refused = _folder_rel(root, path)
+    if rel is None:
+        return ComponentPlan(blocked=refused)
+    existing = load_components(root)
+    pattern = f"{rel}/**"
+    for component in existing.components:
+        if any(p.strip().strip("/") in (rel, pattern) for p in component.paths):
+            return ComponentPlan(blocked=f"`{component.id}` already covers exactly `{pattern}`.")
+
+    language, name, manifest_description = _recognise(root, root / rel)
+    chosen = component_id.strip() if component_id else _base_id(name, rel)
+    if not is_valid_id(chosen):
+        return ComponentPlan(
+            blocked=(
+                f"`{chosen}` is not a valid component id "
+                "(use lowercase letters, digits, `-` and `_`)."
+            )
+        )
+    components_dir = root / COMPONENTS_DIR
+    if (components_dir / chosen).exists():
+        suggestion, n = _slug(rel.replace("/", "-")), 2
+        while not suggestion or (components_dir / suggestion).exists():
+            suggestion, n = f"{_slug(rel.replace('/', '-'))}-{n}", n + 1
+        return ComponentPlan(
+            blocked=f"`{chosen}` is already a component. Pick another id, such as `{suggestion}`.",
+            suggested_id=suggestion,
+        )
+
+    owner = existing.component_for(rel)
+    folder_name = rel.rsplit("/", 1)[-1]
+    return ComponentPlan(
+        blocked=None,
+        id=chosen,
+        path=rel,
+        language=language,
+        description=(description or "").strip() or manifest_description or f"{folder_name} ({rel})",
+        carved_from=owner.id if owner else None,
+    )
+
+
+def add_component(
+    root: Path,
+    path: str,
+    *,
+    component_id: str | None = None,
+    description: str | None = None,
+) -> ComponentPlan:
+    """Plan the component for *path* and write its ``component.yaml``. Nothing is committed."""
+    plan = plan_component(root, path, component_id=component_id, description=description)
+    if plan.blocked is not None or plan.id is None or plan.component_yaml is None:
+        return plan
+    target = root / COMPONENTS_DIR / plan.id / COMPONENT_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("x", encoding="utf-8") as handle:
+        handle.write(plan.component_yaml)
+    return ComponentPlan(
+        blocked=None,
+        id=plan.id,
+        path=plan.path,
+        language=plan.language,
+        description=plan.description,
+        carved_from=plan.carved_from,
+        written=target.relative_to(root).as_posix(),
+    )

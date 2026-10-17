@@ -41,6 +41,7 @@ __all__ = [
     "ComponentSet",
     "SkippedComponent",
     "has_components",
+    "is_valid_id",
     "load_components",
     "path_matches",
 ]
@@ -120,6 +121,11 @@ class ComponentSet:
             elif path not in repo_wide:
                 repo_wide.append(path)
         return tuple(owners[key] for key in sorted(owners)), tuple(repo_wide)
+
+
+def is_valid_id(component_id: str) -> bool:
+    """Lowercase letters, digits, ``-`` and ``_``, starting with a letter or digit."""
+    return bool(_ID_RE.match(component_id))
 
 
 def has_components(root: Path) -> bool:
