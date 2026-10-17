@@ -1,6 +1,6 @@
 """Bundled validator: check_spec_complete.
 
-Checks that ``.dmx/spec.md`` exists and has meaningful content in the
+Checks that the ticket's ``spec.md`` exists and has meaningful content in the
 required sections.  App repos can override this by placing their own
 ``validators/check_spec_complete.py`` at the repo root.
 
@@ -17,7 +17,9 @@ stdin as JSON::
       "loop_context": {..., "workspace_root": "/path/to/repo"}
     }
 
-Reads ``.dmx/spec.md`` relative to ``loop_context.workspace_root``.
+Reads the job's ``spec.md`` from ``loop_context.spec_path``, or
+``.dmx/spec.md`` under ``loop_context.workspace_root`` when the runner did
+not pass that path (a 0.5 layout, or a hand-run check).
 
 Exits 0 on pass, 1 on failure.
 Writes JSON to stdout::
@@ -43,6 +45,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+# Bundled validators run under dmx's interpreter and may import dmx. See #12.
+from dmx.loop_state import SPEC_FILE, ticket_path_from_context
 
 # ---------------------------------------------------------------------------
 # Check implementations
@@ -191,8 +196,8 @@ def _scope_defined(content: str) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
-def run(workspace_root: Path) -> dict[str, Any]:
-    spec = workspace_root / ".dmx" / "spec.md"
+def run(workspace_root: Path, loop_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    spec = ticket_path_from_context(workspace_root, loop_context, "spec_path", SPEC_FILE)
     content = spec.read_text(encoding="utf-8") if spec.exists() else ""
 
     checks_raw = [
@@ -224,7 +229,8 @@ def run(workspace_root: Path) -> dict[str, Any]:
 
 if __name__ == "__main__":
     contract = json.loads(sys.stdin.read() or "{}")
-    workspace_root = contract.get("loop_context", {}).get("workspace_root") or "."
-    result = run(Path(workspace_root))
+    loop_context = contract.get("loop_context", {})
+    workspace_root = loop_context.get("workspace_root") or "."
+    result = run(Path(workspace_root), loop_context)
     print(json.dumps(result))
     sys.exit(0 if result["pass"] else 1)

@@ -6,7 +6,8 @@ deterministically at the runtime level — distinct from the coding-agent
 skills (``update-memory``, ``commit``, ``create-pr``) that do deeper,
 judgment-based memory bank reconciliation.
 
-The loop runtime only touches ``.dmx/activeContext.md``, and only in the
+The loop runtime only touches the job's ``activeContext.md``
+(``.dmx/jobs/{job_id}/activeContext.md`` since GH-84), and only in the
 lightweight ways the file already supports (see ``dmx-update-memory``):
 
 - Before running: surface the current "Open Learnings" / "Open Decisions"
@@ -20,11 +21,14 @@ lightweight ways the file already supports (see ``dmx-update-memory``):
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+from dmx.loop_state import ACTIVE_CONTEXT_FILE, ticket_file
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["read_memory_context", "append_session_note"]
-
-_ACTIVE_CONTEXT_REL = Path(".dmx") / "activeContext.md"
 
 _SKELETON = "## Open Learnings\n\n## Open Decisions\n\n## Session Notes\n"
 
@@ -33,8 +37,8 @@ _MAX_SESSION_NOTES = 10
 _SECTION_RE = r"^##\s+{heading}\s*\n(.*?)(?=^##\s|\Z)"
 
 
-def _active_context_path(workspace_root: Path) -> Path:
-    return workspace_root / _ACTIVE_CONTEXT_REL
+def _active_context_path(workspace_root: Path, job_id: str) -> Path:
+    return ticket_file(workspace_root, job_id, ACTIVE_CONTEXT_FILE)
 
 
 def _section_body(content: str, heading: str) -> str:
@@ -43,13 +47,13 @@ def _section_body(content: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def read_memory_context(workspace_root: Path) -> str:
-    """Return the current Open Learnings + Open Decisions, formatted for display.
+def read_memory_context(workspace_root: Path, job_id: str) -> str:
+    """Return the job's Open Learnings + Open Decisions, formatted for display.
 
-    Returns an empty string if ``.dmx/activeContext.md`` doesn't exist or
-    both sections are empty — nothing worth surfacing to the agent.
+    Returns an empty string if the job's ``activeContext.md`` doesn't exist
+    or both sections are empty — nothing worth surfacing to the agent.
     """
-    path = _active_context_path(workspace_root)
+    path = _active_context_path(workspace_root, job_id)
     if not path.exists():
         return ""
 
@@ -66,15 +70,15 @@ def read_memory_context(workspace_root: Path) -> str:
     return "\n\n".join(blocks)
 
 
-def append_session_note(workspace_root: Path, note: str) -> None:
-    """Append a one-line breadcrumb to the Session Notes section.
+def append_session_note(workspace_root: Path, job_id: str, note: str) -> None:
+    """Append a one-line breadcrumb to the job's Session Notes section.
 
-    Creates ``.dmx/activeContext.md`` with the standard learning-inbox
+    Creates the job's ``activeContext.md`` with the standard learning-inbox
     skeleton if it doesn't exist yet. Keeps only the most recent
     ``_MAX_SESSION_NOTES`` entries, matching the trimming behaviour
     described for ``/dmx/update-memory``.
     """
-    path = _active_context_path(workspace_root)
+    path = _active_context_path(workspace_root, job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     content = path.read_text(encoding="utf-8") if path.exists() else _SKELETON

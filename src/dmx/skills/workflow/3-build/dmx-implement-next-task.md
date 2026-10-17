@@ -6,6 +6,8 @@ description: Execute the single next unchecked task in tasks.md and stop. Use th
 
 You are implementing one task from the current branch's plan. Execute exactly one task and stop. Do not move on without being asked again.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Load configuration and protected branch check
 
 The project configuration is injected into your context as a rule. Extract `branch_base` and `production_branch`. If not available in context, fall back to reading `.dmx/config.md`.
@@ -27,8 +29,8 @@ If they decline, stop. If they confirm, or the branch is not protected, continue
 ## Step 2 — Read spec.md and tasks.md
 
 Read both:
-- `.dmx/spec.md` — for context and technical approach
-- `.dmx/tasks.md` — for the task list
+- `spec.md` — for context and technical approach
+- `tasks.md` — for the task list
 
 If `spec.md` does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first."
 
@@ -61,7 +63,7 @@ Output:
 
 Make the code change, create the file, write the migration, or perform whatever the task specifies. Apply the coding style from the system prompt (functional-first, immutable data, pure functions, type annotations).
 
-If you notice a pattern or decision worth capturing, append a brief note to the `## Open Learnings` section in `.dmx/activeContext.md`.
+If you notice a pattern or decision worth capturing, append a brief note to the `## Open Learnings` section in `activeContext.md`.
 
 ## Step 6 — Check it off
 

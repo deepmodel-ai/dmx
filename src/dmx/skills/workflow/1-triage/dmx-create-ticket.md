@@ -182,7 +182,7 @@ git checkout {branch_name}
 
 ## Step 9 — Scaffold spec.md
 
-Write `.dmx/spec.md`:
+Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill, or `.dmx/jobs/{job_id}/spec.md` when run directly, where `{job_id}` is `{ticket_ref}` when it is a real ticket id, else `{branch_name}`. Create the folder if needed. Do not write `.dmx/spec.md`.
 
 ```markdown
 ---
@@ -265,7 +265,7 @@ labels:       ["in-progress"]
 {if ticketing ≠ none} Ticket: {ticket_ref} — {summary}
 {if ticketing ≠ none} URL:    {ticket_url}
 Branch: {branch_name}
-Spec:   .dmx/spec.md
+Spec:   .dmx/jobs/{job_id}/spec.md
 ```
 
 Then:

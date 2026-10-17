@@ -115,9 +115,9 @@ git checkout {branch_name}
 
 ## Step 8 — Scaffold the ticket spec
 
-If `.dmx/spec.md` already exists, skip and note: "Spec already exists — skipping scaffold."
+Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill, or `.dmx/jobs/{job_id}/spec.md` when run directly, where `{job_id}` is `{ticket_ref}` when it is a real ticket id, else `{branch_name}`. Create the folder if needed. Do not write `.dmx/spec.md`.
 
-Write `.dmx/spec.md`:
+If that `spec.md` already exists, skip and note: "Spec already exists — skipping scaffold."
 
 ```markdown
 ---
@@ -195,7 +195,7 @@ labels:       ["in-progress"]
 ```
 Branch created: {branch_name}
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Progress
-Spec scaffolded: .dmx/spec.md
+Spec scaffolded: .dmx/jobs/{job_id}/spec.md
 
 Next steps:
   1. Answer the questions in spec.md.

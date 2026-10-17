@@ -103,7 +103,7 @@ git checkout {branch_name}
 
 ## Step 7 — Scaffold spec.md
 
-Write `.dmx/spec.md` (skip if it already exists):
+Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill, or `.dmx/jobs/{job_id}/spec.md` when run directly, where `{job_id}` is `{ticket_ref}` when it is a real ticket id, else `{branch_name}`. Create the folder if needed. Do not write `.dmx/spec.md`. Skip this step if that `spec.md` already exists.
 
 ```markdown
 ---
@@ -169,7 +169,7 @@ Add `in-progress` label via `update_issue`.
 Hotfix branch created: {branch_name}
 Based on: {config.production_branch}
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Progress
-Spec: .dmx/spec.md
+Spec: .dmx/jobs/{job_id}/spec.md
 
 Hotfix workflow:
   1. Implement the fix (use /dmx/implement-next-phase or /dmx/implement-next-task).

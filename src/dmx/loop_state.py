@@ -6,9 +6,11 @@ State layout::
       jobs/
         {job_id}/
           {loop_name}-{task_id}.json   — full state for each loop run
+          spec.md  tasks.md  activeContext.md   — the ticket's own files (GH-84)
 
-Job ID  = ticket ID from ``.dmx/spec.md`` frontmatter when its ``branch``
-matches the current branch, or the branch name fallback.
+Job ID  = the job folder whose ``spec.md`` frontmatter ``branch`` is the
+current branch, or the branch name fallback. A 0.5 repo's root
+``.dmx/spec.md`` still counts until its ticket files are moved.
 Task ID = UUID4 generated at ``run_loop`` invocation.
 
 There is no separate "active run pointer" file. Which run is active is
@@ -40,16 +42,15 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from dmx.exceptions import AmbiguousActiveRun
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Status enum
@@ -77,6 +78,13 @@ _TERMINAL_STATUSES = frozenset({LoopStatus.complete.value, LoopStatus.failed.val
 # Job folders under this prefix hold state for a loop that hasn't yet
 # established its real ticket identity — see module docstring.
 PENDING_JOB_PREFIX = "_pending-"
+
+# The files each ticket writes, kept in its job folder since GH-84. Before
+# that they sat at the `.dmx/` root and every ticket edited the same copy.
+SPEC_FILE = "spec.md"
+TASKS_FILE = "tasks.md"
+ACTIVE_CONTEXT_FILE = "activeContext.md"
+TICKET_FILES = (SPEC_FILE, TASKS_FILE, ACTIVE_CONTEXT_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -155,16 +163,43 @@ def usable_ticket(ticket: str | None) -> str | None:
     return ticket
 
 
-def read_spec_identity(workspace_root: Path) -> tuple[str | None, str | None]:
-    """Return ``(ticket, branch)`` from ``.dmx/spec.md`` frontmatter.
+def job_dir(workspace_root: Path, job_id: str) -> Path:
+    """The folder for one job: ``.dmx/jobs/{job_id}/``."""
+    return workspace_root / ".dmx" / "jobs" / job_id
 
-    Either side is None when the file or that key is missing. ``branch`` is
-    the frontmatter key of that name, not ``from_branch``.
+
+def ticket_file(workspace_root: Path, job_id: str, name: str) -> Path:
+    """Path of one of the job's ticket files (see :data:`TICKET_FILES`)."""
+    return job_dir(workspace_root, job_id) / name
+
+
+def root_ticket_file(workspace_root: Path, name: str) -> Path:
+    """Where a 0.5 repo kept a ticket file: the ``.dmx/`` root."""
+    return workspace_root / ".dmx" / name
+
+
+def ticket_path_from_context(
+    workspace_root: Path, loop_context: dict[str, Any] | None, key: str, name: str
+) -> Path:
+    """A validator's path to one ticket file.
+
+    The runner passes ``spec_path``, ``tasks_path`` and
+    ``active_context_path`` in ``loop_context`` (GH-84). Without them, for
+    example when a validator is run by hand, this is the 0.5 root path.
     """
-    spec = workspace_root / ".dmx" / "spec.md"
-    if not spec.exists():
+    value = (loop_context or {}).get(key)
+    if isinstance(value, str) and value:
+        return Path(value)
+    return root_ticket_file(workspace_root, name)
+
+
+def _spec_identity_in(spec: Path) -> tuple[str | None, str | None]:
+    if not spec.is_file():
         return None, None
-    content = spec.read_text(encoding="utf-8")
+    try:
+        content = spec.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
     fm_match = _FRONTMATTER_RE.match(content)
     if not fm_match:
         return None, None
@@ -172,34 +207,96 @@ def read_spec_identity(workspace_root: Path) -> tuple[str | None, str | None]:
     return _frontmatter_field(frontmatter, "ticket"), _frontmatter_field(frontmatter, "branch")
 
 
+def read_spec_identity(
+    workspace_root: Path, job_id: str | None = None
+) -> tuple[str | None, str | None]:
+    """Return ``(ticket, branch)`` from a ``spec.md`` frontmatter.
+
+    With *job_id*, reads that job's ``spec.md``. Without it, reads the 0.5
+    root ``.dmx/spec.md``. Either side is None when the file or that key is
+    missing. ``branch`` is the frontmatter key of that name, not
+    ``from_branch``.
+    """
+    if job_id is None:
+        return _spec_identity_in(root_ticket_file(workspace_root, SPEC_FILE))
+    return _spec_identity_in(ticket_file(workspace_root, job_id, SPEC_FILE))
+
+
+def jobs_for_branch(workspace_root: Path, branch: str) -> list[str]:
+    """Job ids whose ``spec.md`` frontmatter ``branch`` is *branch*, sorted.
+
+    Pending folders are skipped: their identity is not settled yet.
+    """
+    jobs_root = workspace_root / ".dmx" / "jobs"
+    if not jobs_root.is_dir():
+        return []
+    found: list[str] = []
+    for folder in sorted(jobs_root.iterdir()):
+        if not folder.is_dir() or is_pending_job_id(folder.name):
+            continue
+        _ticket, spec_branch = _spec_identity_in(folder / SPEC_FILE)
+        if spec_branch == branch:
+            found.append(folder.name)
+    return found
+
+
+def _has_live_run(workspace_root: Path, job_id: str) -> bool:
+    try:
+        if find_active_run(workspace_root, job_id) is not None:
+            return True
+    except AmbiguousActiveRun:
+        return True
+    return find_pr_snapshot_run(workspace_root, job_id) is not None
+
+
 def resolve_job_id(workspace_root: Path) -> str:
     """Resolve job ID for the current workspace.
 
     Resolution order:
-    1. ``ticket`` in ``.dmx/spec.md`` frontmatter, only when it is a real
-       ticket id and its ``branch`` equals the current git branch. A stale
+    1. The job folder whose ``spec.md`` frontmatter ``branch`` equals the
+       current git branch. When several do, the one with a live run (or a
+       PR snapshot) wins.
+    2. ``ticket`` in a 0.5 root ``.dmx/spec.md``, only when it is a real
+       ticket id and its ``branch`` equals the current branch. A stale
        ticket, or ``none`` / ``unknown`` / empty, is not an identity.
-    2. Current git branch name. A renamed branch therefore resolves to the
+    3. Current git branch name. A renamed branch therefore resolves to the
        new name, and an in-flight job under the old name is no longer found.
        Detached HEAD has no branch name.
-    3. ``unknown`` fallback.
+    4. ``unknown`` fallback.
 
     Args:
         workspace_root: Absolute path to the repo root.
 
     Returns:
         A string job ID — stable across multiple loop runs on the same ticket.
+
+    Raises:
+        AmbiguousActiveRun: Several job folders name the current branch and
+            more or fewer than one of them has a live run.
     """
-    ticket, spec_branch = read_spec_identity(workspace_root)
     branch = current_branch(workspace_root)
+    if not branch:
+        return "unknown"
+
+    matches = jobs_for_branch(workspace_root, branch)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        live = [job_id for job_id in matches if _has_live_run(workspace_root, job_id)]
+        if len(live) == 1:
+            return live[0]
+        names = ", ".join(f"`{job_id}`" for job_id in matches)
+        raise AmbiguousActiveRun(
+            f"{len(matches)} job folders name branch `{branch}` in their spec.md ({names}). "
+            "Resolve manually under .dmx/jobs/: fix the `branch` in the spec.md that is "
+            "wrong, or move the old folder aside."
+        )
+
+    ticket, spec_branch = read_spec_identity(workspace_root)
     identity = usable_ticket(ticket)
-    if identity and spec_branch and branch and spec_branch == branch:
+    if identity and spec_branch == branch:
         return identity
-
-    if branch:
-        return branch
-
-    return "unknown"
+    return branch
 
 
 def job_has_loop_runs(workspace_root: Path, job_id: str) -> bool:
@@ -232,7 +329,7 @@ def state_path(workspace_root: Path, job_id: str, loop_name: str, task_id: str) 
 
 
 def _job_dir(workspace_root: Path, job_id: str) -> Path:
-    return workspace_root / ".dmx" / "jobs" / job_id
+    return job_dir(workspace_root, job_id)
 
 
 def write_initial_state(
@@ -576,11 +673,12 @@ def find_pending_run(workspace_root: Path) -> tuple[str, str, str] | None:
 def rename_job(workspace_root: Path, old_job_id: str, new_job_id: str) -> None:
     """Rename a job folder once its real identity is known.
 
-    Moves every state file from ``.dmx/jobs/{old_job_id}/`` to
-    ``.dmx/jobs/{new_job_id}/``, rewriting each file's own ``job_id`` field
-    to match. If the destination already has files (e.g. a prior run for
-    the same ticket), the moved files are added alongside them rather than
-    overwriting anything unexpected.
+    Moves everything in ``.dmx/jobs/{old_job_id}/`` to
+    ``.dmx/jobs/{new_job_id}/``: the state files, with each file's own
+    ``job_id`` field rewritten to match, and the ticket's ``spec.md``,
+    ``tasks.md``, ``activeContext.md`` and any other file. If the
+    destination already has a file of the same name, the source file stays
+    where it is rather than overwriting it.
 
     A no-op if *old_job_id* has no folder.
     """
@@ -591,11 +689,21 @@ def rename_job(workspace_root: Path, old_job_id: str, new_job_id: str) -> None:
     new_dir = _job_dir(workspace_root, new_job_id)
     new_dir.mkdir(parents=True, exist_ok=True)
 
-    for path in old_dir.glob("*.json"):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        data["job_id"] = new_job_id
-        (new_dir / path.name).write_text(json.dumps(data, indent=2), encoding="utf-8")
-        path.unlink()
+    for path in sorted(old_dir.iterdir()):
+        target = new_dir / path.name
+        if target.exists():
+            continue
+        if path.suffix == ".json" and path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = None
+            if isinstance(data, dict) and {"loop_name", "task_id", "status"} <= data.keys():
+                data["job_id"] = new_job_id
+                target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                path.unlink()
+                continue
+        shutil.move(str(path), str(target))
 
     # Non-empty (unexpected leftover file) — leave it for inspection.
     with contextlib.suppress(OSError):

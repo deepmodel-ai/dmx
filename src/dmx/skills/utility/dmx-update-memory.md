@@ -6,6 +6,8 @@ description: Review spec.md, tasks.md, and the activeContext learning inbox; ext
 
 You are updating the project memory bank with durable learnings from recent work. Follow every step in order. Be precise — only write things that will still be true and useful in future sessions.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Read all core memory bank files
 
 Read each of the following files in full before making any changes:
@@ -13,15 +15,15 @@ Read each of the following files in full before making any changes:
 - `.dmx/productContext.md`
 - `.dmx/systemPatterns.md`
 - `.dmx/techContext.md`
-- `.dmx/activeContext.md`
+- `activeContext.md`
 
 If any file does not exist, create it with a minimal placeholder header before continuing.
 
 ## Step 2 — Read branch working files
 
 Read the following if they exist:
-- `.dmx/spec.md` — branch spec with YAML frontmatter
-- `.dmx/tasks.md` — phased task list
+- `spec.md` — branch spec with YAML frontmatter
+- `tasks.md` — phased task list
 
 If neither exists, proceed with Step 3 using only what is visible in the current session's context and the core files read in Step 1.
 

@@ -321,26 +321,16 @@ Write from package files detected in Step 2:
 
 ---
 
-**`.dmx/activeContext.md`**
-
-```markdown
-# Active Context
-
-## Open Learnings
-_(none yet — append observations here during implementation; promoted to core files on commit or create-pr)_
-
-## Open Decisions
-_(none yet — record unresolved trade-offs or design questions here)_
-
-## Session Notes
-_(scratch context from the current stretch of work; trimmed when promoted or stale)_
-```
-
----
+Do not write `.dmx/activeContext.md`, `.dmx/spec.md` or `.dmx/tasks.md`. Each ticket gets its own in `.dmx/jobs/<job>/`.
 
 Create directory structure:
 ```
-mkdir -p .dmx/releases
+mkdir -p .dmx/releases .dmx/jobs
+```
+
+Add this line to `.gitattributes` at the repo root, creating the file if needed, unless the file already has it. It collapses loop state in PR diffs while the spec and task list stay visible:
+```
+.dmx/jobs/**/*.json linguist-generated=true
 ```
 
 ## Step 9 — Output the result
@@ -359,9 +349,8 @@ Setup complete.
     .dmx/productContext.md     ← durable project knowledge
     .dmx/systemPatterns.md     ← durable project knowledge
     .dmx/techContext.md        ← durable project knowledge
-    .dmx/activeContext.md      ← learning inbox (open learnings, decisions, notes)
 
-  spec.md and tasks.md are created on the first ticket branch.
+  Each ticket's spec.md, tasks.md and activeContext.md are created in .dmx/jobs/<job>/.
 ```
 
 Then, depending on workflow:

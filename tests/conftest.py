@@ -10,6 +10,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def _clear_one_time_notes() -> None:
+    """Start each test without a one-time note left by an earlier one.
+
+    Tests that call loop internals directly (``_start_loop``) set these
+    notes without returning a tool reply that clears them. The server runs
+    each tool call in its own context, so they never leak there.
+    """
+    from dmx.loop_tools import _LEGACY_MOVE_NOTE, _TICKET_FILES_MOVE_NOTE
+
+    _LEGACY_MOVE_NOTE.set(None)
+    _TICKET_FILES_MOVE_NOTE.set(None)
+
+
 @pytest.fixture()
 def tmp_skills_dir(tmp_path: Path) -> Path:
     """Return a temp directory pre-populated with valid and invalid skill files."""

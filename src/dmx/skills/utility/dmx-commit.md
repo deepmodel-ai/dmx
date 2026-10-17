@@ -22,6 +22,8 @@ arguments:
 
 You are creating a git commit. Follow every step in order. Never push — committing and pushing are separate decisions.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Load configuration and protected branch check
 
 The project configuration is injected into your context as a rule. Extract `branch_base` and `production_branch`. If not available in context, fall back to reading `.dmx/config.md`.
@@ -58,8 +60,8 @@ Before staging, refresh the memory bank with progress from this commit.
 Run `git diff` and `git status --short` to understand unstaged changes.
 
 Read:
-- `.dmx/activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
-- `.dmx/spec.md` — if it exists, read for branch context (frontmatter `summary`)
+- `activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
+- `spec.md` — if it exists, read for branch context (frontmatter `summary`)
 
 **Promote qualifying inbox items to core files:**
 
@@ -114,7 +116,7 @@ Extract the ticket ref from the branch name:
 - Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result (e.g. `dm-1662` → `DM-1662`). Footer line: `Closes {TICKET_ID}`.
 - GitHub Issues: match `gh-([0-9]+)`, extract `{number}`. Footer line: `Closes #{number}`.
 
-If the branch name yields nothing, fall back to the `ticket` field in `.dmx/spec.md` frontmatter (already read in Step 3). For GitHub Issues refs (`gh-{number}`), still extract the numeric part for the footer.
+If the branch name yields nothing, fall back to the `ticket` field in `spec.md` frontmatter (already read in Step 3). For GitHub Issues refs (`gh-{number}`), still extract the numeric part for the footer.
 
 If still no ticket ref found: omit the `Closes` footer line.
 

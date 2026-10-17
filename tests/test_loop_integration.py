@@ -250,8 +250,12 @@ class TestFullPipeline:
         assert resolve_job_id(tmp_path) == "GH-1"
         assert find_active_run(tmp_path, "GH-1") is None
 
-        # Memory hooks: a breadcrumb was written for each of the 5 loops.
-        active_context = (tmp_path / ".dmx" / "activeContext.md").read_text(encoding="utf-8")
+        # Memory hooks: a breadcrumb was written for each of the 5 loops, in
+        # the ticket's own inbox. The spec loop's notes moved with the
+        # pending folder when it was promoted.
+        active_context = (tmp_path / ".dmx" / "jobs" / "GH-1" / "activeContext.md").read_text(
+            encoding="utf-8"
+        )
         assert active_context.count("loop completed (outcome: success)") == 5
         assert "chained to plan" in active_context
         assert "chained to dev" in active_context
@@ -268,9 +272,9 @@ class TestRepeatUntilIntegration:
     @pytest.mark.asyncio
     async def test_dev_loop_iterates_then_chains_to_validate(self, tmp_path: Path) -> None:
         _install_passing_validators(tmp_path)
-        dmx_dir = tmp_path / ".dmx"
-        dmx_dir.mkdir(parents=True)
-        tasks_path = dmx_dir / "tasks.md"
+        job_dir = tmp_path / ".dmx" / "jobs" / "unknown"
+        job_dir.mkdir(parents=True)
+        tasks_path = job_dir / "tasks.md"
         tasks_path.write_text("## Phase 1: X\n- [ ] Not done yet\n", encoding="utf-8")
 
         app = create_app()
@@ -321,7 +325,7 @@ class TestRepeatUntilIntegration:
         assert active is not None
         assert active[0] == "validate"
 
-        content = (tmp_path / ".dmx" / "activeContext.md").read_text(encoding="utf-8")
+        content = (job_dir / "activeContext.md").read_text(encoding="utf-8")
         assert "iterating (round 1)" in content
 
 
@@ -399,8 +403,8 @@ class TestMemoryContextIntegration:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _write_config(tmp_path)
-        _MockBranch(monkeypatch, tmp_path)
-        active_context = tmp_path / ".dmx" / "activeContext.md"
+        _MockBranch(monkeypatch, tmp_path, initial="feature-gh-1")
+        active_context = tmp_path / ".dmx" / "jobs" / "feature-gh-1" / "activeContext.md"
         active_context.parent.mkdir(parents=True, exist_ok=True)
         active_context.write_text(
             "## Open Learnings\n- CI requires `uv run pytest -q`\n\n"
@@ -411,10 +415,10 @@ class TestMemoryContextIntegration:
 
         async with Client(app) as client:
             result = await client.call_tool(
-                "run_loop", {"name": "spec", "workspace_root": str(tmp_path)}
+                "run_loop", {"name": "dev", "workspace_root": str(tmp_path)}
             )
 
-        assert "Memory context" in result.data
+        assert "Memory context (from `.dmx/jobs/feature-gh-1/activeContext.md`)" in result.data
         assert "CI requires `uv run pytest -q`" in result.data
 
 

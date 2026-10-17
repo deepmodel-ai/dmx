@@ -76,6 +76,10 @@ from dmx.ide.rules_refresh import rules_reminder
 from dmx.loop_memory import append_session_note, read_memory_context
 from dmx.loop_schema import LoopConfig, RequireBranch, load_loop, load_loops_dir
 from dmx.loop_state import (
+    ACTIVE_CONTEXT_FILE,
+    SPEC_FILE,
+    TASKS_FILE,
+    TICKET_FILES,
     LoopOutcome,
     LoopStatus,
     _now_iso,
@@ -94,7 +98,9 @@ from dmx.loop_state import (
     read_state,
     rename_job,
     resolve_job_id,
+    root_ticket_file,
     supersede_pr_snapshots,
+    ticket_file,
     usable_ticket,
     write_initial_state,
     write_state,
@@ -114,15 +120,22 @@ _LEGACY_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
+# Set when a 0.5 repo's root ticket files move into the job folder (GH-84).
+_TICKET_FILES_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dmx_ticket_files_move", default=None
+)
+
+
 def _with_legacy_note(message: str) -> str:
-    """Append the job-move line once, then clear it."""
-    note = _LEGACY_MOVE_NOTE.get()
-    if not note:
-        return message
-    _LEGACY_MOVE_NOTE.set(None)
-    if note in message:
-        return message
-    return f"{message}\n\n{note}"
+    """Append the job-move and ticket-file-move lines once, then clear them."""
+    for var in (_LEGACY_MOVE_NOTE, _TICKET_FILES_MOVE_NOTE):
+        note = var.get()
+        if not note:
+            continue
+        var.set(None)
+        if note not in message:
+            message = f"{message}\n\n{note}"
+    return message
 
 
 def _with_rules_reminder(root: Path, message: str) -> str:
@@ -758,7 +771,11 @@ def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
     """
     if not is_pending_job_id(job_id):
         return job_id
-    ticket, spec_branch = read_spec_identity(root)
+    ticket, spec_branch = read_spec_identity(root, job_id)
+    # A create-ticket skill written for 0.5 still writes the root spec.md.
+    from_root = spec_branch is None
+    if from_root:
+        ticket, spec_branch = read_spec_identity(root)
     branch = current_branch(root)
     if not branch or not spec_branch or spec_branch != branch:
         return job_id
@@ -779,7 +796,54 @@ def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
         )
     rename_job(root, job_id, real_job_id)
     logger.info("promoted pending job %s -> %s", job_id, real_job_id)
+    if from_root:
+        _move_root_ticket_files(root, real_job_id)
     return real_job_id
+
+
+def _move_root_ticket_files(root: Path, job_id: str) -> list[str]:
+    """Move a 0.5 repo's root ticket files into *job_id*'s folder (GH-84).
+
+    Only when the root files belong to *job_id*: the root ``.dmx/spec.md``
+    names the current branch and its ticket (or that branch) is *job_id*;
+    or there is no root ``spec.md`` and *job_id*'s own ``spec.md`` names
+    the current branch, so a root ``tasks.md`` or ``activeContext.md``
+    written by a skill made for 0.5 is this ticket's. A stale root spec
+    from an earlier ticket stays for ``/dmx/upgrade``. A file the job folder
+    already has is not overwritten. Called from the tools that write anyway
+    (``run_loop``, ``loop_advance``, ``loop_continue``), never from a
+    read-only call. Sets :data:`_TICKET_FILES_MOVE_NOTE` when something
+    moved.
+
+    Returns:
+        The names of the files moved.
+    """
+    branch = current_branch(root)
+    if not branch:
+        return []
+    if root_ticket_file(root, SPEC_FILE).is_file():
+        ticket, spec_branch = read_spec_identity(root)
+        if spec_branch != branch or (usable_ticket(ticket) or branch) != job_id:
+            return []
+    elif read_spec_identity(root, job_id)[1] != branch:
+        return []
+    moved: list[str] = []
+    for name in TICKET_FILES:
+        source = root_ticket_file(root, name)
+        target = ticket_file(root, job_id, name)
+        if not source.is_file() or target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(target)
+        moved.append(name)
+    if moved:
+        listed = ", ".join(f"`{name}`" for name in moved)
+        logger.info("moved root ticket files %s into jobs/%s", moved, job_id)
+        _TICKET_FILES_MOVE_NOTE.set(
+            f"Moved {listed} from `.dmx/` into `.dmx/jobs/{job_id}/` "
+            "(ticket files live in the job folder since 0.6)."
+        )
+    return moved
 
 
 # ---------------------------------------------------------------------------
@@ -854,7 +918,9 @@ def _skill_instruction(
     return (
         f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
         f"Next skill: `{skill_name}` (Loop: {loop_name} | Skill {index + 1}/{total}) | "
-        f"Job: `{job_id}` | Task: `{short_task}`{desc_block}\n\n"
+        f"Job: `{job_id}` | Task: `{short_task}`{desc_block}\n"
+        f"Ticket files: `.dmx/jobs/{job_id}/{SPEC_FILE}`, `{TASKS_FILE}`, "
+        f"`{ACTIVE_CONTEXT_FILE}` (in that folder).\n\n"
         f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the skill "
         f"instructions, then execute them exactly as written.\n\n"
         f"REQUIRED: When the skill finishes, you MUST immediately call the "
@@ -1252,8 +1318,8 @@ def _start_loop(
     chaining starts the next loop directly rather than asking the agent to
     make a second ``run_loop`` call.
 
-    Reads persistent context from ``.dmx/activeContext.md`` (Open Learnings /
-    Open Decisions) and surfaces it alongside the first-skill instruction —
+    Reads persistent context from the job's ``activeContext.md`` (Open
+    Learnings / Open Decisions) and surfaces it alongside the first-skill instruction —
     the "reads persistent context before running" half of the loop's memory
     property.
     """
@@ -1292,7 +1358,11 @@ def _start_loop(
             )
         job_id = make_pending_job_id(task_id)
     else:
-        job_id = resolve_job_id(root)
+        try:
+            job_id = resolve_job_id(root)
+        except AmbiguousActiveRun as exc:
+            return _StartedLoop(f"Error: {exc}")
+        _move_root_ticket_files(root, job_id)
 
     # One write. A pending file, then a second write that marks the run in
     # progress, is visible to loop_status in between: the next loop looks
@@ -1320,10 +1390,11 @@ def _start_loop(
         first_skill, name, 0, len(config.skills), job_id, task_id, description
     )
 
-    memory_context = read_memory_context(root)
+    memory_context = read_memory_context(root, job_id)
     if memory_context:
         instruction = (
-            f"Memory context (from `.dmx/activeContext.md`):\n{memory_context}\n\n{instruction}"
+            f"Memory context (from `.dmx/jobs/{job_id}/{ACTIVE_CONTEXT_FILE}`):\n"
+            f"{memory_context}\n\n{instruction}"
         )
     return _StartedLoop(instruction, job_id, name, task_id)
 
@@ -1629,7 +1700,7 @@ def _apply_loop_outcome(
     (success, failure, or warning), the next loop starts automatically —
     no second ``run_loop`` call from the agent is required.
 
-    Every branch appends a one-line breadcrumb to ``.dmx/activeContext.md``
+    Every branch appends a one-line breadcrumb to the job's ``activeContext.md``
     (Session Notes) — the "writes learnings back when it completes" half of
     the loop's memory property. This is a deterministic log entry, not
     judgment; promoting it to durable knowledge is still ``/dmx/update-memory``'s job.
@@ -1641,6 +1712,10 @@ def _apply_loop_outcome(
         "loop_name": loop_name,
         "branch": current_branch(root),
         "ticket_ref": job_id if job_id != "unknown" else None,
+        "job_dir": str(ticket_file(root, job_id, SPEC_FILE).parent),
+        "spec_path": str(ticket_file(root, job_id, SPEC_FILE)),
+        "tasks_path": str(ticket_file(root, job_id, TASKS_FILE)),
+        "active_context_path": str(ticket_file(root, job_id, ACTIVE_CONTEXT_FILE)),
     }
 
     validator_results = run_validators(config, root, skill_outputs, loop_context)
@@ -1667,12 +1742,13 @@ def _apply_loop_outcome(
         )
         append_session_note(
             root,
+            job_id,
             f"{loop_name} loop paused for validator review (job `{job_id}`, "
             f"task `{short_task}`): {decision['message']}",
         )
         return _validator_failure_message(loop_name, job_id, task_id, decision["message"], why)
 
-    if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root):
+    if config.repeat_until and not evaluate_repeat_until(config.repeat_until, root, job_id):
         current_state = read_state(root, job_id, loop_name, task_id)
         iteration = current_state.get("iteration_count", 0) + 1
         write_state(
@@ -1695,6 +1771,7 @@ def _apply_loop_outcome(
         )
         append_session_note(
             root,
+            job_id,
             f"{loop_name} loop iterating (round {iteration}) — repeat_until "
             f"'{config.repeat_until}' not yet met (job `{job_id}`).",
         )
@@ -1723,6 +1800,7 @@ def _apply_loop_outcome(
             # own outcome plainly instead of a misleading "chaining" message.
             append_session_note(
                 root,
+                job_id,
                 f"{loop_name} loop completed (outcome: {outcome}) — chaining to "
                 f"{next_loop} was configured but blocked: {chain_guard_error}",
             )
@@ -1736,6 +1814,7 @@ def _apply_loop_outcome(
 
         append_session_note(
             root,
+            job_id,
             f"{loop_name} loop completed (outcome: {outcome}) — "
             f"chained to {next_loop} (job `{job_id}`).",
         )
@@ -1753,7 +1832,9 @@ def _apply_loop_outcome(
         _publish_finish_message(root, job_id, loop_name, task_id, message, chained=started.chained)
         return message
 
-    append_session_note(root, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`).")
+    append_session_note(
+        root, job_id, f"{loop_name} loop completed (outcome: {outcome}) (job `{job_id}`)."
+    )
     return _store_outcome(
         root,
         job_id,
@@ -1982,7 +2063,10 @@ def _rejected_advance(state: dict[str, object], skill: str) -> str | None:
 def _latest_run_state(root: Path) -> dict[str, object] | None:
     """The newest loop-state file under the current job or a pending job."""
     jobs_dir = root / ".dmx" / "jobs"
-    job_ids = [resolve_job_id(root)]
+    try:
+        job_ids = [resolve_job_id(root)]
+    except AmbiguousActiveRun:
+        job_ids = []
     if jobs_dir.exists():
         job_ids.extend(path.name for path in jobs_dir.glob("_pending-*") if path.is_dir())
     best_at = ""
@@ -2255,6 +2339,7 @@ def register_loop_tools(app: FastMCP) -> None:
             job_id = _maybe_promote_pending_job(root, job_id)
         except PendingJobPromotionError as exc:
             return finish(f"Error: {exc}")
+        _move_root_ticket_files(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
         if state.get("status") == LoopStatus.validating.value:
@@ -2385,6 +2470,7 @@ def register_loop_tools(app: FastMCP) -> None:
             job_id = _maybe_promote_pending_job(root, job_id)
         except PendingJobPromotionError as exc:
             return finish(f"Error: {exc}")
+        _move_root_ticket_files(root, job_id)
 
         state = read_state(root, job_id, loop_name, task_id)
         snapshot = is_pr_snapshot(state)

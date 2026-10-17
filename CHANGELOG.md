@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **(GH-84)** Each ticket's `spec.md`, `tasks.md`, and `activeContext.md` live in its job folder, `.dmx/jobs/<job>/`, instead of the `.dmx/` root, so parallel tickets no longer conflict on them when they merge. The current ticket is the job folder whose `spec.md` frontmatter `branch` is the current branch; when several are, the one with a live run wins, and otherwise dmx asks you to resolve it. A 0.5 root `.dmx/spec.md` still names the ticket. The spec loop writes `spec.md` into its pending folder, and promotion moves every file in that folder. Every loop message names the ticket files after its `Job:` line. Validators receive `job_dir`, `spec_path`, `tasks_path`, and `active_context_path` in `loop_context`; the bundled ones use them and fall back to the root paths when they are absent. `check_pr_ready`'s `memory_updated` counts a repo-wide memory file or the job's `activeContext.md`, not the job's `spec.md` or `tasks.md`. In a repo upgraded mid-ticket, `run_loop`, `loop_advance`, and `loop_continue` move that ticket's root files into its job folder and say so; `loop_status` never moves anything. The rule, the skills, and `/dmx/status` use the job folder, `/dmx/init` no longer writes a root `activeContext.md` and adds `.dmx/jobs/**/*.json linguist-generated=true` to `.gitattributes`, and the workflow version is 0.6.0, so run `/dmx/upgrade` once to refresh the rule files.
+
 ## [0.5.1] — 2026-10-17
 
 ### Changed

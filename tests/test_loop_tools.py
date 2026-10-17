@@ -160,7 +160,7 @@ class TestFinishLoopWithRepeatUntil:
         config = self._dev_config()
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
-        (tmp_path / ".dmx" / "tasks.md").write_text(
+        (tmp_path / ".dmx" / "jobs" / "J" / "tasks.md").write_text(
             "## Phase 1: X\n- [x] Done\n## Phase 2: Y\n- [ ] Not done\n", encoding="utf-8"
         )
         # Simulate having advanced past both skills already.
@@ -192,7 +192,7 @@ class TestFinishLoopWithRepeatUntil:
         config = self._dev_config()
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
-        (tmp_path / ".dmx" / "tasks.md").write_text(
+        (tmp_path / ".dmx" / "jobs" / "J" / "tasks.md").write_text(
             "## Phase 1: X\n- [x] Done\n## Phase 2: Y\n- [x] Also done\n", encoding="utf-8"
         )
 
@@ -213,7 +213,9 @@ class TestFinishLoopWithRepeatUntil:
         config = self._dev_config()
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
-        (tmp_path / ".dmx" / "tasks.md").write_text("- [ ] Still not done\n", encoding="utf-8")
+        (tmp_path / ".dmx" / "jobs" / "J" / "tasks.md").write_text(
+            "- [ ] Still not done\n", encoding="utf-8"
+        )
 
         _finish_loop(tmp_path, "J", "dev", "T", config, {})
         state_after_first = read_state(tmp_path, "J", "dev", "T")
@@ -352,23 +354,39 @@ class TestLoopMemoryHooks:
     """Loop-level memory hooks: read Open Learnings/Decisions before running,
     write a Session Notes breadcrumb when finishing."""
 
-    def test_start_loop_surfaces_open_learnings(
+    def test_start_loop_surfaces_the_jobs_open_learnings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _allow_spec_loop_start(tmp_path, monkeypatch)
-        active_context = tmp_path / ".dmx" / "activeContext.md"
+        monkeypatch.setattr("dmx.loop_tools.resolve_job_id", lambda _root: "GH-1")
+        active_context = tmp_path / ".dmx" / "jobs" / "GH-1" / "activeContext.md"
+        active_context.parent.mkdir(parents=True)
         active_context.write_text(
             "## Open Learnings\n- validators must print JSON on stdout only\n\n"
             "## Open Decisions\n\n## Session Notes\n",
             encoding="utf-8",
         )
 
-        message = _start_loop(tmp_path, "spec").message
+        message = _start_loop(tmp_path, "dev").message
 
-        assert "Memory context" in message
+        assert "Memory context (from `.dmx/jobs/GH-1/activeContext.md`)" in message
         assert "validators must print JSON on stdout only" in message
         assert "get_skill_definition" in message
-        assert "create-ticket" in message
+        assert "implement-next-phase" in message
+
+    def test_spec_loop_does_not_surface_another_tickets_learnings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A new ticket starts in its own pending folder; a 0.5 root inbox and
+        # other tickets' inboxes are not its context.
+        _allow_spec_loop_start(tmp_path, monkeypatch)
+        (tmp_path / ".dmx" / "activeContext.md").write_text(
+            "## Open Learnings\n- belongs to an earlier ticket\n", encoding="utf-8"
+        )
+
+        message = _start_loop(tmp_path, "spec").message
+
+        assert "Memory context" not in message
+        assert "belongs to an earlier ticket" not in message
 
     def test_start_loop_without_memory_file_has_no_context_block(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -393,7 +411,7 @@ class TestLoopMemoryHooks:
 
         _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
-        active_context = tmp_path / ".dmx" / "activeContext.md"
+        active_context = tmp_path / ".dmx" / "jobs" / "J" / "activeContext.md"
         assert active_context.exists()
         content = active_context.read_text(encoding="utf-8")
         assert "## Session Notes" in content
@@ -414,7 +432,9 @@ class TestLoopMemoryHooks:
 
         _finish_loop(tmp_path, "J", "spec", "T", config, {})
 
-        content = (tmp_path / ".dmx" / "activeContext.md").read_text(encoding="utf-8")
+        content = (tmp_path / ".dmx" / "jobs" / "J" / "activeContext.md").read_text(
+            encoding="utf-8"
+        )
         assert "paused for validator review" in content
 
     def test_finish_loop_writes_session_note_on_iterating(self, tmp_path: Path) -> None:
@@ -428,13 +448,15 @@ class TestLoopMemoryHooks:
         )
         _write_validator(tmp_path, "v", PASSING_VALIDATOR)
         _setup(tmp_path, config)
-        (tmp_path / ".dmx" / "tasks.md").write_text(
+        (tmp_path / ".dmx" / "jobs" / "J" / "tasks.md").write_text(
             "## Phase 1: X\n- [ ] Not done\n", encoding="utf-8"
         )
 
         _finish_loop(tmp_path, "J", "dev", "T", config, {})
 
-        content = (tmp_path / ".dmx" / "activeContext.md").read_text(encoding="utf-8")
+        content = (tmp_path / ".dmx" / "jobs" / "J" / "activeContext.md").read_text(
+            encoding="utf-8"
+        )
         assert "iterating (round 1)" in content
 
 

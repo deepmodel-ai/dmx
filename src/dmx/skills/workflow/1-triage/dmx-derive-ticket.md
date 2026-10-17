@@ -166,7 +166,7 @@ If `git stash pop` fails with a conflict, stop: "Stash re-apply failed with conf
 
 ## Step 10 — Scaffold spec.md
 
-Write `.dmx/spec.md`:
+Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill, or `.dmx/jobs/{job_id}/spec.md` when run directly, where `{job_id}` is `{ticket_ref}` when it is a real ticket id, else `{branch_name}`. Create the folder if needed. Do not write `.dmx/spec.md`.
 
 ```markdown
 ---
@@ -244,7 +244,7 @@ Ticket derived from uncommitted changes.
 {if ticketing ≠ none} Ticket: {ticket_ref} — {summary}
 Branch:  {branch_name}  (created from {branch_base})
 Stash:   applied successfully
-Spec:    .dmx/spec.md
+Spec:    .dmx/jobs/{job_id}/spec.md
 
 Next steps:
   1. Review spec.md — verify the inferred scope and context are accurate.

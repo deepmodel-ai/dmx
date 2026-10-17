@@ -6,9 +6,11 @@ description: Read the current branch's spec.md, validate all Q&A is complete, an
 
 You are generating the implementation plan for the current branch. Follow every step in order.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Read spec.md
 
-Read `.dmx/spec.md`.
+Read `spec.md`.
 
 If the file does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first to scaffold the spec."
 
@@ -29,7 +31,7 @@ spec.md has unanswered questions. Please answer the following before planning:
 
 {list each unanswered question by number and text}
 
-Edit `.dmx/spec.md` and re-run /dmx/plan.
+Edit `spec.md` and re-run /dmx/plan.
 ```
 
 If all questions are answered (or there are no questions), proceed.
@@ -62,12 +64,12 @@ Design a set of phases that group logically related work. Each phase should be c
 
 ## Step 5 — Write tasks.md
 
-Write the following file to `.dmx/tasks.md`:
+Write the following file to `tasks.md` in the job folder:
 
 ```markdown
 # Tasks: {summary from spec.md}
 
-**Spec:** `.dmx/spec.md`
+**Spec:** `.dmx/jobs/{job_id}/spec.md`
 **Branch:** {branch from spec frontmatter}
 {if ticket is set} **Ticket:** [{ticket}]({ticket_url})
 **Status:** In Progress
@@ -101,7 +103,7 @@ Output the full content of the generated `tasks.md` as a markdown block so the d
 Then output:
 
 ```
-Plan saved: .dmx/tasks.md
+Plan saved: .dmx/jobs/{job_id}/tasks.md
 {N} phases, {M} tasks total.
 
 Open the file and press Cmd+Shift+V (Mac) / Ctrl+Shift+V (Windows) to preview.

@@ -74,11 +74,14 @@ per_page:  50
 
 Run `git branch --show-current`.
 
+Find the current ticket's job folder: the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch. If there is none, use `.dmx/jobs/{branch}/` when that folder exists, else leave it out of the report.
+
 ## Step 7 — Assemble the report
 
 ```
 # Development Status — {repo}
 Current branch: {branch}
+{if a job folder was found:} Ticket files: .dmx/jobs/{job_id}/ (spec.md, tasks.md, activeContext.md)
 
 ---
 

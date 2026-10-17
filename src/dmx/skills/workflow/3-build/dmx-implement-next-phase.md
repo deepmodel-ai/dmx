@@ -6,6 +6,8 @@ description: Execute every task in the next unchecked phase of tasks.md, checkin
 
 You are implementing the next phase of the current branch's work. Follow every step in order. You execute the whole phase — not just a single task — and then stop. Never continue to the next phase automatically.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Load configuration and protected branch check
 
 The project configuration is injected into your context as a rule. Extract `branch_base` and `production_branch`. If not available in context, fall back to reading `.dmx/config.md`.
@@ -27,8 +29,8 @@ If they decline, stop. If they confirm, or the branch is not protected, continue
 ## Step 2 — Read spec.md and tasks.md
 
 Read both:
-- `.dmx/spec.md` — for context, summary, and technical approach
-- `.dmx/tasks.md` — for the task list
+- `spec.md` — for context, summary, and technical approach
+- `tasks.md` — for the task list
 
 If `spec.md` does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first."
 
@@ -69,7 +71,7 @@ For each unchecked task in the phase, in order:
 4. **Briefly report:** 1–2 sentences on what was done. No lengthy explanations.
 5. Move to the next task.
 
-If you notice a pattern or decision worth capturing during implementation, append a brief note to the `## Open Learnings` section in `.dmx/activeContext.md`. Keep notes short (one sentence each).
+If you notice a pattern or decision worth capturing during implementation, append a brief note to the `## Open Learnings` section in `activeContext.md`. Keep notes short (one sentence each).
 
 Do not skip tasks. Do not reorder tasks. If a task is already checked, skip it silently.
 

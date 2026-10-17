@@ -6,6 +6,8 @@ description: Three-part quality gate before opening a PR. Checks ticket complete
 
 You are running the pre-PR validation gate for the current branch. Follow every step in order. Do not skip checks. Do not open a PR.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
@@ -15,7 +17,7 @@ If not available in context, fall back to reading `.dmx/config.md`. If neither i
 
 ## Step 2 — Read spec.md
 
-Read `.dmx/spec.md`.
+Read `spec.md`.
 
 If the file does not exist, stop: "spec.md not found. Run `/dmx/create-ticket` or `/dmx/create-branch` first."
 
@@ -28,7 +30,7 @@ Extract from the YAML frontmatter:
 ## Step 3 — Read tasks.md and memory bank
 
 Read all of the following:
-- `.dmx/tasks.md`
+- `tasks.md`
 - `.dmx/systemPatterns.md` — for code quality reference
 - `.dmx/techContext.md` — for stack and constraint reference
 
@@ -181,7 +183,7 @@ Rate each finding: `Critical` | `High` | `Medium` | `Low`.
 
 The report in Step 8 is for the developer to read. This step writes a machine-readable copy of your scope/regression/edge-case findings, so the `spec_adherence` validator grades your actual diff analysis instead of re-parsing prose.
 
-Determine `job_id`: use the value given in the loop runtime instruction that invoked this skill (the line reading `` Job: `{job_id}` ``). If you were invoked directly (not through the loop runtime), resolve it the same way the runtime does: the `ticket` field from `spec.md` frontmatter (Step 2), else the current branch name, else `unknown`.
+Determine `job_id`: use the value given in the loop runtime instruction that invoked this skill (the line reading `` Job: `{job_id}` ``). If you were invoked directly (not through the loop runtime), it is the job folder found under **Ticket files** above: the folder whose `spec.md` frontmatter `branch` is the current branch, else the current branch name, else `unknown`.
 
 Write `.dmx/jobs/{job_id}/validation-report.json` (create the directory if it doesn't exist):
 

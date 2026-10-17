@@ -12,6 +12,8 @@ You are drafting a pull request description. Output only the final markdown — 
 
 Follow the steps below to gather information, then fill in the output template determined in Step 1.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Detect the output template
 
 Check for a PR template in the workspace root (try each path, use the first that exists):
@@ -74,12 +76,12 @@ If configuration is not available in context, fall back to reading `.dmx/config.
 
 ## Step 4 — Detect the ticket reference and read spec/tasks
 
-Read `.dmx/spec.md` if it exists. Extract from the YAML frontmatter:
+Read `spec.md` if it exists. Extract from the YAML frontmatter:
 - `ticket` → store as `ticket_ref` (may be empty when ticketing is `none`)
 - `summary` → one-line summary (use as fallback if API is unavailable)
 - `branch`, `ticketing`
 
-Also read `.dmx/tasks.md` if it exists — use completed phases/tasks to enrich the Changes and Validation sections.
+Also read `tasks.md` if it exists — use completed phases/tasks to enrich the Changes and Validation sections.
 
 If `spec.md` is absent or `ticket` is empty, fall back to parsing `git branch --show-current`:
 - Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result → `ticket_ref`

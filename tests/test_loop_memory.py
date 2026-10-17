@@ -14,13 +14,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+_JOB = "GH-1"
+
+
 def _active_context_path(tmp_path: Path) -> Path:
-    return tmp_path / ".dmx" / "activeContext.md"
+    return tmp_path / ".dmx" / "jobs" / _JOB / "activeContext.md"
 
 
 class TestReadMemoryContext:
     def test_missing_file_returns_empty_string(self, tmp_path: Path) -> None:
-        assert read_memory_context(tmp_path) == ""
+        assert read_memory_context(tmp_path, _JOB) == ""
 
     def test_empty_sections_return_empty_string(self, tmp_path: Path) -> None:
         path = _active_context_path(tmp_path)
@@ -29,7 +32,7 @@ class TestReadMemoryContext:
             "## Open Learnings\n\n## Open Decisions\n\n## Session Notes\n- did a thing\n",
             encoding="utf-8",
         )
-        assert read_memory_context(tmp_path) == ""
+        assert read_memory_context(tmp_path, _JOB) == ""
 
     def test_returns_open_learnings_and_decisions(self, tmp_path: Path) -> None:
         path = _active_context_path(tmp_path)
@@ -44,7 +47,7 @@ class TestReadMemoryContext:
             encoding="utf-8",
         )
 
-        context = read_memory_context(tmp_path)
+        context = read_memory_context(tmp_path, _JOB)
 
         assert "Open Learnings:" in context
         assert "validators must return JSON on stdout only" in context
@@ -61,7 +64,7 @@ class TestReadMemoryContext:
             encoding="utf-8",
         )
 
-        context = read_memory_context(tmp_path)
+        context = read_memory_context(tmp_path, _JOB)
 
         assert "Open Learnings:" in context
         assert "Open Decisions:" not in context
@@ -69,7 +72,7 @@ class TestReadMemoryContext:
 
 class TestAppendSessionNote:
     def test_creates_file_with_skeleton_when_missing(self, tmp_path: Path) -> None:
-        append_session_note(tmp_path, "spec loop completed (job J)")
+        append_session_note(tmp_path, _JOB, "spec loop completed (job J)")
 
         path = _active_context_path(tmp_path)
         assert path.exists()
@@ -89,7 +92,7 @@ class TestAppendSessionNote:
             encoding="utf-8",
         )
 
-        append_session_note(tmp_path, "second note")
+        append_session_note(tmp_path, _JOB, "second note")
 
         content = path.read_text(encoding="utf-8")
         assert "- existing learning" in content
@@ -99,7 +102,7 @@ class TestAppendSessionNote:
 
     def test_trims_to_max_session_notes(self, tmp_path: Path) -> None:
         for i in range(12):
-            append_session_note(tmp_path, f"note {i}")
+            append_session_note(tmp_path, _JOB, f"note {i}")
 
         content = _active_context_path(tmp_path).read_text(encoding="utf-8")
         notes = [line for line in content.splitlines() if line.startswith("- note")]
@@ -114,7 +117,7 @@ class TestAppendSessionNote:
         path.parent.mkdir(parents=True)
         path.write_text("## Open Learnings\n- something\n", encoding="utf-8")
 
-        append_session_note(tmp_path, "a note")
+        append_session_note(tmp_path, _JOB, "a note")
 
         content = path.read_text(encoding="utf-8")
         assert "## Session Notes" in content

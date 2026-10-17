@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -49,8 +50,19 @@ def _write_passing_project(root: Path) -> None:
     (root / "Makefile").write_text("test:\n\tpython -m pytest -q test_ok.py\n", encoding="utf-8")
 
 
-def _write_spec(root: Path) -> None:
-    (root / ".dmx" / "spec.md").write_text(
+_TICKET_FILES_RE = re.compile(r"Ticket files: `(\.dmx/jobs/[^/`]+)/spec\.md`")
+
+
+def _ticket_dir(root: Path, message: str) -> Path:
+    """The job folder a loop message tells the skill to write to (GH-84)."""
+    match = _TICKET_FILES_RE.search(message)
+    assert match, message
+    return root / match.group(1)
+
+
+def _write_spec(job_dir: Path) -> None:
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "spec.md").write_text(
         f"---\nticket: {_TICKET}\nbranch: {_BRANCH}\n---\n"
         "Q: What?\nA: A widget.\n\n"
         "## Technical Approach\nAdd one function and a test that calls it.\n\n"
@@ -59,8 +71,8 @@ def _write_spec(root: Path) -> None:
     )
 
 
-def _write_tasks(root: Path) -> None:
-    (root / ".dmx" / "tasks.md").write_text(
+def _write_tasks(job_dir: Path) -> None:
+    (job_dir / "tasks.md").write_text(
         "## Phase 1: Widget\n- [x] Implement the widget\n",
         encoding="utf-8",
     )
@@ -157,15 +169,21 @@ class TestBundledPipeline:
             async def call(tool: str, **kwargs: str) -> str:
                 return await _call(client, tool, tmp_path, **kwargs)
 
-            await call("run_loop", name="spec")
+            started = await call("run_loop", name="spec")
+            pending_dir = _ticket_dir(tmp_path, started)
+            assert pending_dir.name.startswith("_pending-")
             _git(tmp_path, "checkout", "-b", _BRANCH)
-            _write_spec(tmp_path)
+            _write_spec(pending_dir)
             await call("loop_advance", output="created ticket", skill="create-ticket")
             spec_done = await call("loop_continue")
             assert "chaining automatically to **plan**" in spec_done.lower()
             assert "outcome: `success`" in spec_done
+            job_dir = _ticket_dir(tmp_path, spec_done)
+            assert job_dir == tmp_path / ".dmx" / "jobs" / _TICKET
+            assert (job_dir / "spec.md").is_file()
+            assert not pending_dir.exists()
 
-            _write_tasks(tmp_path)
+            _write_tasks(job_dir)
             await call("loop_advance", output="tasks.md written", skill="plan")
             plan_done = await call("loop_continue")
             assert "chaining automatically to **dev**" in plan_done.lower()
@@ -183,3 +201,7 @@ class TestBundledPipeline:
             validate_done = await call("loop_continue")
             assert "chaining automatically to **release**" in validate_done.lower()
             assert "outcome: `success`" in validate_done
+
+        for name in ("spec.md", "tasks.md", "activeContext.md"):
+            assert not (tmp_path / ".dmx" / name).exists(), name
+        assert (tmp_path / ".dmx" / "jobs" / _TICKET / "activeContext.md").is_file()

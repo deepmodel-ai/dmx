@@ -1,6 +1,6 @@
 """Bundled validator: check_plan_complete.
 
-Checks that ``.dmx/tasks.md`` exists, defines at least one phase, and that
+Checks that the ticket's ``tasks.md`` exists, defines at least one phase, and that
 tasks have concrete descriptions rather than empty checklist items. App
 repos can override this by placing their own
 ``validators/check_plan_complete.py`` at the repo root.
@@ -18,7 +18,9 @@ stdin as JSON::
       "loop_context": {..., "workspace_root": "/path/to/repo"}
     }
 
-Reads ``.dmx/tasks.md`` relative to ``loop_context.workspace_root``.
+Reads the job's ``tasks.md`` from ``loop_context.tasks_path``, or
+``.dmx/tasks.md`` under ``loop_context.workspace_root`` when the runner did
+not pass that path (a 0.5 layout, or a hand-run check).
 
 Exits 0 on pass, 1 on failure.
 Writes JSON to stdout::
@@ -41,6 +43,9 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+
+# Bundled validators run under dmx's interpreter and may import dmx. See #12.
+from dmx.loop_state import TASKS_FILE, ticket_path_from_context
 
 _PHASE_RE = re.compile(r"^##\s+Phase\s+\d+\s*:.*$", re.MULTILINE)
 _TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s*(.*)$", re.MULTILINE)
@@ -71,8 +76,8 @@ def _tasks_have_descriptions(content: str) -> tuple[bool, str]:
     return True, f"{len(task_lines)} task(s) have concrete descriptions"
 
 
-def run(workspace_root: Path) -> dict[str, Any]:
-    tasks = workspace_root / ".dmx" / "tasks.md"
+def run(workspace_root: Path, loop_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    tasks = ticket_path_from_context(workspace_root, loop_context, "tasks_path", TASKS_FILE)
     content = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
 
     checks_raw = [
@@ -99,7 +104,8 @@ def run(workspace_root: Path) -> dict[str, Any]:
 
 if __name__ == "__main__":
     contract = json.loads(sys.stdin.read() or "{}")
-    workspace_root = contract.get("loop_context", {}).get("workspace_root") or "."
-    result = run(Path(workspace_root))
+    loop_context = contract.get("loop_context", {})
+    workspace_root = loop_context.get("workspace_root") or "."
+    result = run(Path(workspace_root), loop_context)
     print(json.dumps(result))
     sys.exit(0 if result["pass"] else 1)

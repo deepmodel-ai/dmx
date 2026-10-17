@@ -12,7 +12,11 @@ or not), **excluding** ``.dmx/jobs/`` — a skill that edits the memory bank
 (or any other tracked ``.dmx/`` file, e.g. ``shared-sources.yaml``) without
 committing (see GH-15) would otherwise leave dangling working-tree state
 that's silently excluded from the PR. Only once the tree is clean does it
-fall back to checking whether the latest commit touched ``.dmx/*.md``.
+check whether the latest commit touched a memory file: a repo-wide
+``.dmx/*.md`` other than ``config.md``, or the job's ``activeContext.md``
+(from ``loop_context.active_context_path``). The job's ``spec.md`` and
+``tasks.md`` do not count, so a PR that only rewrote its own spec has not
+updated memory (GH-84).
 
 ``.dmx/jobs/`` is excluded, not just narrowed to ``*.md``, because it's the
 loop runtime's own bookkeeping (see GH-23), not a skill's uncommitted
@@ -56,6 +60,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+# Bundled validators run under dmx's interpreter and may import dmx. See #12.
+from dmx.loop_state import ACTIVE_CONTEXT_FILE, ticket_path_from_context
 
 GH_TIMEOUT_SECONDS = 30
 GIT_TIMEOUT_SECONDS = 15
@@ -119,7 +126,26 @@ def _dirty_dmx_files(workspace_root: Path) -> list[str]:
     return [line[3:].strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
-def _memory_updated(workspace_root: Path) -> tuple[bool, str]:
+def _is_memory_file(path: str, active_context: str | None) -> bool:
+    """True for a repo-wide memory file or the job's ``activeContext.md``."""
+    if active_context is not None and path == active_context:
+        return True
+    if not path.startswith(".dmx/"):
+        return False
+    name = path.removeprefix(".dmx/")
+    return "/" not in name and name.endswith(".md") and name != "config.md"
+
+
+def _repo_relative(workspace_root: Path, path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(workspace_root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _memory_updated(
+    workspace_root: Path, loop_context: dict[str, Any] | None = None
+) -> tuple[bool, str]:
     dirty = _dirty_dmx_files(workspace_root)
     if dirty:
         # A skill (e.g. update-memory) edited .dmx/ without committing —
@@ -145,10 +171,13 @@ def _memory_updated(workspace_root: Path) -> tuple[bool, str]:
     except Exception:  # noqa: BLE001
         changed = []
 
-    if any(f.startswith(".dmx/") and f.endswith(".md") for f in changed):
+    active_context = ticket_path_from_context(
+        workspace_root, loop_context, "active_context_path", ACTIVE_CONTEXT_FILE
+    )
+    active_context_rel = _repo_relative(workspace_root, active_context)
+    if any(_is_memory_file(f, active_context_rel) for f in changed):
         return True, "Memory bank files updated in the latest commit"
 
-    active_context = workspace_root / ".dmx" / "activeContext.md"
     if active_context.exists():
         return True, "activeContext.md present (recent update not confirmed via git diff)"
 
@@ -159,7 +188,7 @@ def run(workspace_root: Path, loop_context: dict[str, Any]) -> dict[str, Any]:
     checks_raw = [
         ("pr_exists", _pr_exists(workspace_root)),
         ("ticket_transitioned", _ticket_transitioned(loop_context)),
-        ("memory_updated", _memory_updated(workspace_root)),
+        ("memory_updated", _memory_updated(workspace_root, loop_context)),
     ]
 
     checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]

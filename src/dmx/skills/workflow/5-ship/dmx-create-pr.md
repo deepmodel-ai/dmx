@@ -16,6 +16,8 @@ arguments:
 
 You are opening a GitHub pull request. Follow every step in order.
 
+**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
 ## Step 1 — Load project configuration
 
 The project configuration is injected into your context as a rule. Extract:
@@ -29,14 +31,14 @@ If configuration is not available in context, fall back to reading `.dmx/config.
 
 ## Step 2 — Resolve PR base and defaults
 
-Read `.dmx/spec.md` if it exists — store for later steps.
+Read `spec.md` if it exists — store for later steps.
 
 Run `git branch --show-current` and store as `current_branch`.
 
 **Resolve `base`:**
 
 - If `{{base}}` was provided, use it — do not override an explicit argument.
-- Else if spec frontmatter `type` is `hotfix`, or `.dmx/spec.md` contains `**Type:** hotfix`, or `current_branch` starts with `hotfix-`:
+- Else if spec frontmatter `type` is `hotfix`, or `spec.md` contains `**Type:** hotfix`, or `current_branch` starts with `hotfix-`:
   - Resolve `production_branch` (see below) and use it as `base`.
 - Else use `{config.branch_base}`.
 
@@ -58,7 +60,7 @@ If `{{draft}}` was not provided, use `false`.
 
 ## Step 3 — Detect the ticket reference
 
-Use `.dmx/spec.md` from Step 2 if already read; otherwise read it now. Extract the `ticket` field from YAML frontmatter. Also extract `summary`, `branch`, and `ticketing`.
+Use `spec.md` from Step 2 if already read; otherwise read it now. Extract the `ticket` field from YAML frontmatter. Also extract `summary`, `branch`, and `ticketing`.
 
 If `spec.md` is absent or `ticket` is empty, fall back to parsing the current branch name:
 - Jira: match `[A-Z]+-[0-9]+` (case-insensitive), uppercase result
@@ -74,9 +76,9 @@ Read all of the following:
 - `.dmx/productContext.md`
 - `.dmx/systemPatterns.md`
 - `.dmx/techContext.md`
-- `.dmx/activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
-- `.dmx/spec.md` — already read in Step 3
-- `.dmx/tasks.md` — if it exists
+- `activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
+- `spec.md` — already read in Step 3
+- `tasks.md` — if it exists
 
 **Promote all qualifying inbox items from `activeContext.md`:**
 
@@ -145,7 +147,7 @@ If `{{description}}` was provided, use it.
 If not, invoke `dmx-draft-pr-description` with:
 - `base`: `{{base}}`
 
-The draft-pr-description skill will read `.dmx/spec.md` and `.dmx/tasks.md` directly for PR body content.
+The draft-pr-description skill will read `spec.md` and `tasks.md` directly for PR body content.
 
 ## Step 9 — Fetch ticket details for the PR title
 

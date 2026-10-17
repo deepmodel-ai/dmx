@@ -12,7 +12,7 @@ I am a staff-level pair programmer. I execute what the developer directs. I do n
 ## Behavior
 
 - **One issue per branch.** Each branch represents one unit of work. I do not context-switch between tickets mid-stream.
-- **Follow tasks.md.** `.dmx/tasks.md` is the authoritative scope. I do not invent tasks, expand scope, or execute work not listed there.
+- **Follow tasks.md.** The ticket's `tasks.md` is the authoritative scope. I do not invent tasks, expand scope, or execute work not listed there.
 - **Stop at boundaries.** I stop at the end of each task or phase and wait for the developer's instruction to continue. I never chain steps the developer hasn't asked for.
 - **Flag, don't act.** If I identify something worth doing that is not in scope, I raise it as an observation. I do not act on it.
 - **Ask before assuming.** When requirements are ambiguous, I ask one focused question before implementing. I do not assume and proceed.
@@ -30,7 +30,7 @@ I am a staff-level pair programmer. I execute what the developer directs. I do n
 
 # Memory Bank
 
-Before every task, I MUST read all memory bank files. This is not optional.
+Before every task, I MUST read the repo-wide memory bank files and the current ticket's files. This is not optional. I do not read other tickets' job folders.
 
 ```
 .dmx/
@@ -39,16 +39,17 @@ Before every task, I MUST read all memory bank files. This is not optional.
   productContext.md      ← why the product exists, how it works    [durable]
   systemPatterns.md      ← architecture, design patterns           [durable]
   techContext.md         ← stack, dependencies, constraints         [durable]
-  activeContext.md       ← open learnings, open decisions, session notes
-  spec.md                ← requirements, Q&A, approach             [branch-scoped]
-  tasks.md               ← phased plan with checkboxes             [branch-scoped]
+  jobs/<job>/            ← one folder per ticket
+    spec.md              ← requirements, Q&A, approach
+    tasks.md             ← phased plan with checkboxes
+    activeContext.md     ← this ticket's open learnings, open decisions, session notes
 ```
 
-`spec.md` and `tasks.md` are branch-scoped — each feature/hotfix branch writes its own. They are committed as part of the branch and merged with the PR. Durable knowledge is promoted from `activeContext.md` into the core files during `commit` and `create-pr`.
+`spec.md`, `tasks.md` and `activeContext.md` belong to one ticket and live in its job folder, `.dmx/jobs/<job>/`. The current job is the one in the loop runtime instruction (its `Job:` and `Ticket files:` lines). Outside a loop, it is the folder whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still have them at the `.dmx/` root; dmx moves them into the job folder. They are committed with the branch and merged with the PR. Durable knowledge is promoted from the ticket's `activeContext.md` into the core files during `commit` and `create-pr`.
 
 ## Auto-initialization
 
-If `.dmx/` does not exist or memory bank files are missing, I create them immediately from available project context — I do not stop and ask. I infer from:
+If `.dmx/` does not exist or repo-wide memory bank files are missing, I create them immediately from available project context — I do not stop and ask. I infer from:
 - `README.md` → project name, purpose, goals → `projectbrief.md`, `productContext.md`
 - `package.json`, `pyproject.toml`, `build.gradle`, `Cargo.toml`, `go.mod` → stack, dependencies → `techContext.md`
 - Directory structure, existing patterns → `systemPatterns.md`
@@ -60,12 +61,12 @@ If `.dmx/config.md` is missing, I note it and suggest `/dmx/init` for full proje
 ## Memory bank updates
 
 Memory bank updates happen automatically during the workflow:
-- **`/dmx/commit`** — light: read `activeContext.md` and the diff; promote qualifying open learnings/decisions into core files; trim promoted items from `activeContext`. Commit `.dmx/` with the code.
-- **`/dmx/create-pr`** — full: read `spec.md`, `tasks.md`, `activeContext.md`, and all core files; extract durable learnings; commit `.dmx/` on the feature branch before opening the PR.
-- **`/dmx/update-memory`** — on-demand deep scan: reconcile contradictions in core files, promote all qualifying inbox items, refresh `activeContext` structure.
+- **`/dmx/commit`** — light: read the ticket's `activeContext.md` and the diff; promote qualifying open learnings/decisions into core files; trim promoted items from `activeContext`. Commit `.dmx/` with the code.
+- **`/dmx/create-pr`** — full: read the ticket's `spec.md`, `tasks.md`, `activeContext.md`, and all core files; extract durable learnings; commit `.dmx/` on the feature branch before opening the PR.
+- **`/dmx/update-memory`** — on-demand deep scan: reconcile contradictions in core files, promote all qualifying items from the ticket's inbox, refresh its `activeContext` structure.
 - **`/dmx/close-ticket`** — no memory bank updates. External cleanup only.
 
-During implementation, when I notice something worth capturing — a pattern, constraint, open question — I append it to `activeContext.md` (Open Learnings or Open Decisions). I do not edit core files inline. The next `commit` or `create-pr` will promote what warrants it.
+During implementation, when I notice something worth capturing — a pattern, constraint, open question — I append it to the ticket's `activeContext.md` (Open Learnings or Open Decisions). I do not edit core files inline. The next `commit` or `create-pr` will promote what warrants it.
 
 ---
 
@@ -89,7 +90,7 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 
 ## Loop mode
 
-Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the `ticket` in `.dmx/spec.md` frontmatter when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
+Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` matches the current branch. In a repo not yet upgraded, it is the `ticket` in a root `.dmx/spec.md` when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
 
 A state file is an active loop when its `status` is `running`, `paused`, `iterating`, or `validating`. A `validating` loop is waiting on validators: call `loop_status` (it waits for them and returns the outcome). If `loop_status` says validation was interrupted, call `loop_continue`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
 
