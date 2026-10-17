@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 from dmx.components import COMPONENTS_DIR, is_valid_id, load_components
 from dmx.loop_schema import LoopConfig, ValidatorCheck, ValidatorConfig
+from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 from dmx.ticket_components import ticket_components
 from dmx.workspace import ide_folder
 
@@ -62,8 +63,24 @@ def split_component_name(name: str) -> tuple[str, str] | None:
 
 
 def component_dirs(root: Path, component_id: str, kind: str) -> list[Path]:
-    """Where a component's ``skills``, ``validators`` or ``loops`` live, in search order."""
-    return [root / COMPONENTS_DIR / component_id / kind]
+    """Where a component's ``skills``, ``validators`` or ``loops`` live, in search order.
+
+    The component's own folder, then each of its shared sources in declared
+    order. A source that is not locked, or can't be fetched, is skipped with
+    a warning; ``dmx fetch-shared-sources`` and ``dmx check`` report it.
+    """
+    dirs = [root / COMPONENTS_DIR / component_id / kind]
+    try:
+        sources = read_shared_sources(root, component=component_id)
+    except SharedSourceError as exc:
+        logger.warning("component %s: %s", component_id, exc)
+        return dirs
+    for source in sources:
+        try:
+            dirs.append(source_root(root, source, component=component_id) / kind)
+        except SharedSourceError as exc:
+            logger.warning("component %s: %s", component_id, exc)
+    return dirs
 
 
 def ticket_component_ids(root: Path, job_id: str | None) -> list[str]:

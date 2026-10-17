@@ -144,8 +144,16 @@ def _validate_subdir(subdir: str, source: str) -> None:
         )
 
 
-def read_shared_sources(workspace_root: Path) -> list[SharedSource]:
-    """Read and parse ``.dmx/shared-sources.yaml``.
+def config_dir(workspace_root: Path, component: str | None = None) -> Path:
+    """Where ``shared-sources.yaml`` and its lock live: ``.dmx/``, or a component's folder."""
+    base = workspace_root / ".dmx"
+    return base / "components" / component if component else base
+
+
+def read_shared_sources(
+    workspace_root: Path, *, component: str | None = None
+) -> list[SharedSource]:
+    """Read and parse ``.dmx/shared-sources.yaml``, or a component's (GH-90).
 
     Returns an empty list if the file doesn't exist — shared sources are
     entirely optional; a repo with none behaves exactly as it did before
@@ -156,7 +164,7 @@ def read_shared_sources(workspace_root: Path) -> list[SharedSource]:
             wrong shape, a duplicate name, or an entry with an invalid
             source address).
     """
-    path = workspace_root / ".dmx" / "shared-sources.yaml"
+    path = config_dir(workspace_root, component) / "shared-sources.yaml"
     if not path.exists():
         return []
 
@@ -214,18 +222,18 @@ _LOCK_HEADER = (
 )
 
 
-def lock_path(workspace_root: Path) -> Path:
-    """``.dmx/shared-sources.lock``."""
-    return workspace_root / ".dmx" / "shared-sources.lock"
+def lock_path(workspace_root: Path, *, component: str | None = None) -> Path:
+    """``.dmx/shared-sources.lock``, or ``.dmx/components/<id>/shared-sources.lock``."""
+    return config_dir(workspace_root, component) / "shared-sources.lock"
 
 
-def read_lock(workspace_root: Path) -> dict[str, LockEntry]:
-    """Entries of ``.dmx/shared-sources.lock`` by source name; empty when absent.
+def read_lock(workspace_root: Path, *, component: str | None = None) -> dict[str, LockEntry]:
+    """Entries of the lock by source name; empty when absent.
 
     Raises:
         SharedSourceError: If the file exists but is malformed.
     """
-    path = lock_path(workspace_root)
+    path = lock_path(workspace_root, component=component)
     if not path.exists():
         return {}
     try:
@@ -257,8 +265,10 @@ def read_lock(workspace_root: Path) -> dict[str, LockEntry]:
     return locked
 
 
-def write_lock(workspace_root: Path, entries: list[LockEntry]) -> None:
-    """Write ``.dmx/shared-sources.lock`` with *entries*, in the order given."""
+def write_lock(
+    workspace_root: Path, entries: list[LockEntry], *, component: str | None = None
+) -> None:
+    """Write the lock with *entries*, in the order given."""
     body = {
         "shared_sources": {
             entry.name: {"source": entry.source, "commit": entry.commit, "hash": entry.hash}
@@ -266,7 +276,7 @@ def write_lock(workspace_root: Path, entries: list[LockEntry]) -> None:
         }
     }
     text = _LOCK_HEADER + yaml.safe_dump(body, sort_keys=False, default_flow_style=False)
-    path = lock_path(workspace_root)
+    path = lock_path(workspace_root, component=component)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
@@ -281,7 +291,9 @@ def vendor_lock_path(workspace_root: Path, name: str) -> Path:
     return vendor_dir(workspace_root, name) / ".lock.json"
 
 
-def source_root(workspace_root: Path, source: SharedSource) -> Path:
+def source_root(
+    workspace_root: Path, source: SharedSource, *, component: str | None = None
+) -> Path:
     """The resolved search root for a shared source: its tree + its ``subdir``.
 
     When ``.dmx/shared-sources.lock`` has an entry for *source*, that is the
@@ -295,11 +307,22 @@ def source_root(workspace_root: Path, source: SharedSource) -> Path:
     loops/skills/validators are actually searched for, mirroring how the
     ``git::...//<subdir>`` address works in Terraform.
 
+    A component's source (GH-90) has no vendored fallback: without a lock
+    entry it raises. Every tree is cached under the repo's ``.dmx/.cache/``,
+    so sources locked at the same commit share one copy.
+
     Raises:
-        SharedSourceError: The lock is malformed, or a locked source cannot
-            be fetched or does not match its hash.
+        SharedSourceError: The lock is malformed, a component's source is not
+            locked, or a locked source cannot be fetched or does not match
+            its hash.
     """
-    entry = read_lock(workspace_root).get(source.name)
+    entry = read_lock(workspace_root, component=component).get(source.name)
+    if entry is None and component is not None:
+        raise SharedSourceError(
+            f"`{component}/{source.name}` is not in "
+            f"`.dmx/components/{component}/shared-sources.lock`. "
+            f"Run `/dmx/update-shared-sources {component}`."
+        )
     if entry is None:
         root = vendor_dir(workspace_root, source.name)
         return (root / source.subdir) if source.subdir else root

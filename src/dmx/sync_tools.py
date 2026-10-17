@@ -16,8 +16,9 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
+from dmx.components import is_valid_id
 from dmx.exceptions import WorkspaceRootInvalid
-from dmx.shared_sources import SharedSourceError, read_shared_sources
+from dmx.shared_sources import SharedSourceError, config_dir, read_shared_sources
 from dmx.sync_runner import (
     detect_collisions,
     require_non_base_branch_error,
@@ -39,6 +40,7 @@ def register_sync_tools(app: FastMCP) -> None:
         ctx: Context,
         names: list[str] | None = None,
         update_all: bool = False,
+        component: str | None = None,
         workspace_root: str | None = None,
     ) -> str:
         """Lock the declared shared sources in ``.dmx/shared-sources.lock``.
@@ -57,9 +59,15 @@ def register_sync_tools(app: FastMCP) -> None:
         Blocked from running on the repo's configured ``branch_base`` — the
         lock goes through a reviewed PR.
 
+        With *component*, updates that component's own sources instead:
+        ``.dmx/components/<id>/shared-sources.yaml`` and its lock (GH-90).
+        The cache is shared, so the same source at the same commit is
+        fetched once for every component.
+
         Args:
             names: Sources to look up again even if their entry is current.
             update_all: Look up every declared source again.
+            component: A component id, to update its sources instead.
             workspace_root: Repo root path override. Auto-detected if omitted.
 
         Returns:
@@ -71,17 +79,29 @@ def register_sync_tools(app: FastMCP) -> None:
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
 
+        if component is not None and (
+            not is_valid_id(component)
+            or not (root / ".dmx" / "components" / component / "component.yaml").is_file()
+        ):
+            return (
+                f"`{component}` is not a component "
+                f"(no `.dmx/components/{component}/component.yaml`)."
+            )
         guard_error = require_non_base_branch_error(root)
         if guard_error:
             return guard_error
 
+        folder = config_dir(root, component).relative_to(root).as_posix()
         try:
-            sources = read_shared_sources(root)
+            sources = read_shared_sources(root, component=component)
             if not sources:
                 return (
-                    "No shared sources declared in `.dmx/shared-sources.yaml` — nothing to update."
+                    f"No shared sources declared in `{folder}/shared-sources.yaml` — "
+                    "nothing to update."
                 )
-            report = update_shared_sources(root, names=names, update_all=update_all)
+            report = update_shared_sources(
+                root, names=names, update_all=update_all, component=component
+            )
         except SharedSourceError as exc:
             return f"Error reading shared sources: {exc}"
 
@@ -99,7 +119,8 @@ def register_sync_tools(app: FastMCP) -> None:
             lines.append(f"Not declared in `.dmx/shared-sources.yaml`: {listed}.")
         body = "\n".join(lines)
 
-        collisions = detect_collisions(sources, root)
+        # A component's items are named `<id>/<name>`, so they can't collide.
+        collisions = detect_collisions(sources, root) if component is None else []
         collisions_block = ""
         if collisions:
             collision_lines = "\n".join(f"⚠️ {c}" for c in collisions)
@@ -114,6 +135,6 @@ def register_sync_tools(app: FastMCP) -> None:
             f"**Shared sources updated:**\n\n{body}{collisions_block}\n\n"
             f"**Summary for the PR description:**\n\n{summary}\n\n"
             "Next: commit the lock, push, and open a PR with that summary — e.g.:\n"
-            "```\ngit add .dmx/shared-sources.lock .dmx/shared-sources.yaml\n"
+            f"```\ngit add {folder}/shared-sources.lock {folder}/shared-sources.yaml\n"
             'git commit -m "chore: update shared sources"\ngit push\n```'
         )

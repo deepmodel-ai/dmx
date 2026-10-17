@@ -9,6 +9,9 @@ arguments:
   - name: all
     description: "Set to true to look up every declared source again."
     required: false
+  - name: component
+    description: "A component id, to update that component's own sources in .dmx/components/<id>/ instead of the repo-wide ones."
+    required: false
 ---
 
 You are updating this repo's declared shared sources (loops/skills/validators an organization maintains centrally). The repo commits only `.dmx/shared-sources.lock`, the commit and content hash of each source; dmx fetches the content into the git-ignored `.dmx/.cache/` when it needs it. Follow every step in order.
@@ -38,13 +41,16 @@ Do not proceed to Step 2 in this case.
 
 ## Step 2 — Check shared-sources.yaml exists
 
-If `.dmx/shared-sources.yaml` does not exist, stop: "No `.dmx/shared-sources.yaml` found — nothing to update. Add a `shared_sources` entry first if you want to pull in an org-wide source."
+Below, `{folder}` is `.dmx/components/{{component}}` when `{{component}}` was provided, else `.dmx`. A component's sources are its own: they are locked in its folder, its team can bump them without platform approval, and its skills and loops from them are named `{{component}}/<name>`.
+
+If `{folder}/shared-sources.yaml` does not exist, stop: "No `{folder}/shared-sources.yaml` found — nothing to update. Add a `shared_sources` entry first if you want to pull in a shared source."
 
 ## Step 3 — Update the lock
 
 Call `update_shared_sources` on `user-dmx`:
 - If `{{sources}}` was provided, pass it as `names`, split on commas, trimmed.
 - If `{{all}}` is `true`, pass `update_all` set to true.
+- If `{{component}}` was provided, pass it as `component`.
 - Otherwise pass neither. Only sources that are new or whose address changed in `.dmx/shared-sources.yaml` are looked up again; every other source keeps its locked commit, so a floating ref such as `?ref=main` does not move by surprise.
 
 The tool looks up each of those refs, fetches the tree, checks its shape, hashes it, and writes `.dmx/shared-sources.lock`. It also checks for same-name collisions across the app repo's own `.dmx/loops/`/`.dmx/skills/`/`validators/` and every declared source, in precedence order. It does not commit anything — that is your job in Step 5.
@@ -63,7 +69,7 @@ The tool looks up each of those refs, fetches the tree, checks its shape, hashes
 
 Run:
 ```
-git add .dmx/shared-sources.lock .dmx/shared-sources.yaml
+git add {folder}/shared-sources.lock {folder}/shared-sources.yaml
 git commit -m "chore: update shared sources"
 git push -u origin HEAD
 ```

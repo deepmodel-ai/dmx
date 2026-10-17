@@ -197,7 +197,9 @@ def list_skills(*, skills_dir: Path | None) -> None:
     help="A folder in the repo (default: the current directory). Its .dmx/ is found from there.",
 )
 def fetch_shared_sources(*, workspace_root: Path | None) -> None:
-    """Fetch every locked shared source into .dmx/.cache/ without changing the lock.
+    """Fetch every locked shared source into .dmx/.cache/ without changing a lock.
+
+    Covers the repo-wide lock and each component's.
 
     For CI and fresh clones. Needs read access to each source repo.
     """

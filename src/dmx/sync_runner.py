@@ -34,6 +34,7 @@ from dmx.shared_sources import (
     LockEntry,
     SharedSource,
     SharedSourceError,
+    lock_path,
     read_lock,
     read_shared_sources,
     source_root,
@@ -313,9 +314,16 @@ def _describe_change(
 
 
 def update_shared_sources(
-    workspace_root: Path, *, names: list[str] | None = None, update_all: bool = False
+    workspace_root: Path,
+    *,
+    names: list[str] | None = None,
+    update_all: bool = False,
+    component: str | None = None,
 ) -> UpdateReport:
     """Lock the declared shared sources and write ``.dmx/shared-sources.lock``.
+
+    With *component*, the component's own ``shared-sources.yaml`` and lock
+    in ``.dmx/components/<id>/`` (GH-90); the cache is the same.
 
     A source is looked up again when it is new, its declared address
     changed, it is named in *names*, or *update_all* is set. Every other
@@ -328,8 +336,8 @@ def update_shared_sources(
         SharedSourceError: ``.dmx/shared-sources.yaml`` or the lock is
             malformed.
     """
-    sources = read_shared_sources(workspace_root)
-    lock = read_lock(workspace_root)
+    sources = read_shared_sources(workspace_root, component=component)
+    lock = read_lock(workspace_root, component=component)
     wanted = set(names or [])
     declared = {source.name for source in sources}
 
@@ -370,7 +378,7 @@ def update_shared_sources(
         unknown=sorted(wanted - declared),
     )
     if report.wrote_lock:
-        write_lock(workspace_root, entries)
+        write_lock(workspace_root, entries, component=component)
     return report
 
 
@@ -426,33 +434,65 @@ def summary_markdown(report: UpdateReport) -> str:
     return "\n\n".join(blocks)
 
 
-def fetch_shared_sources(workspace_root: Path) -> tuple[list[str], bool]:
-    """Fetch every locked source into the cache without changing the lock.
+def _components_with_sources(workspace_root: Path) -> list[str]:
+    base = workspace_root / ".dmx" / "components"
+    if not base.is_dir():
+        return []
+    return sorted(
+        folder.name
+        for folder in base.iterdir()
+        if (folder / "shared-sources.yaml").is_file() and (folder / "component.yaml").is_file()
+    )
 
-    Returns one line per declared source and whether all of them are ready.
-    A declared source with no lock entry, or one locked from a different
-    address, is reported as needing ``/dmx/update-shared-sources``.
-    """
-    sources = read_shared_sources(workspace_root)
-    lock = read_lock(workspace_root)
+
+def _fetch_one(workspace_root: Path, component: str | None) -> tuple[list[str], bool]:
+    prefix = f"{component}/" if component else ""
+    lock_rel = lock_path(workspace_root, component=component).relative_to(workspace_root)
+    command = (
+        f"/dmx/update-shared-sources {component}" if component else "/dmx/update-shared-sources"
+    )
+    try:
+        sources = read_shared_sources(workspace_root, component=component)
+        lock = read_lock(workspace_root, component=component)
+    except SharedSourceError as exc:
+        if component is None:
+            raise
+        return [f"✗ `{component}`: {exc}"], False
     lines: list[str] = []
     ok = True
     for source in sources:
+        label = f"{prefix}{source.name}"
         entry = lock.get(source.name)
         if entry is None or entry.source != source.source:
             ok = False
             lines.append(
-                f"✗ `{source.name}`: not in `.dmx/shared-sources.lock` for its current "
-                "address. Run `/dmx/update-shared-sources`."
+                f"✗ `{label}`: not in `{lock_rel.as_posix()}` for its current "
+                f"address. Run `{command}`."
             )
             continue
         try:
             ensure_fetched(workspace_root, source, entry)
         except SharedSourceError as exc:
             ok = False
-            lines.append(f"✗ `{source.name}`: {exc}")
+            lines.append(f"✗ `{label}`: {exc}")
             continue
-        lines.append(f"✓ `{source.name}` at `{entry.commit[:12]}`")
+        lines.append(f"✓ `{label}` at `{entry.commit[:12]}`")
+    return lines, ok
+
+
+def fetch_shared_sources(workspace_root: Path) -> tuple[list[str], bool]:
+    """Fetch every locked source into the cache without changing a lock.
+
+    Covers the repo-wide lock and each component's (GH-90). Returns one line
+    per declared source and whether all of them are ready. A declared source
+    with no lock entry, or one locked from a different address, is reported
+    as needing ``/dmx/update-shared-sources`` (with the component's id).
+    """
+    lines, ok = _fetch_one(workspace_root, None)
+    for component in _components_with_sources(workspace_root):
+        more, more_ok = _fetch_one(workspace_root, component)
+        lines.extend(more)
+        ok = ok and more_ok
     return lines, ok
 
 
