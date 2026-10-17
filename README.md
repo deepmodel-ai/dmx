@@ -100,7 +100,7 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 ## Upgrading
 
-Pin a version in your MCP config (`deepmodel-dmx==0.5.0`) or use `@latest`, restart your IDE, then run `/dmx/upgrade` once in each repo and commit the refreshed rule files. [Upgrading dmx →](https://dmx.deepmodel.ai/upgrading)
+Pin a version in your MCP config (`deepmodel-dmx==0.5.1`) or use `@latest`, restart your IDE, then run `/dmx/upgrade` once in each repo and commit the refreshed rule files. [Upgrading dmx →](https://dmx.deepmodel.ai/upgrading)
 
 ## Roadmap
 
