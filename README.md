@@ -92,7 +92,7 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 **A memory bank.** `.dmx/` holds project context, the current spec and plan, and loop state, committed to the repo. Every session and every developer starts from the same understanding. [Memory bank →](https://dmx.deepmodel.ai/configuration/memory-bank)
 
-**Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and vendor them into every project with `/dmx/sync`. Layer team config over an org baseline; each repo can still override what it needs. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)
+**Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and lock them into every project with `/dmx/update-shared-sources`; dmx fetches them into a git-ignored cache. Layer team config over an org baseline; each repo can still override what it needs. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)
 
 **Skill discovery.** Ask your agent "which skills can update helm?" and it finds matching skills from your repo and every shared source. Ask for the task and it runs the right one. [Custom skills →](https://dmx.deepmodel.ai/configuration/custom-skills)
 

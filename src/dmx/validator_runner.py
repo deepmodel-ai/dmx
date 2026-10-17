@@ -99,7 +99,10 @@ def resolve_validator_path(name: str, workspace_root: Path) -> Path:
     except SharedSourceError as exc:
         raise ValidatorRunError(f"Error reading .dmx/shared-sources.yaml: {exc}") from exc
     for source in shared_sources:
-        source_path = source_root(workspace_root, source) / "validators" / f"{name}.py"
+        try:
+            source_path = source_root(workspace_root, source) / "validators" / f"{name}.py"
+        except SharedSourceError as exc:
+            raise ValidatorRunError(str(exc)) from exc
         checked.append(source_path)
         if source_path.exists():
             return source_path

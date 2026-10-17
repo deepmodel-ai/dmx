@@ -208,8 +208,8 @@ class TestBundledSkills:
 
         skills_dir = _Path(str(pkg.files("dmx") / "skills"))
         skills = load_skills(skills_dir)
-        assert len(skills) == 27, (
-            f"Expected 27 bundled skills but got {len(skills)}. "
+        assert len(skills) == 28, (
+            f"Expected 28 bundled skills but got {len(skills)}. "
             "A skill file may have broken YAML frontmatter."
         )
 

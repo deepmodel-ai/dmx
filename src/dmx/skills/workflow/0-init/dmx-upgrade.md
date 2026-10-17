@@ -40,7 +40,7 @@ If `notes` lists files that could not be read or have no end to their dmx block,
 
 ## Step 6 — Migrate the `.dmx/` layout
 
-Since 0.6, each ticket's `spec.md`, `tasks.md` and `activeContext.md` live in `.dmx/jobs/<job>/` instead of the `.dmx/` root.
+Since 0.6, each ticket's `spec.md`, `tasks.md` and `activeContext.md` live in `.dmx/jobs/<job>/` instead of the `.dmx/` root, and shared sources are locked in `.dmx/shared-sources.lock` and fetched into the git-ignored `.dmx/.cache/` instead of being copied into `.dmx/vendor/`.
 
 Call `migrate_dmx_layout` with `dry_run` set to true.
 
@@ -55,9 +55,19 @@ Otherwise show the plan, one list per field, omitting empty ones:
 - `references` — custom validators, loops, skills or shared-source files that still name the old paths. They break once the files move: the developer updates them to the job folder. A validator can read `spec_path`, `tasks_path` and `active_context_path` from `loop_context`.
 - `adds_gitattributes` — adds `gitattributes_line` to `.gitattributes`.
 - `open_items` — open learnings or decisions in a root `activeContext.md` that is being deleted.
+- `locks` — shared sources vendored in `.dmx/vendor/`, locked at the commit they were vendored at. Applying fetches each one, so this machine needs read access to those repos.
+- `removes_vendor` — `.dmx/vendor/` is removed once every vendored source is locked.
+- `adds_gitignore` — adds `gitignore_line` to `.gitignore`.
+- `needs_update` — declared shared sources with neither a lock entry nor a vendored copy. Run `/dmx/update-shared-sources` after the migration.
 
 Ask once: "Apply this migration? (yes/no)". If the answer is not yes, change nothing and stop.
 
 If `open_items` is not empty, first promote each item into the core memory bank files the way `/dmx/update-memory` does, so nothing is lost when the root `activeContext.md` is deleted.
 
-Then call `migrate_dmx_layout` with `dry_run` set to false and list what it moved and deleted. Tell the developer to commit the rule files and the migration together as one PR. Do not commit them.
+Then call `migrate_dmx_layout` with `dry_run` set to false and list what it moved, deleted and locked.
+
+If `lock_failures` is not empty, show each one verbatim: those sources could not be fetched, so `.dmx/vendor/` was kept and they still resolve from it. Fix access and run `/dmx/upgrade` again.
+
+If the repo has shared sources, tell the developer that CI which runs shared validators now needs read access to those repos: give it a read token and run `dmx fetch-shared-sources` before the tests.
+
+Tell the developer to commit the rule files and the migration together as one PR. Do not commit them.

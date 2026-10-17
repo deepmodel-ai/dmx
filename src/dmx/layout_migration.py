@@ -14,7 +14,12 @@ merged ticket's leftovers, and a feature branch's are its own. The migration:
   that merge a visible modify/delete conflict instead;
 - lists custom code that still names the old paths, so the developer can fix
   it before anything moves;
-- adds the ``.gitattributes`` line that collapses loop state in PR diffs.
+- adds the ``.gitattributes`` line that collapses loop state in PR diffs;
+- locks shared sources that 0.5 vendored into ``.dmx/vendor/`` (GH-85): each
+  vendored copy's ``.lock.json`` commit is fetched into the cache and hashed
+  into ``.dmx/shared-sources.lock``, then ``.dmx/vendor/`` is removed and
+  ``.dmx/.cache/`` is git-ignored. If any source cannot be fetched,
+  ``.dmx/vendor/`` stays, so nothing stops resolving.
 
 The deterministic half of ``/dmx/upgrade``'s migration step, exposed through
 one MCP tool (:func:`register_layout_migration_tools`). The skill shows the
@@ -23,8 +28,10 @@ plan, asks once, and the developer commits the result.
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+import shutil
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import (
@@ -50,6 +57,15 @@ from dmx.loop_tools import (  # noqa: PLC2701 — same package, no public API sp
     _read_branch_base,
     _read_config_value,
 )
+from dmx.shared_sources import (
+    LockEntry,
+    SharedSourceError,
+    read_lock,
+    read_shared_sources,
+    vendor_lock_path,
+    write_lock,
+)
+from dmx.source_cache import extract_commit, tree_hash
 from dmx.workspace import resolve_workspace_root
 
 if TYPE_CHECKING:
@@ -57,6 +73,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GITATTRIBUTES_LINE",
+    "GITIGNORE_LINE",
     "LayoutPlan",
     "apply_layout_migration",
     "plan_layout_migration",
@@ -64,6 +81,7 @@ __all__ = [
 ]
 
 GITATTRIBUTES_LINE = ".dmx/jobs/**/*.json linguist-generated=true"
+GITIGNORE_LINE = ".dmx/.cache/"
 
 # Where custom code that could name the old paths lives: the app repo's own
 # validators, loops and skills, and 0.5's vendored shared sources.
@@ -93,10 +111,22 @@ class LayoutPlan:
     references: tuple[str, ...] = ()
     open_items: str = ""
     adds_gitattributes: bool = False
+    locks: tuple[tuple[str, str], ...] = ()  # (source name, commit) from .dmx/vendor/
+    needs_update: tuple[str, ...] = ()  # declared sources with no lock and no vendored copy
+    removes_vendor: bool = False
+    adds_gitignore: bool = False
+    lock_failures: tuple[str, ...] = ()  # set by apply
 
     @property
     def has_changes(self) -> bool:
-        return bool(self.moves or self.deletes or self.adds_gitattributes)
+        return bool(
+            self.moves
+            or self.deletes
+            or self.adds_gitattributes
+            or self.locks
+            or self.removes_vendor
+            or self.adds_gitignore
+        )
 
     def as_dict(self, *, applied: bool) -> dict[str, Any]:
         return {
@@ -110,6 +140,12 @@ class LayoutPlan:
             "open_items": self.open_items,
             "adds_gitattributes": self.adds_gitattributes,
             "gitattributes_line": GITATTRIBUTES_LINE,
+            "locks": [{"name": name, "commit": commit} for name, commit in self.locks],
+            "needs_update": list(self.needs_update),
+            "removes_vendor": self.removes_vendor,
+            "adds_gitignore": self.adds_gitignore,
+            "gitignore_line": GITIGNORE_LINE,
+            "lock_failures": list(self.lock_failures),
         }
 
 
@@ -171,15 +207,80 @@ def _scan_old_paths(root: Path) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _needs_gitattributes_line(root: Path) -> bool:
-    path = root / ".gitattributes"
+def _lacks_line(path: Path, line: str) -> bool:
     if not path.is_file():
         return True
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return False
-    return GITATTRIBUTES_LINE not in (line.strip() for line in lines)
+    return line not in (existing.strip() for existing in lines)
+
+
+def _append_line(path: Path, line: str) -> None:
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    path.write_text(f"{existing}{line}\n", encoding="utf-8")
+
+
+def _vendored_commit(root: Path, name: str, address: str) -> str | None:
+    """The commit 0.5 recorded for a vendored source, when it is the declared address."""
+    try:
+        recorded = json.loads(vendor_lock_path(root, name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(recorded, dict) or recorded.get("source") != address:
+        return None
+    commit = recorded.get("resolved_sha")
+    return commit if isinstance(commit, str) and commit else None
+
+
+def _shared_source_plan(
+    root: Path,
+) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...], bool, bool]:
+    """``(locks, needs_update, removes_vendor, adds_gitignore)`` for the migration."""
+    try:
+        sources = read_shared_sources(root)
+        lock = read_lock(root)
+    except SharedSourceError:
+        return (), (), False, False
+    locks: list[tuple[str, str]] = []
+    needs_update: list[str] = []
+    for source in sources:
+        entry = lock.get(source.name)
+        if entry is not None and entry.source == source.source:
+            continue
+        commit = _vendored_commit(root, source.name, source.source)
+        if commit is None:
+            needs_update.append(source.name)
+        else:
+            locks.append((source.name, commit))
+    removes_vendor = (root / ".dmx" / "vendor").is_dir()
+    adds_gitignore = bool(sources or removes_vendor) and _lacks_line(
+        root / ".gitignore", GITIGNORE_LINE
+    )
+    return tuple(locks), tuple(needs_update), removes_vendor, adds_gitignore
+
+
+def _lock_vendored(root: Path, locks: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    """Fetch and hash each vendored commit into the lock. Returns failures."""
+    if not locks:
+        return ()
+    sources = read_shared_sources(root)
+    by_name = {source.name: source for source in sources}
+    lock = read_lock(root)
+    failures: list[str] = []
+    for name, commit in locks:
+        source = by_name[name]
+        try:
+            tree = extract_commit(root, source, commit, fresh=True)
+        except SharedSourceError as exc:
+            failures.append(f"`{name}`: {exc}")
+            continue
+        lock[name] = LockEntry(name=name, source=source.source, commit=commit, hash=tree_hash(tree))
+    write_lock(root, [lock[source.name] for source in sources if source.name in lock])
+    return tuple(failures)
 
 
 def plan_layout_migration(root: Path) -> LayoutPlan:
@@ -209,6 +310,7 @@ def plan_layout_migration(root: Path) -> LayoutPlan:
         else:
             moves.append((_rel(root, source), _rel(root, target)))
 
+    locks, needs_update, removes_vendor, adds_gitignore = _shared_source_plan(root)
     return LayoutPlan(
         blocked=None,
         moves=tuple(moves),
@@ -216,7 +318,11 @@ def plan_layout_migration(root: Path) -> LayoutPlan:
         kept=tuple(kept),
         references=references,
         open_items=open_items,
-        adds_gitattributes=_needs_gitattributes_line(root),
+        adds_gitattributes=_lacks_line(root / ".gitattributes", GITATTRIBUTES_LINE),
+        locks=locks,
+        needs_update=needs_update,
+        removes_vendor=removes_vendor,
+        adds_gitignore=adds_gitignore,
     )
 
 
@@ -232,12 +338,13 @@ def apply_layout_migration(root: Path) -> LayoutPlan:
     for rel in plan.deletes:
         (root / rel).unlink(missing_ok=True)
     if plan.adds_gitattributes:
-        path = root / ".gitattributes"
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-        if existing and not existing.endswith("\n"):
-            existing += "\n"
-        path.write_text(f"{existing}{GITATTRIBUTES_LINE}\n", encoding="utf-8")
-    return plan
+        _append_line(root / ".gitattributes", GITATTRIBUTES_LINE)
+    failures = _lock_vendored(root, plan.locks)
+    if plan.removes_vendor and not failures:
+        shutil.rmtree(root / ".dmx" / "vendor")
+    if plan.adds_gitignore:
+        _append_line(root / ".gitignore", GITIGNORE_LINE)
+    return replace(plan, lock_failures=failures)
 
 
 def register_layout_migration_tools(app: FastMCP) -> None:
@@ -254,6 +361,9 @@ def register_layout_migration_tools(app: FastMCP) -> None:
         ticket files that belong to the current branch's ticket move into its
         job folder; other root ticket files are deleted. Lists custom code
         that names the old paths, and adds the ``.gitattributes`` line.
+        Locks shared sources vendored in ``.dmx/vendor/`` at their recorded
+        commits (fetching them), removes ``.dmx/vendor/`` when every one
+        locked, and git-ignores ``.dmx/.cache/``.
         Refuses on ``branch_base``, ``production_branch`` and a detached
         HEAD. Does not commit.
 
@@ -263,8 +373,10 @@ def register_layout_migration_tools(app: FastMCP) -> None:
 
         Returns:
             ``blocked``, ``applied``, ``has_changes``, ``moves``, ``deletes``,
-            ``kept``, ``references``, ``open_items``, ``adds_gitattributes``
-            and ``gitattributes_line``.
+            ``kept``, ``references``, ``open_items``, ``adds_gitattributes``,
+            ``gitattributes_line``, ``locks``, ``needs_update``,
+            ``removes_vendor``, ``adds_gitignore``, ``gitignore_line`` and
+            ``lock_failures``.
         """
         try:
             root = await resolve_workspace_root(ctx, workspace_root)

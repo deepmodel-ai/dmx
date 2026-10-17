@@ -189,6 +189,36 @@ def list_skills(*, skills_dir: Path | None) -> None:
         )
 
 
+@main.command(name="fetch-shared-sources")
+@click.option(
+    "--workspace-root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="A folder in the repo (default: the current directory). Its .dmx/ is found from there.",
+)
+def fetch_shared_sources(*, workspace_root: Path | None) -> None:
+    """Fetch every locked shared source into .dmx/.cache/ without changing the lock.
+
+    For CI and fresh clones. Needs read access to each source repo.
+    """
+    from dmx.shared_sources import SharedSourceError
+    from dmx.sync_runner import fetch_shared_sources as fetch
+    from dmx.workspace import find_dmx_root
+
+    root, _skipped = find_dmx_root((workspace_root or Path.cwd()).resolve())
+    try:
+        lines, ok = fetch(root)
+    except SharedSourceError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not lines:
+        click.echo("No shared sources declared in .dmx/shared-sources.yaml.")
+        return
+    for line in lines:
+        click.echo(line)
+    if not ok:
+        raise SystemExit(1)
+
+
 @main.command()
 def version() -> None:
     """Print version and exit."""

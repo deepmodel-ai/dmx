@@ -2323,10 +2323,10 @@ def register_loop_tools(app: FastMCP) -> None:
 
         # Folder-shaped skill (GH-27 phase 4): the body may reference
         # scripts/, references/, or assets/ relative to its own directory.
-        # dmx never copies vendored content anywhere else (see GH-27's
-        # "pass the root path, don't copy anything"), so that directory is
-        # exactly where /dmx/sync already vendored it — tell the agent so it
-        # can resolve those paths itself with its own file/shell tools.
+        # dmx never copies a shared source's content anywhere else (see
+        # GH-27's "pass the root path, don't copy anything"), so that
+        # directory is exactly where the source is cached (or, in a 0.5 repo,
+        # vendored) — tell the agent so it can resolve those paths itself.
         prefix = (
             f"Skill root: `{resolved.root_path}/` — resolve any `scripts/`, `references/`, "
             "or `assets/` paths mentioned below relative to this directory.\n"

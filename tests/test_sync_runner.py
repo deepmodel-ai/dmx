@@ -7,7 +7,6 @@ here depends on real network access.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -16,12 +15,14 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dmx.shared_sources import SharedSource, vendor_dir, vendor_lock_path
+from dmx.shared_sources import LockEntry, SharedSource, lock_path, source_root
+from dmx.source_cache import cached_tree, tree_hash
 from dmx.sync_runner import (
     SyncError,
     detect_collisions,
+    lock_source,
     require_non_base_branch_error,
-    sync_source,
+    update_shared_sources,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,16 @@ def _init_source_repo(root: Path, files: dict[str, str], tag: str = "v1") -> str
     return result.stdout.strip()
 
 
+def update_shared_sources_for(workspace: Path, *sources: SharedSource) -> None:
+    """Declare *sources* in the workspace and lock them, as the skill would."""
+    entries = "\n".join(f"  - name: {s.name}\n    source: {s.source}" for s in sources)
+    config = workspace / ".dmx" / "shared-sources.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f"shared_sources:\n{entries}\n", encoding="utf-8")
+    report = update_shared_sources(workspace)
+    assert not report.failures, report.failures
+
+
 def _source(name: str, url: Path, ref: str = "v1", subdir: str | None = None) -> SharedSource:
     address = f"git::{url}"
     if subdir:
@@ -65,53 +76,50 @@ def _source(name: str, url: Path, ref: str = "v1", subdir: str | None = None) ->
 
 
 # ---------------------------------------------------------------------------
-# sync_source
+# lock_source
 # ---------------------------------------------------------------------------
 
 
-class TestSyncSource:
-    def test_vendors_files_and_writes_lock(self, tmp_path: Path) -> None:
+def _tree(workspace: Path, source_repo: Path, commit: str) -> Path:
+    return cached_tree(workspace, str(source_repo), commit)
+
+
+class TestLockSource:
+    def test_locks_the_ref_and_caches_the_tree(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
         sha = _init_source_repo(source_repo, {"loops/custom.yaml": "name: custom\n"})
         workspace = tmp_path / "consumer"
         workspace.mkdir()
-
-        result = sync_source(_source("acme", source_repo), workspace)
-
-        assert result.name == "acme"
-        assert result.resolved_sha == sha
-        vendored = vendor_dir(workspace, "acme") / "loops" / "custom.yaml"
-        assert vendored.read_text(encoding="utf-8") == "name: custom\n"
-
-    def test_lock_file_contents(self, tmp_path: Path) -> None:
-        source_repo = tmp_path / "source"
-        sha = _init_source_repo(source_repo, {"skills/custom-skill.md": "# hi\n"})
-        workspace = tmp_path / "consumer"
-        workspace.mkdir()
-
         source = _source("acme", source_repo)
-        sync_source(source, workspace)
 
-        lock = json.loads(vendor_lock_path(workspace, "acme").read_text(encoding="utf-8"))
-        assert lock == {"name": "acme", "source": source.source, "resolved_sha": sha}
+        entry = lock_source(source, workspace)
 
-    def test_vendored_tree_has_no_git_directory(self, tmp_path: Path) -> None:
+        assert entry == LockEntry(
+            name="acme",
+            source=source.source,
+            commit=sha,
+            hash=tree_hash(_tree(workspace, source_repo, sha)),
+        )
+        cached = _tree(workspace, source_repo, sha) / "loops" / "custom.yaml"
+        assert cached.read_text(encoding="utf-8") == "name: custom\n"
+        assert not lock_path(workspace).exists()
+
+    def test_cached_tree_has_no_git_directory(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
-        _init_source_repo(source_repo, {"validators/v.py": "# v\n"})
+        sha = _init_source_repo(source_repo, {"validators/v.py": "# v\n"})
         workspace = tmp_path / "consumer"
         workspace.mkdir()
 
-        sync_source(_source("acme", source_repo), workspace)
+        lock_source(_source("acme", source_repo), workspace)
 
-        assert not (vendor_dir(workspace, "acme") / ".git").exists()
+        assert not (_tree(workspace, source_repo, sha) / ".git").exists()
 
-    def test_resyncing_replaces_previous_contents(self, tmp_path: Path) -> None:
+    def test_each_commit_gets_its_own_tree(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
-        _init_source_repo(source_repo, {"loops/old.yaml": "name: old\n"}, tag="v1")
+        first = _init_source_repo(source_repo, {"loops/old.yaml": "name: old\n"}, tag="v1")
         workspace = tmp_path / "consumer"
         workspace.mkdir()
-        sync_source(_source("acme", source_repo, ref="v1"), workspace)
-        assert (vendor_dir(workspace, "acme") / "loops" / "old.yaml").exists()
+        lock_source(_source("acme", source_repo, ref="v1"), workspace)
 
         # Bump the source: new commit, new tag, old file removed.
         (source_repo / "loops" / "old.yaml").unlink()
@@ -120,10 +128,12 @@ class TestSyncSource:
         _run(["git", "commit", "-q", "-m", "bump"], source_repo)
         _run(["git", "tag", "v2"], source_repo)
 
-        sync_source(_source("acme", source_repo, ref="v2"), workspace)
+        second = lock_source(_source("acme", source_repo, ref="v2"), workspace).commit
 
-        assert not (vendor_dir(workspace, "acme") / "loops" / "old.yaml").exists()
-        assert (vendor_dir(workspace, "acme") / "loops" / "new.yaml").exists()
+        assert second != first
+        assert (_tree(workspace, source_repo, first) / "loops" / "old.yaml").exists()
+        assert not (_tree(workspace, source_repo, second) / "loops" / "old.yaml").exists()
+        assert (_tree(workspace, source_repo, second) / "loops" / "new.yaml").exists()
 
     def test_subdir_is_respected(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -136,19 +146,21 @@ class TestSyncSource:
         )
         workspace = tmp_path / "consumer"
         workspace.mkdir()
+        source = _source("acme", source_repo, subdir="shared")
+        update_shared_sources_for(workspace, source)
 
-        sync_source(_source("acme", source_repo, subdir="shared"), workspace)
+        root = source_root(workspace, source)
 
-        assert (vendor_dir(workspace, "acme") / "loops" / "custom.yaml").exists()
-        assert not (vendor_dir(workspace, "acme") / "unrelated").exists()
+        assert (root / "loops" / "custom.yaml").exists()
+        assert not (root / "unrelated").exists()
 
-    def test_clone_failure_raises_with_actionable_message(self, tmp_path: Path) -> None:
+    def test_fetch_failure_raises_with_actionable_message(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "does-not-exist"
         workspace = tmp_path / "consumer"
         workspace.mkdir()
 
-        with pytest.raises(SyncError, match="Could not clone"):
-            sync_source(_source("acme", nonexistent), workspace)
+        with pytest.raises(SyncError, match="Could not fetch shared source `acme`"):
+            lock_source(_source("acme", nonexistent), workspace)
 
     def test_missing_ref_raises_with_actionable_message(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -157,7 +169,7 @@ class TestSyncSource:
         workspace.mkdir()
 
         with pytest.raises(SyncError, match="not found in shared source"):
-            sync_source(_source("acme", source_repo, ref="does-not-exist"), workspace)
+            lock_source(_source("acme", source_repo, ref="does-not-exist"), workspace)
 
     def test_missing_subdir_raises(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -166,7 +178,7 @@ class TestSyncSource:
         workspace.mkdir()
 
         with pytest.raises(SyncError, match="does not exist at ref"):
-            sync_source(_source("acme", source_repo, subdir="nonexistent-subdir"), workspace)
+            lock_source(_source("acme", source_repo, subdir="nonexistent-subdir"), workspace)
 
     def test_wrong_shaped_source_raises(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -175,7 +187,7 @@ class TestSyncSource:
         workspace.mkdir()
 
         with pytest.raises(SyncError, match="doesn't look like a dmx shared source"):
-            sync_source(_source("acme", source_repo), workspace)
+            lock_source(_source("acme", source_repo), workspace)
 
     def test_accepts_skills_only_source(self, tmp_path: Path) -> None:
         # Shape check only requires *one* of loops/skills/validators, not all three.
@@ -184,21 +196,20 @@ class TestSyncSource:
         workspace = tmp_path / "consumer"
         workspace.mkdir()
 
-        result = sync_source(_source("acme", source_repo), workspace)
-        assert result.name == "acme"
+        assert lock_source(_source("acme", source_repo), workspace).name == "acme"
 
     def test_accepts_folder_shaped_skill(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
-        _init_source_repo(
+        sha = _init_source_repo(
             source_repo, {"skills/custom-skill/SKILL.md": "---\ntitle: X\n---\nbody\n"}
         )
         workspace = tmp_path / "consumer"
         workspace.mkdir()
 
-        result = sync_source(_source("acme", source_repo), workspace)
+        lock_source(_source("acme", source_repo), workspace)
 
-        assert result.name == "acme"
-        assert (vendor_dir(workspace, "acme") / "skills" / "custom-skill" / "SKILL.md").exists()
+        tree = _tree(workspace, source_repo, sha)
+        assert (tree / "skills" / "custom-skill" / "SKILL.md").exists()
 
     def test_rejects_folder_shaped_skill_missing_skill_md(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -207,7 +218,7 @@ class TestSyncSource:
         workspace.mkdir()
 
         with pytest.raises(SyncError, match="malformed entries under skills/"):
-            sync_source(_source("acme", source_repo), workspace)
+            lock_source(_source("acme", source_repo), workspace)
 
     def test_rejects_stray_non_markdown_file_under_skills(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
@@ -216,14 +227,14 @@ class TestSyncSource:
         workspace.mkdir()
 
         with pytest.raises(SyncError, match="malformed entries under skills/"):
-            sync_source(_source("acme", source_repo), workspace)
+            lock_source(_source("acme", source_repo), workspace)
 
     def test_hidden_files_under_skills_are_not_flagged_as_malformed(self, tmp_path: Path) -> None:
         # .gitkeep/.gitignore/.DS_Store etc. are common, harmless repo-hygiene
         # artifacts at the top of any real directory — must not fail an
         # otherwise well-formed source just for containing one.
         source_repo = tmp_path / "source"
-        _init_source_repo(
+        sha = _init_source_repo(
             source_repo,
             {
                 "skills/custom-skill.md": "# hi\n",
@@ -234,48 +245,9 @@ class TestSyncSource:
         workspace = tmp_path / "consumer"
         workspace.mkdir()
 
-        result = sync_source(_source("acme", source_repo), workspace)
+        lock_source(_source("acme", source_repo), workspace)
 
-        assert result.name == "acme"
-        assert (vendor_dir(workspace, "acme") / "skills" / "custom-skill.md").exists()
-
-    def test_uninitialized_submodule_directory_is_vendored_empty(self, tmp_path: Path) -> None:
-        # Git itself refuses to track any path literally named ".git" at any
-        # depth (confirmed: `git add -A` on a manually-created nested `.git/`
-        # is a silent no-op), so a real nested-.git-in-a-tracked-tree
-        # scenario can't actually occur through normal git usage — the only
-        # realistic case is an *uninitialized* submodule, which git clone
-        # (without --recurse-submodules, which sync_source deliberately
-        # doesn't pass) leaves as an empty directory with no .git at all.
-        # This just confirms that case vendors cleanly.
-        source_repo = tmp_path / "source"
-        _init_source_repo(source_repo, {"skills/custom-skill/SKILL.md": "body\n"})
-        submodule_repo = tmp_path / "submodule-target"
-        _init_source_repo(submodule_repo, {"README.md": "sub\n"})
-        _run(
-            [
-                "git",
-                "-c",
-                "protocol.file.allow=always",
-                "submodule",
-                "add",
-                str(submodule_repo),
-                "sub",
-            ],
-            source_repo,
-        )
-        _run(["git", "commit", "-q", "-m", "add submodule"], source_repo)
-        _run(["git", "tag", "-f", "v1"], source_repo)
-        workspace = tmp_path / "consumer"
-        workspace.mkdir()
-
-        sync_source(_source("acme", source_repo), workspace)
-
-        vendored = vendor_dir(workspace, "acme")
-        assert (vendored / "skills" / "custom-skill" / "SKILL.md").exists()
-        # The submodule directory exists (git always creates it) but is
-        # empty — no nested .git, since --recurse-submodules was never used.
-        assert not (vendored / "sub" / ".git").exists()
+        assert (_tree(workspace, source_repo, sha) / "skills" / "custom-skill.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +274,7 @@ class TestRequireNonBaseBranchError:
         error = require_non_base_branch_error(tmp_path)
 
         assert error is not None
-        assert "sync" in error.lower()
+        assert "/dmx/update-shared-sources" in error
         assert "main" in error
 
     def test_allows_a_feature_branch(self, tmp_path: Path) -> None:
@@ -429,7 +401,7 @@ class TestDetectCollisions:
         _vendor(tmp_path, "acme", "skills", "dmx-commit.md")
         assert detect_collisions([_no_op_source("acme")], tmp_path) == []
 
-    def test_end_to_end_with_real_sync_source(self, tmp_path: Path) -> None:
+    def test_end_to_end_with_a_real_locked_source(self, tmp_path: Path) -> None:
         source_repo = tmp_path / "source"
         _init_source_repo(source_repo, {"loops/custom.yaml": "name: custom\n"})
         workspace = tmp_path / "consumer"
@@ -437,7 +409,7 @@ class TestDetectCollisions:
         _app_file(workspace, "loops", "custom.yaml")
 
         source = _source("acme", source_repo)
-        sync_source(source, workspace)
+        update_shared_sources_for(workspace, source)
 
         warnings = detect_collisions([source], workspace)
         assert len(warnings) == 1

@@ -11,6 +11,14 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_source_cache(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep shared-source git mirrors out of the developer's ``~/.cache/dmx``."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path_factory.getbasetemp() / "xdg-cache"))
+
+
+@pytest.fixture(autouse=True)
 def _clear_one_time_notes() -> None:
     """Start each test without a one-time note left by an earlier one.
 

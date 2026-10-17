@@ -1,9 +1,10 @@
-"""MCP tool: ``sync_shared_sources`` — the deterministic half of ``/dmx/sync``.
+"""MCP tool: ``update_shared_sources`` — the deterministic half of ``/dmx/update-shared-sources``.
 
-Called from within the ``/dmx-sync`` skill; not a user-facing command on its
-own (same pattern as ``setup_ide_rules``, called from within ``/dmx-init``).
-The skill still owns the parts that need agent judgment or should stay a
-plain, reviewable git operation: committing and pushing the result.
+Called from within the ``/dmx/update-shared-sources`` skill (and the
+``/dmx/sync`` alias kept for 0.6); not a user-facing command on its own
+(same pattern as ``setup_ide_rules``, called from within ``/dmx/init``). The
+skill still owns the parts that should stay a plain, reviewable git
+operation: committing the lock and pushing.
 """
 
 from __future__ import annotations
@@ -18,10 +19,10 @@ from fastmcp import (
 from dmx.exceptions import WorkspaceRootInvalid
 from dmx.shared_sources import SharedSourceError, read_shared_sources
 from dmx.sync_runner import (
-    SyncError,
     detect_collisions,
     require_non_base_branch_error,
-    sync_source,
+    summary_markdown,
+    update_shared_sources,
 )
 from dmx.workspace import resolve_workspace_root
 
@@ -31,36 +32,39 @@ logger = logging.getLogger(__name__)
 
 
 def register_sync_tools(app: FastMCP) -> None:
-    """Register ``sync_shared_sources`` on *app*."""
+    """Register ``update_shared_sources`` on *app*."""
 
-    @app.tool
-    async def sync_shared_sources(ctx: Context, workspace_root: str | None = None) -> str:
-        """Clone/fetch every declared shared source and vendor it into ``.dmx/vendor/``.
+    @app.tool(name="update_shared_sources")
+    async def update_shared_sources_tool(
+        ctx: Context,
+        names: list[str] | None = None,
+        update_all: bool = False,
+        workspace_root: str | None = None,
+    ) -> str:
+        """Lock the declared shared sources in ``.dmx/shared-sources.lock``.
 
-        Reads ``.dmx/shared-sources.yaml``; for each declared source, clones it
-        at its pinned ``ref``, copies its tree into ``.dmx/vendor/{name}/``
-        (replacing any previous contents), and writes a per-source
-        ``.lock.json`` recording the resolved commit SHA. Does **not** commit
-        or push — the calling skill does that once this returns.
+        Looks up the commit each ``ref`` points to for sources that are new
+        or whose address changed in ``.dmx/shared-sources.yaml``, plus any
+        listed in *names*, or every source with *update_all*. Fetches those
+        trees into the git-ignored ``.dmx/.cache/``, checks their shape,
+        hashes them, and writes the lock. Every other entry keeps its
+        commit. Does **not** commit or push — the calling skill does that.
 
-        After vendoring, checks for same-name collisions across the app
-        repo's own ``loops``/``skills``/``validators`` and every declared
-        source (in declared-order precedence) and surfaces them as warnings
-        — the resolver would silently pick the winner per that same
-        precedence, so this is the one point where an unintended shadowing
-        can be caught and flagged before it's ever hit at loop-run time.
+        After locking, checks for same-name collisions across the app repo's
+        own ``loops``/``skills``/``validators`` and every declared source (in
+        declared-order precedence) and surfaces them as warnings.
 
-        Blocked from running on the repo's configured ``branch_base`` — every
-        other write path in dmx requires a reviewed PR rather than a direct
-        commit there, and this tool produces one.
+        Blocked from running on the repo's configured ``branch_base`` — the
+        lock goes through a reviewed PR.
 
         Args:
+            names: Sources to look up again even if their entry is current.
+            update_all: Look up every declared source again.
             workspace_root: Repo root path override. Auto-detected if omitted.
 
         Returns:
-            A per-source summary (success with resolved SHA, or a specific
-            failure reason), any collision warnings, and next-step
-            instructions for the agent.
+            Per-source results, a summary to paste into the PR, any collision
+            warnings, and next-step instructions for the agent.
         """
         try:
             root = await resolve_workspace_root(ctx, workspace_root)
@@ -73,24 +77,26 @@ def register_sync_tools(app: FastMCP) -> None:
 
         try:
             sources = read_shared_sources(root)
+            if not sources:
+                return (
+                    "No shared sources declared in `.dmx/shared-sources.yaml` — nothing to update."
+                )
+            report = update_shared_sources(root, names=names, update_all=update_all)
         except SharedSourceError as exc:
-            return f"Error reading .dmx/shared-sources.yaml: {exc}"
-
-        if not sources:
-            return "No shared sources declared in `.dmx/shared-sources.yaml` — nothing to sync."
+            return f"Error reading shared sources: {exc}"
 
         lines: list[str] = []
-        any_success = False
-        for source in sources:
-            try:
-                result = sync_source(source, root)
-            except SyncError as exc:
-                logger.warning("sync failed for shared source '%s': %s", source.name, exc)
-                lines.append(f"❌ `{source.name}`: {exc}")
-                continue
-            any_success = True
-            lines.append(f"✅ `{source.name}` synced at `{result.resolved_sha[:12]}`.")
-
+        for change in report.changes:
+            lines.append(f"✅ `{change.name}` locked at `{change.current.commit[:12]}`.")
+        if report.unchanged:
+            listed = ", ".join(f"`{name}`" for name in report.unchanged)
+            lines.append(f"Unchanged: {listed}.")
+        for failure in report.failures:
+            logger.warning("update failed for shared source %s", failure)
+            lines.append(f"❌ {failure}")
+        if report.unknown:
+            listed = ", ".join(f"`{name}`" for name in report.unknown)
+            lines.append(f"Not declared in `.dmx/shared-sources.yaml`: {listed}.")
         body = "\n".join(lines)
 
         collisions = detect_collisions(sources, root)
@@ -99,11 +105,15 @@ def register_sync_tools(app: FastMCP) -> None:
             collision_lines = "\n".join(f"⚠️ {c}" for c in collisions)
             collisions_block = f"\n\n**Collisions detected:**\n\n{collision_lines}"
 
-        if any_success:
-            return (
-                f"**Shared sources synced:**\n\n{body}{collisions_block}\n\n"
-                "Next: stage and commit the vendored files, then push and open a PR — "
-                "e.g.:\n```\ngit add .dmx/vendor/ .dmx/shared-sources.yaml\n"
-                'git commit -m "chore: sync shared sources"\ngit push\n```'
-            )
-        return f"**Shared source sync failed — nothing was vendored:**\n\n{body}{collisions_block}"
+        if not report.wrote_lock:
+            if report.failures:
+                return f"**Shared source update failed:**\n\n{body}{collisions_block}"
+            return f"**Shared sources:** nothing changed.\n\n{body}{collisions_block}"
+        summary = summary_markdown(report)
+        return (
+            f"**Shared sources updated:**\n\n{body}{collisions_block}\n\n"
+            f"**Summary for the PR description:**\n\n{summary}\n\n"
+            "Next: commit the lock, push, and open a PR with that summary — e.g.:\n"
+            "```\ngit add .dmx/shared-sources.lock .dmx/shared-sources.yaml\n"
+            'git commit -m "chore: update shared sources"\ngit push\n```'
+        )

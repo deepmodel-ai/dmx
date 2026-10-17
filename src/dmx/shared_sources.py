@@ -1,4 +1,4 @@
-"""Shared sources: org-wide loops/skills/validators vendored via ``/dmx/sync``.
+"""Shared sources: org-wide loops/skills/validators locked by ``/dmx/update-shared-sources``.
 
 See GH-27 for the full design. This module is the shared-sources equivalent
 of the small per-field readers in ``loop_tools.py`` (``_read_branch_base`` et
@@ -9,13 +9,15 @@ Config lives in its own file, ``.dmx/shared-sources.yaml`` — deliberately not
 folded into ``.dmx/config.md``, which carries ``alwaysApply: true`` and is
 injected into every prompt's context. ``shared_sources`` has exactly two
 consumers (the resolver functions in ``loop_tools.py``/``validator_runner.py``,
-and the ``/dmx/sync`` skill at sync time), neither of which needs it preloaded
+and the ``/dmx/update-shared-sources`` skill), neither of which needs it preloaded
 into every prompt.
 
-This module only *reads* declared sources and resolves paths — it never
-shells out to ``git`` itself. Cloning/fetching/locking is the ``/dmx/sync``
-skill's job (GH-27 phase 2); this phase only wires the resolver tier so it's
-ready to search ``.dmx/vendor/{name}/`` once something populates it.
+Since GH-85 a repo commits ``.dmx/shared-sources.lock`` — each source's
+commit and content hash — and the content is fetched into the git-ignored
+``.dmx/.cache/`` (see :mod:`dmx.source_cache`). :func:`source_root` resolves
+through the lock, fetching on first use. A source the lock does not cover
+yet, in a repo still on 0.5, resolves to its committed ``.dmx/vendor/{name}/``
+copy as before.
 """
 
 from __future__ import annotations
@@ -30,13 +32,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "LockEntry",
     "SharedSource",
     "SharedSourceError",
+    "lock_path",
     "parse_source_address",
+    "read_lock",
     "read_shared_sources",
     "source_root",
     "vendor_dir",
     "vendor_lock_path",
+    "write_lock",
 ]
 
 
@@ -192,6 +198,79 @@ def read_shared_sources(workspace_root: Path) -> list[SharedSource]:
     return sources
 
 
+@dataclass(frozen=True)
+class LockEntry:
+    """One source's entry in ``.dmx/shared-sources.lock``."""
+
+    name: str
+    source: str  # the declared address it was locked from
+    commit: str
+    hash: str  # "sha256:<hex>" of the tree at that commit
+
+
+_LOCK_HEADER = (
+    "# Written by /dmx/update-shared-sources. Commit this file; do not edit it by hand.\n"
+    "# dmx fetches each source at its commit into .dmx/.cache/ (git-ignored).\n"
+)
+
+
+def lock_path(workspace_root: Path) -> Path:
+    """``.dmx/shared-sources.lock``."""
+    return workspace_root / ".dmx" / "shared-sources.lock"
+
+
+def read_lock(workspace_root: Path) -> dict[str, LockEntry]:
+    """Entries of ``.dmx/shared-sources.lock`` by source name; empty when absent.
+
+    Raises:
+        SharedSourceError: If the file exists but is malformed.
+    """
+    path = lock_path(workspace_root)
+    if not path.exists():
+        return {}
+    try:
+        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise SharedSourceError(f"Could not parse {path}: {exc}") from exc
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SharedSourceError(f"{path} must be a mapping with a top-level `shared_sources`.")
+    entries = raw.get("shared_sources")
+    if entries is None:
+        return {}
+    if not isinstance(entries, dict):
+        raise SharedSourceError(f"`shared_sources` in {path} must be a mapping of names.")
+    locked: dict[str, LockEntry] = {}
+    for name, entry in entries.items():
+        if not isinstance(entry, dict) or not {"source", "commit", "hash"} <= entry.keys():
+            raise SharedSourceError(
+                f"{path}: entry `{name}` must have `source`, `commit` and `hash`. "
+                "Run `/dmx/update-shared-sources --all` to write it again."
+            )
+        locked[str(name)] = LockEntry(
+            name=str(name),
+            source=str(entry["source"]),
+            commit=str(entry["commit"]),
+            hash=str(entry["hash"]),
+        )
+    return locked
+
+
+def write_lock(workspace_root: Path, entries: list[LockEntry]) -> None:
+    """Write ``.dmx/shared-sources.lock`` with *entries*, in the order given."""
+    body = {
+        "shared_sources": {
+            entry.name: {"source": entry.source, "commit": entry.commit, "hash": entry.hash}
+            for entry in entries
+        }
+    }
+    text = _LOCK_HEADER + yaml.safe_dump(body, sort_keys=False, default_flow_style=False)
+    path = lock_path(workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def vendor_dir(workspace_root: Path, name: str) -> Path:
     """The local vendored path for a declared shared source, ``.dmx/vendor/{name}/``."""
     return workspace_root / ".dmx" / "vendor" / name
@@ -203,12 +282,26 @@ def vendor_lock_path(workspace_root: Path, name: str) -> Path:
 
 
 def source_root(workspace_root: Path, source: SharedSource) -> Path:
-    """The resolved search root for a vendored source: vendor dir + its ``subdir``.
+    """The resolved search root for a shared source: its tree + its ``subdir``.
 
-    ``/dmx/sync`` always clones the full source into ``.dmx/vendor/{name}/``;
+    When ``.dmx/shared-sources.lock`` has an entry for *source* locked from
+    the same address, that is the cached tree at the locked commit, fetched
+    on first use (see :func:`dmx.source_cache.ensure_fetched`). Otherwise it
+    is the 0.5 vendored copy, ``.dmx/vendor/{name}/``, which may not exist.
     ``subdir`` (from ``//<subdir>`` in the source address) narrows where
-    within that clone loops/skills/validators are actually searched for,
+    within that tree loops/skills/validators are actually searched for,
     mirroring how the ``git::...//<subdir>`` address works in Terraform.
+
+    Raises:
+        SharedSourceError: The lock is malformed, or a locked source cannot
+            be fetched or does not match its hash.
     """
-    root = vendor_dir(workspace_root, source.name)
+    entry = read_lock(workspace_root).get(source.name)
+    if entry is not None and entry.source == source.source:
+        # source_cache imports this module, so the import stays here.
+        from dmx.source_cache import ensure_fetched
+
+        root = ensure_fetched(workspace_root, source, entry)
+    else:
+        root = vendor_dir(workspace_root, source.name)
     return (root / source.subdir) if source.subdir else root

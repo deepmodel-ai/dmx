@@ -1,55 +1,62 @@
-"""``/dmx/sync`` mechanics: clone/fetch a declared shared source and vendor it.
+"""``/dmx/update-shared-sources`` mechanics: lock declared shared sources.
 
-See GH-27 (phase 2). This module holds the deterministic, git-mechanical
-half of ``/dmx/sync`` — cloning a source at its pinned ``ref``, resolving
-the commit it points to, copying its tree into ``.dmx/vendor/{name}/``, and
-writing the per-source lock file. No LLM judgment is needed for any of this
-(same reasoning that keeps validators and loop orchestration out of the
-agent's hands), so it's a plain, directly-testable Python module exposed to
-the ``/dmx/sync`` skill through one deterministic MCP tool
-(:func:`register_sync_tools`) rather than a sequence of raw shell commands
-the agent runs itself.
+See GH-27 for shared sources and GH-85 for locking. This module holds the
+deterministic, git-mechanical half of ``/dmx/update-shared-sources``:
+looking up the commit each source's ``ref`` points to, fetching that tree
+into the git-ignored cache (:mod:`dmx.source_cache`), checking its shape,
+hashing it, and writing ``.dmx/shared-sources.lock``. No LLM judgment is
+needed for any of this, so it's a plain, directly-testable module exposed to
+the skill through one MCP tool (:func:`dmx.sync_tools.register_sync_tools`).
 
-What this module deliberately does **not** do: commit or push the vendored
-files. That stays the agent's job, run from the skill, matching the
-existing convention that dmx's deterministic tools write files and skills
-commit them (e.g. ``draft-release-note`` writes ``.dmx/releases/{v}.md`` in
-one step, then commits it in the next).
+Only sources that are new or whose declared address changed are looked up
+again by default, so a floating ``?ref=main`` moves only when asked
+(``update_all`` or naming the source). The result includes a summary for the
+PR: old and new commit, a compare link, and the skills, loops and validators
+added, removed or changed, with loops and validators called out as code to
+review.
 
-Vendored content is a plain copy of the source's working tree at the
-resolved ref — not a nested git repository, not a submodule. The clone used
-to fetch it is scratch space in a temp directory and is discarded once the
-copy is made, so ``.dmx/vendor/{name}/`` never contains a ``.git`` of its
-own; every file under it is tracked by the *app repo's* own git history,
-consistent with "vendor-and-commit."
+What this module deliberately does **not** do: commit or push the lock.
+That stays the agent's job, run from the skill, matching the existing
+convention that dmx's deterministic tools write files and skills commit
+them.
 """
 
 from __future__ import annotations
 
-import json
-import shutil
-import subprocess
-import tempfile
-from dataclasses import dataclass
+import hashlib
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dmx.loop_state import current_branch
 from dmx.loop_tools import _read_branch_base  # noqa: PLC2701 — same package, no public API split
-from dmx.shared_sources import SharedSource, source_root, vendor_dir, vendor_lock_path
+from dmx.shared_sources import (
+    LockEntry,
+    SharedSource,
+    SharedSourceError,
+    read_lock,
+    read_shared_sources,
+    source_root,
+    write_lock,
+)
+from dmx.source_cache import (
+    SharedSourceFetchError,
+    ensure_fetched,
+    extract_commit,
+    resolve_commit,
+    tree_hash,
+)
 
 __all__ = [
+    "SourceChange",
     "SyncError",
-    "SyncResult",
+    "UpdateReport",
     "detect_collisions",
+    "fetch_shared_sources",
+    "lock_source",
     "require_non_base_branch_error",
-    "sync_source",
+    "update_shared_sources",
 ]
-
-# Network-bound (unlike the local-only git calls elsewhere in dmx), so a more
-# generous budget than e.g. _COMMIT_DMX_STATE_TIMEOUT_SECONDS in loop_tools.py —
-# but still bounded, so a hung clone (bad credentials prompting interactively,
-# an unreachable host) can't hang the whole MCP tool call indefinitely.
-_SYNC_TIMEOUT_SECONDS = 120
 
 # The category directories a shared source is expected to contain at least
 # one of. See "Directory structure a shared source must follow" in GH-27.
@@ -77,9 +84,9 @@ _APP_REPO_OWNER = "<app repo>"
 
 
 def require_non_base_branch_error(root: Path) -> str | None:
-    """Return an error message if ``/dmx/sync`` is being run from ``branch_base``.
+    """Return an error message if ``/dmx/update-shared-sources`` runs on ``branch_base``.
 
-    ``/dmx/sync`` produces a commit (the vendored files + lock), and every
+    ``/dmx/update-shared-sources`` produces a commit (the lock), and every
     other write path in dmx already enforces that commits go through a
     reviewed PR rather than landing directly on ``branch_base`` — the
     release loop, ``close-ticket``, ``check_pr_ready``'s dirty-tree check.
@@ -100,44 +107,22 @@ def require_non_base_branch_error(root: Path) -> str | None:
     if branch is None or branch != branch_base:
         return None
     return (
-        f"Cannot run `/dmx/sync` from `{branch_base}` — it commits vendored shared-source "
-        "files directly, and every other write path in dmx requires that go through a "
-        f"reviewed PR rather than landing on `{branch_base}` directly. Create a branch first "
-        "(e.g. `git checkout -b chore/sync-shared-sources`), then run `/dmx/sync` again."
+        f"Cannot run `/dmx/update-shared-sources` from `{branch_base}` — it commits "
+        "`.dmx/shared-sources.lock`, and every other write path in dmx requires that go "
+        f"through a reviewed PR rather than landing on `{branch_base}` directly. Create a "
+        "branch first (e.g. `git checkout -b chore/update-shared-sources`), then run "
+        "`/dmx/update-shared-sources` again."
     )
 
 
 class SyncError(Exception):
-    """Raised when cloning, checking out, or vendoring a shared source fails.
+    """Raised when fetching or locking a shared source fails.
 
     Always constructed with a message that names which of the three
     distinguishable failure causes applies (auth, missing ref, wrong-shaped
-    source) — see GH-27's ``/dmx/sync`` step 6 — never a generic
-    passthrough of a raw git error.
+    source) — see GH-27's sync step 6 — never a generic passthrough of a raw
+    git error.
     """
-
-
-@dataclass(frozen=True)
-class SyncResult:
-    """The outcome of successfully vendoring one declared shared source."""
-
-    name: str
-    source: str
-    resolved_sha: str
-    warning: str | None  # e.g. an unexpected-but-not-fatal shape observation
-
-
-def _run_git(args: list[str], cwd: Path, *, error_context: str) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=_SYNC_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise SyncError(f"{error_context}: timed out after {_SYNC_TIMEOUT_SECONDS}s") from exc
 
 
 def _check_source_shape(source_dir: Path, name: str) -> None:
@@ -146,8 +131,8 @@ def _check_source_shape(source_dir: Path, name: str) -> None:
     A source with zero of ``loops/``, ``skills/``, ``validators/`` is almost
     certainly the wrong repo, the wrong ``subdir``, or a source that was
     never meant to be a dmx shared source — one of the three failure causes
-    ``/dmx/sync`` must be able to tell apart (GH-27 step 6), not something to
-    silently vendor and let resolve to "not found" later with no context.
+    the update must be able to tell apart (GH-27 step 6), not something to
+    silently lock and let resolve to "not found" later with no context.
     """
     if not any((source_dir / category).is_dir() for category in _EXPECTED_CATEGORIES):
         raise SyncError(
@@ -197,100 +182,278 @@ def _check_skills_shape(source_dir: Path, name: str) -> None:
         )
 
 
-def sync_source(source: SharedSource, workspace_root: Path) -> SyncResult:
-    """Clone *source* at its pinned ``ref`` and vendor it into ``.dmx/vendor/{name}/``.
+def lock_source(source: SharedSource, workspace_root: Path) -> LockEntry:
+    """Look up *source*'s ``ref`` now, fetch that tree, and return its lock entry.
 
-    Clones into a scratch temp directory, checks out ``ref``, resolves the
-    commit it points to, copies the (sub)tree — excluding ``.git`` — into
-    ``.dmx/vendor/{name}/`` (replacing any previous contents), and writes
-    ``.dmx/vendor/{name}/.lock.json``.
+    The tree is checked for the shared-source shape and hashed. Nothing is
+    written to the lock file here.
 
     Raises:
-        SyncError: If cloning fails (likely auth or a bad URL), the ref
+        SyncError: The fetch failed (likely auth or a bad URL), the ref
             doesn't exist, the declared ``subdir`` doesn't exist, or the
-            resolved directory doesn't look like a dmx shared source.
+            tree doesn't look like a dmx shared source.
     """
-    with tempfile.TemporaryDirectory(prefix="dmx-sync-") as tmp:
-        clone_dir = Path(tmp) / "clone"
-
-        clone = _run_git(
-            ["clone", "--quiet", "--no-single-branch", source.url, str(clone_dir)],
-            cwd=Path(tmp),
-            error_context=f"Cloning shared source '{source.name}'",
+    try:
+        commit = resolve_commit(source)
+        # Fresh, so the hash written to the lock is of the real tree, not of a
+        # cached copy someone may have edited.
+        tree = extract_commit(workspace_root, source, commit, fresh=True)
+    except SharedSourceFetchError as exc:
+        raise SyncError(str(exc)) from exc
+    searched = (tree / source.subdir) if source.subdir else tree
+    if not searched.is_dir():
+        raise SyncError(
+            f"Subdir '{source.subdir}' declared for shared source '{source.name}' does not "
+            f"exist at ref '{source.ref}' ({source.url})."
         )
-        if clone.returncode != 0:
-            raise SyncError(
-                f"Could not clone shared source '{source.name}' from {source.url}: "
-                f"{clone.stderr.strip() or clone.stdout.strip()}. Confirm the URL is correct "
-                "and that this machine's git credentials (SSH key / PAT / `gh auth`) can "
-                "access it, then retry."
-            )
+    _check_source_shape(searched, source.name)
+    _check_skills_shape(searched, source.name)
+    return LockEntry(name=source.name, source=source.source, commit=commit, hash=tree_hash(tree))
 
-        checkout = _run_git(
-            ["checkout", "--quiet", source.ref],
-            cwd=clone_dir,
-            error_context=f"Checking out ref for shared source '{source.name}'",
-        )
-        if checkout.returncode != 0:
-            raise SyncError(
-                f"Ref '{source.ref}' not found in shared source '{source.name}' ({source.url}): "
-                f"{checkout.stderr.strip() or checkout.stdout.strip()}. It may have been "
-                "deleted, renamed, or force-pushed since `.dmx/shared-sources.yaml` was written — "
-                "confirm the ref still exists upstream and update the config if needed."
-            )
 
-        rev_parse = _run_git(
-            ["rev-parse", "HEAD"],
-            cwd=clone_dir,
-            error_context=f"Resolving commit SHA for shared source '{source.name}'",
-        )
-        if rev_parse.returncode != 0:
-            raise SyncError(
-                f"Could not resolve a commit SHA for shared source '{source.name}' after "
-                f"checkout: {rev_parse.stderr.strip()}"
-            )
-        resolved_sha = rev_parse.stdout.strip()
+@dataclass(frozen=True)
+class SourceChange:
+    """One source whose locked commit or address changed."""
 
-        checked_out_root = (clone_dir / source.subdir) if source.subdir else clone_dir
-        if not checked_out_root.is_dir():
-            raise SyncError(
-                f"Subdir '{source.subdir}' declared for shared source '{source.name}' does not "
-                f"exist at ref '{source.ref}' ({source.url})."
-            )
-        _check_source_shape(checked_out_root, source.name)
-        _check_skills_shape(checked_out_root, source.name)
+    name: str
+    url: str
+    previous: LockEntry | None
+    current: LockEntry
+    added: dict[str, list[str]] = field(default_factory=dict)
+    removed: dict[str, list[str]] = field(default_factory=dict)
+    changed: dict[str, list[str]] = field(default_factory=dict)
+    note: str | None = None  # e.g. the previous tree could not be fetched
 
-        dest = vendor_dir(workspace_root, source.name)
-        if dest.exists():
-            shutil.rmtree(dest)
-        dest.mkdir(parents=True)
-        for item in checked_out_root.iterdir():
-            if item.name == ".git":
+
+@dataclass(frozen=True)
+class UpdateReport:
+    """What ``/dmx/update-shared-sources`` did."""
+
+    changes: list[SourceChange]
+    unchanged: list[str]
+    failures: list[str]
+    removed: list[str]
+    unknown: list[str]
+
+    @property
+    def wrote_lock(self) -> bool:
+        return bool(self.changes or self.removed)
+
+
+def _digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
+    for item in files:
+        digest.update(item.relative_to(path).as_posix().encode() if path.is_dir() else b"")
+        digest.update(item.read_bytes())
+    return digest.hexdigest()
+
+
+def _category_items(searched: Path, category: str) -> dict[str, str]:
+    """Logical name -> content digest for one category of a source tree."""
+    directory = searched / category
+    if not directory.is_dir():
+        return {}
+    items: dict[str, str] = {}
+    for entry in sorted(directory.iterdir()):
+        if category == "skills":
+            if entry.is_file() and entry.suffix == ".md":
+                items[entry.stem.removeprefix("dmx-")] = _digest(entry)
+            elif entry.is_dir() and (entry / "SKILL.md").is_file():
+                items[entry.name.removeprefix("dmx-")] = _digest(entry)
+        elif entry.is_file() and entry.match(_CATEGORY_GLOB[category]):
+            items[entry.stem] = _digest(entry)
+    return items
+
+
+def _diff_trees(old: Path | None, new: Path) -> tuple[dict[str, list[str]], ...]:
+    added: dict[str, list[str]] = {}
+    removed: dict[str, list[str]] = {}
+    changed: dict[str, list[str]] = {}
+    for category in _EXPECTED_CATEGORIES:
+        before = _category_items(old, category) if old is not None else {}
+        after = _category_items(new, category)
+        if names := sorted(set(after) - set(before)):
+            added[category] = names
+        if names := sorted(set(before) - set(after)):
+            removed[category] = names
+        if names := sorted(n for n in set(before) & set(after) if before[n] != after[n]):
+            changed[category] = names
+    return added, removed, changed
+
+
+def _searched(tree: Path, source: SharedSource) -> Path:
+    return (tree / source.subdir) if source.subdir else tree
+
+
+def _describe_change(
+    workspace_root: Path, source: SharedSource, previous: LockEntry | None, current: LockEntry
+) -> SourceChange:
+    new_tree = _searched(ensure_fetched(workspace_root, source, current), source)
+    old_tree: Path | None = None
+    note = None
+    if previous is not None:
+        try:
+            old_tree = _searched(ensure_fetched(workspace_root, source, previous), source)
+        except SharedSourceError as exc:
+            note = f"Could not fetch the previous commit to compare: {exc}"
+    added, removed, changed = _diff_trees(old_tree, new_tree)
+    if note is not None:
+        added, removed, changed = {}, {}, {}
+    return SourceChange(
+        name=source.name,
+        url=source.url,
+        previous=previous,
+        current=current,
+        added=added,
+        removed=removed,
+        changed=changed,
+        note=note,
+    )
+
+
+def update_shared_sources(
+    workspace_root: Path, *, names: list[str] | None = None, update_all: bool = False
+) -> UpdateReport:
+    """Lock the declared shared sources and write ``.dmx/shared-sources.lock``.
+
+    A source is looked up again when it is new, its declared address
+    changed, it is named in *names*, or *update_all* is set. Every other
+    entry keeps its locked commit, so a floating ref never moves by
+    surprise. Entries for sources no longer declared are dropped. A failed
+    source keeps its previous entry. The lock is written only when something
+    changed.
+
+    Raises:
+        SharedSourceError: ``.dmx/shared-sources.yaml`` or the lock is
+            malformed.
+    """
+    sources = read_shared_sources(workspace_root)
+    lock = read_lock(workspace_root)
+    wanted = set(names or [])
+    declared = {source.name for source in sources}
+
+    entries: list[LockEntry] = []
+    changes: list[SourceChange] = []
+    unchanged: list[str] = []
+    failures: list[str] = []
+    for source in sources:
+        previous = lock.get(source.name)
+        stale = previous is None or previous.source != source.source
+        if not (stale or update_all or source.name in wanted):
+            assert previous is not None
+            entries.append(previous)
+            unchanged.append(source.name)
+            continue
+        try:
+            current = lock_source(source, workspace_root)
+        except SyncError as exc:
+            failures.append(f"`{source.name}`: {exc}")
+            if previous is not None:
+                entries.append(previous)
+            continue
+        entries.append(current)
+        if previous is not None and (previous.commit, previous.source) == (
+            current.commit,
+            current.source,
+        ):
+            unchanged.append(source.name)
+            continue
+        changes.append(_describe_change(workspace_root, source, previous, current))
+
+    removed = sorted(set(lock) - declared)
+    report = UpdateReport(
+        changes=changes,
+        unchanged=unchanged,
+        failures=failures,
+        removed=removed,
+        unknown=sorted(wanted - declared),
+    )
+    if report.wrote_lock:
+        write_lock(workspace_root, entries)
+    return report
+
+
+_GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
+
+
+def compare_link(url: str, old: str, new: str) -> str | None:
+    """A GitHub compare URL for two commits of *url*, or None for other hosts."""
+    match = _GITHUB_RE.search(url)
+    if match is None:
+        return None
+    owner, repo = match.groups()
+    return f"https://github.com/{owner}/{repo}/compare/{old}...{new}"
+
+
+_LABELS = {"skills": "Skills", "loops": "Loops", "validators": "Validators"}
+
+
+def summary_markdown(report: UpdateReport) -> str:
+    """The PR summary: each changed source, with loops and validators flagged."""
+    blocks: list[str] = []
+    for change in report.changes:
+        new = change.current.commit[:12]
+        if change.previous is None:
+            heading = f"**`{change.name}`**: locked at `{new}`"
+        else:
+            old = change.previous.commit[:12]
+            heading = f"**`{change.name}`**: `{old}` → `{new}`"
+            link = compare_link(change.url, change.previous.commit, change.current.commit)
+            if link:
+                heading += f" ([compare]({link}))"
+        lines = [heading]
+        if change.note:
+            lines.append(f"- {change.note}")
+        for category in _EXPECTED_CATEGORIES:
+            parts = []
+            for verb, found in (
+                ("added", change.added),
+                ("removed", change.removed),
+                ("changed", change.changed),
+            ):
+                if found.get(category):
+                    parts.append(f"{verb} " + ", ".join(f"`{n}`" for n in found[category]))
+            if not parts:
                 continue
-            target = dest / item.name
-            if item.is_dir():
-                # ignore_patterns(".git") also applies recursively to every
-                # subdirectory copytree descends into, not just this one —
-                # so a nested .git (e.g. a submodule checked out somewhere
-                # under skills/) never gets vendored either, not just the
-                # top-level one filtered by the `continue` above.
-                shutil.copytree(item, target, ignore=shutil.ignore_patterns(".git"))
-            else:
-                shutil.copy2(item, target)
+            label = _LABELS[category]
+            if category != "skills":
+                label = f"**{label} (code to review)**"
+            lines.append(f"- {label}: " + "; ".join(parts))
+        blocks.append("\n".join(lines))
+    if report.removed:
+        blocks.append("Dropped from the lock: " + ", ".join(f"`{n}`" for n in report.removed))
+    return "\n\n".join(blocks)
 
-        lock_path = vendor_lock_path(workspace_root, source.name)
-        lock_path.write_text(
-            json.dumps(
-                {"name": source.name, "source": source.source, "resolved_sha": resolved_sha},
-                indent=2,
+
+def fetch_shared_sources(workspace_root: Path) -> tuple[list[str], bool]:
+    """Fetch every locked source into the cache without changing the lock.
+
+    Returns one line per declared source and whether all of them are ready.
+    A declared source with no lock entry, or one locked from a different
+    address, is reported as needing ``/dmx/update-shared-sources``.
+    """
+    sources = read_shared_sources(workspace_root)
+    lock = read_lock(workspace_root)
+    lines: list[str] = []
+    ok = True
+    for source in sources:
+        entry = lock.get(source.name)
+        if entry is None or entry.source != source.source:
+            ok = False
+            lines.append(
+                f"✗ `{source.name}`: not in `.dmx/shared-sources.lock` for its current "
+                "address. Run `/dmx/update-shared-sources`."
             )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        return SyncResult(
-            name=source.name, source=source.source, resolved_sha=resolved_sha, warning=None
-        )
+            continue
+        try:
+            ensure_fetched(workspace_root, source, entry)
+        except SharedSourceError as exc:
+            ok = False
+            lines.append(f"✗ `{source.name}`: {exc}")
+            continue
+        lines.append(f"✓ `{source.name}` at `{entry.commit[:12]}`")
+    return lines, ok
 
 
 def _filenames(directory: Path, glob: str) -> set[str]:
@@ -369,7 +532,7 @@ def detect_collisions(sources: list[SharedSource], workspace_root: Path) -> list
     Returns:
         A sorted list of human-readable warning strings (empty if no
         collisions). Never raises — a collision is a warning, not a
-        failure; ``/dmx/sync`` still vendors and commits regardless.
+        failure; the lock is still written and committed regardless.
     """
     warnings: list[str] = []
     for category, app_rel_dir in _APP_CATEGORY_DIRS.items():
