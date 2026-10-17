@@ -347,7 +347,9 @@ def job_has_loop_runs(workspace_root: Path, job_id: str) -> bool:
 
 def state_path(workspace_root: Path, job_id: str, loop_name: str, task_id: str) -> Path:
     """Return the path for a loop run state file."""
-    return workspace_root / ".dmx" / "jobs" / job_id / f"{loop_name}-{task_id}.json"
+    # A component loop is named `<id>/<name>` (GH-90); a `/` would make a folder.
+    stem = loop_name.replace("/", "--")
+    return workspace_root / ".dmx" / "jobs" / job_id / f"{stem}-{task_id}.json"
 
 
 def _job_dir(workspace_root: Path, job_id: str) -> Path:

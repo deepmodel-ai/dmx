@@ -17,6 +17,7 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
+from dmx.component_config import component_skill_catalog, parse_validator_entry
 from dmx.components import ComponentSet, has_components, load_components
 from dmx.exceptions import WorkspaceRootInvalid
 from dmx.learnings import REPO_WIDE, waiting_counts, waiting_learnings
@@ -106,11 +107,12 @@ def editable_memory(root: Path) -> list[str]:
     return editable
 
 
-def _skills(root: Path) -> list[dict[str, Any]]:
+def _skills(root: Path, component_ids: list[str]) -> list[dict[str, Any]]:
     try:
         catalog = _skill_catalog(root)
     except SharedSourceError:
-        return []
+        catalog = []
+    catalog = component_skill_catalog(root, component_ids) + catalog
     return [
         {
             "name": name,
@@ -130,6 +132,32 @@ def _loop_names(root: Path) -> list[str]:
     except SharedSourceError:
         pass
     return sorted(names)
+
+
+def _component_validators(root: Path, component_ids: list[str]) -> list[dict[str, Any]]:
+    components = load_components(root)
+    used: dict[str, tuple[str, str, list[str]]] = {}
+    for component_id in component_ids:
+        component = components.get(component_id)
+        for loop_name, entries in sorted(
+            ((component.validators if component else None) or {}).items()
+        ):
+            if not isinstance(entries, list):
+                continue
+            for index, raw in enumerate(entries):
+                validator = parse_validator_entry(component_id, index, raw)
+                name = validator.tool.split("/", 1)[1]
+                used.setdefault(validator.tool, (component_id, name, []))[2].append(loop_name)
+    entries_out: list[dict[str, Any]] = []
+    for tool, (component_id, name, loops) in used.items():
+        entry: dict[str, Any] = {"name": tool, "loops": loops}
+        try:
+            entry["path"] = _shown(root, resolve_validator_path(name, root, component=component_id))
+        except ValidatorRunError as exc:
+            entry["path"] = None
+            entry["error"] = str(exc)
+        entries_out.append(entry)
+    return entries_out
 
 
 def _validators(root: Path) -> list[dict[str, Any]]:
@@ -202,8 +230,9 @@ def build_context(
             if job_id
             else []
         ),
-        "skills": _skills(root),
-        "validators": _validators(root),
+        "skills": _skills(root, [c.id for c in found.components]),
+        "validators": _validators(root)
+        + _component_validators(root, [c.id for c in found.components]),
         "waiting_learnings": [item.as_dict() for item in waiting],
         "waiting_counts": waiting_counts(root, exclude_job=job_id) if with_components else {},
     }

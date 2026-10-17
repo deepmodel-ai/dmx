@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from dmx.group_timeout import run_with_group_timeout
-from dmx.loop_schema import FailureHandling, LoopConfig, OnOptionalFailure
+from dmx.loop_schema import FailureHandling, LoopConfig, OnOptionalFailure, ValidatorConfig
 from dmx.loop_state import LoopOutcome, LoopStatus
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 
@@ -79,21 +79,35 @@ def _bundled_validators_dir() -> Path:
     return Path(str(pkg.files("dmx") / "validators"))
 
 
-def resolve_validator_path(name: str, workspace_root: Path) -> Path:
+def resolve_validator_path(
+    name: str, workspace_root: Path, *, component: str | None = None
+) -> Path:
     """Resolve a validator name to a script path.
 
-    App repo ``validators/{name}.py`` takes precedence, then declared
-    ``shared_sources`` in order (``.dmx/vendor/{source}/validators/{name}.py``
-    — see GH-27), then the bundled fallback shipped with dmx.
+    For a validator a component adds (GH-90), the component's own
+    ``validators/`` comes first. Then app repo ``validators/{name}.py``,
+    then declared ``shared_sources`` in order, then the bundled fallback
+    shipped with dmx.
 
     Raises:
         ValidatorRunError: If the validator is not found in any location.
     """
+    checked: list[Path] = []
+    if component is not None:
+        # Imported here: component_config imports the loop schema and tools.
+        from dmx.component_config import component_dirs  # noqa: PLC0415
+
+        for folder in component_dirs(workspace_root, component, "validators"):
+            path = folder / f"{name}.py"
+            checked.append(path)
+            if path.exists():
+                return path
+
     app_path = workspace_root / "validators" / f"{name}.py"
     if app_path.exists():
         return app_path
 
-    checked = [app_path]
+    checked.append(app_path)
     try:
         shared_sources = read_shared_sources(workspace_root)
     except SharedSourceError as exc:
@@ -152,6 +166,8 @@ def run_validator(
     goal_state: str,
     loop_context: dict[str, Any],
     timeout_seconds: int | None = None,
+    *,
+    component: str | None = None,
 ) -> dict[str, Any]:
     """Resolve and run a single validator via subprocess.
 
@@ -167,7 +183,7 @@ def run_validator(
     Raises:
         ValidatorRunError: If resolution, execution, or parsing fails.
     """
-    path = resolve_validator_path(name, workspace_root)
+    path = resolve_validator_path(name, workspace_root, component=component)
     limit = _effective_timeout(timeout_seconds)
 
     contract = {
@@ -215,6 +231,25 @@ def run_validator(
     return result
 
 
+def _owned_result(validator_cfg: ValidatorConfig, result: dict[str, Any]) -> dict[str, Any]:
+    """Name a component validator's result and checks after the component (GH-90)."""
+    owner = validator_cfg.owner
+    checks = [
+        {**check, "name": f"{owner}/{check['name']}"}
+        for check in result.get("checks") or []
+        if isinstance(check, dict) and isinstance(check.get("name"), str)
+    ]
+    if validator_cfg.require_reported and not checks:
+        checks = [
+            {
+                "name": validator_cfg.tool,
+                "pass": bool(result.get("pass")),
+                "message": result.get("message", ""),
+            }
+        ]
+    return {**result, "tool": validator_cfg.tool, "checks": checks}
+
+
 def run_validators(
     config: LoopConfig,
     workspace_root: Path,
@@ -230,22 +265,38 @@ def run_validators(
     """
     results: list[dict[str, Any]] = []
     for validator_cfg in config.validators:
+        owner = validator_cfg.owner
+        name = validator_cfg.tool.split("/", 1)[1] if owner else validator_cfg.tool
         try:
             result = run_validator(
-                validator_cfg.tool,
+                name,
                 workspace_root,
                 skill_outputs,
                 config.goal_state,
                 loop_context,
                 timeout_seconds=validator_cfg.timeout_seconds,
+                component=owner,
             )
+            if owner:
+                result = _owned_result(validator_cfg, result)
         except ValidatorRunError as exc:
             logger.warning("validator '%s' failed to run: %s", validator_cfg.tool, exc)
             result = {
                 "tool": validator_cfg.tool,
                 "pass": False,
                 "message": f"Validator error: {exc}",
-                "checks": [{"name": check.name, "pass": False} for check in validator_cfg.checks],
+                "checks": [{"name": check.name, "pass": False} for check in validator_cfg.checks]
+                or (
+                    [
+                        {
+                            "name": validator_cfg.tool,
+                            "pass": False,
+                            "message": f"Validator error: {exc}",
+                        }
+                    ]
+                    if validator_cfg.require_reported
+                    else []
+                ),
             }
         results.append(result)
     return results

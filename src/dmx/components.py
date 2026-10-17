@@ -9,7 +9,8 @@ monorepo::
     test: {cmd: make test, cwd: services/payments}   # optional (#89): run
                                                  # with ``sh -c`` from cwd,
                                                  # the repo root by default
-    validators: {validate: [no_float_money]}     # optional (#90)
+    validators: {validate: [no_float_money]}     # optional (#90): extra checks
+                                                 # per loop, see component_config
     ticket: {jira_project: PAY}                  # optional (#92)
 
 ``paths`` decide which component a file belongs to. They are

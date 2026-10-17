@@ -71,6 +71,16 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
+from dmx.component_config import (
+    component_dirs,
+    component_skill_catalog,
+    component_validators,
+    expand_reported_checks,
+    scope_refusal,
+    split_component_name,
+    ticket_component_ids,
+)
+from dmx.components import has_components
 from dmx.exceptions import AmbiguousActiveRun, WorkspaceRootInvalid
 from dmx.ide.rules_refresh import rules_reminder
 from dmx.loop_memory import append_session_note, read_memory_context
@@ -110,7 +120,7 @@ from dmx.loop_state import (
 )
 from dmx.repeat_until import evaluate_repeat_until
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
-from dmx.ticket_components import with_components_line
+from dmx.ticket_components import current_job, with_components_line
 from dmx.validator_runner import evaluate_validator_results, run_validators
 from dmx.workspace import ide_folder, resolve_workspace_root, with_skipped_dmx_note
 
@@ -282,6 +292,16 @@ def _resolve_skill(name: str, workspace_root: Path) -> ResolvedSkill | None:
     absolute-path-shaped name is never a real skill, only ever a path
     traversal attempt, so it's rejected before touching the filesystem.
     """
+    split = split_component_name(name)
+    if split is not None:
+        component_id, item = split
+        for skills_dir in component_dirs(workspace_root, component_id, "skills"):
+            resolved = _find_skill_in_dir(
+                skills_dir, [item, f"dmx-{item}"], workspace_root, recursive=False
+            )
+            if resolved is not None:
+                return resolved
+        return None
     if not _SKILL_NAME_RE.match(name):
         return None
 
@@ -324,6 +344,9 @@ def list_skills(workspace_root: Path) -> str:
         entries = _skill_catalog(workspace_root)
     except SharedSourceError as exc:
         return f"Error reading .dmx/shared-sources.yaml: {exc}"
+    if has_components(workspace_root):
+        ids = ticket_component_ids(workspace_root, current_job(workspace_root))
+        entries = component_skill_catalog(workspace_root, ids) + entries
     if not entries:
         return "No local or shared skills."
     bundled = _bundled_logical_names()
@@ -976,6 +999,17 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
     Raises:
         FileNotFoundError: If the loop is not found in any location.
     """
+    split = split_component_name(name)
+    if split is not None:
+        component_id, item = split
+        for loops_dir in component_dirs(workspace_root, component_id, "loops"):
+            path = loops_dir / f"{item}.yaml"
+            if path.exists():
+                return load_loop(path)
+        raise FileNotFoundError(
+            f"Loop '{name}' not found in .dmx/components/{component_id}/loops/."
+        )
+
     app_path = workspace_root / ".dmx" / "loops" / f"{name}.yaml"
     if app_path.exists():
         return load_loop(app_path)
@@ -1438,6 +1472,9 @@ def _start_loop(
         refusal = _validating_start_refusal(root)
         if refusal:
             return _StartedLoop(refusal)
+    refusal = scope_refusal(root, current_job(root), name)
+    if refusal:
+        return _StartedLoop(f"Error: {refusal}")
     try:
         config = _resolve_loop(name, root)
     except FileNotFoundError as exc:
@@ -1830,7 +1867,11 @@ def _apply_loop_outcome(
         "active_context_path": str(ticket_file(root, job_id, ACTIVE_CONTEXT_FILE)),
     }
 
+    added = component_validators(root, job_id, loop_name)
+    if added:
+        config = config.model_copy(update={"validators": [*config.validators, *added]})
     validator_results = run_validators(config, root, skill_outputs, loop_context)
+    config = expand_reported_checks(config, validator_results)
     decision = evaluate_validator_results(config, validator_results)
     outcome = decision["outcome"]
     next_status = decision["next_status"]
@@ -2334,6 +2375,9 @@ def register_loop_tools(app: FastMCP) -> None:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return f"Could not resolve a valid workspace root: {exc}"
+        refusal = scope_refusal(root, current_job(root), name)
+        if refusal and _resolve_skill(name, root) is not None:
+            return refusal
         try:
             resolved = _resolve_skill(name, root)
         except SharedSourceError as exc:

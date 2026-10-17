@@ -83,6 +83,12 @@ class ValidatorConfig(BaseModel):
     # 30 second cleanup gap. Bundled run_tests sets this above its own inner
     # limit so the runner does not kill the test command first.
     timeout_seconds: StrictInt | None = Field(default=None, ge=60)
+    # Set only for a validator a component adds (GH-90): the component id,
+    # whose folder ``tool``'s second part resolves in first.
+    owner: str | None = None
+    # A bare name in component.yaml: every check the validator reports is
+    # required, and one that reports none is judged by its own ``pass``.
+    require_reported: bool = False
 
     @field_validator("tool")
     @classmethod
