@@ -119,12 +119,15 @@ Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the 
 
 If that `spec.md` already exists, skip and note: "Spec already exists — skipping scaffold."
 
+**Components.** When `.dmx/components/` exists, the `components` line lists the components this ticket is about, by the names of their folders in `.dmx/components/`. Choose them from the ticket details from Step 3 and the request, using each `component.yaml`'s `description` and `paths`. If it is unclear which, ask the developer before writing the spec. Write `components: []` for a ticket about repo-wide files only. Leave the line out when the repo has no `.dmx/components/` folder.
+
 ```markdown
 ---
 ticket: {ticket_ref or ""}
 branch: {branch_name}
 summary: {summary}
 ticketing: {ticketing}
+components: [{component ids}]
 ---
 
 # {summary}

@@ -184,12 +184,15 @@ git checkout {branch_name}
 
 Write the ticket's `spec.md` in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill, or `.dmx/jobs/{job_id}/spec.md` when run directly, where `{job_id}` is `{ticket_ref}` when it is a real ticket id, else `{branch_name}`. Create the folder if needed. Do not write `.dmx/spec.md`.
 
+**Components.** When `.dmx/components/` exists, the `components` line lists the components this ticket is about, by the names of their folders in `.dmx/components/`. Choose them from the request and the ticket drafted in Step 5, using each `component.yaml`'s `description` and `paths`. If it is unclear which, ask the developer before writing the spec. Write `components: []` for a ticket about repo-wide files only. Leave the line out when the repo has no `.dmx/components/` folder.
+
 ```markdown
 ---
 ticket: {ticket_ref or ""}
 branch: {branch_name}
 summary: {summary}
 ticketing: {ticketing}
+components: [{component ids}]
 ---
 
 # {summary}

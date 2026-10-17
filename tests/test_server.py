@@ -55,6 +55,7 @@ class TestCreateApp:
         assert "update_shared_sources" in names
         assert "migrate_dmx_layout" in names
         assert "prune_jobs" in names
+        assert "get_context" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"

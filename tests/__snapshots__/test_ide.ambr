@@ -2,7 +2,7 @@
 # name: TestEmitAgentsRules.test_snapshot_agents_md
   '''
   <!-- deepmodel:dmx:start -->
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -12,7 +12,7 @@
 # ---
 # name: TestEmitAntigravityRules.test_snapshot_antigravity_rule_file
   '''
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   
   # Persona
   
@@ -23,7 +23,7 @@
 # name: TestEmitClaudeRules.test_snapshot_claude_md
   '''
   <!-- deepmodel:dmx:start -->
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -33,7 +33,7 @@
 # ---
 # name: TestEmitClaudeRules.test_snapshot_claude_rule_file
   '''
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   
   # Persona
   
@@ -44,7 +44,7 @@
 # name: TestEmitCopilotRules.test_snapshot_copilot_instructions
   '''
   <!-- deepmodel:dmx:start -->
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -55,7 +55,7 @@
 # name: TestEmitIdeRuleFiles.test_snapshot_cursor_agents_md
   '''
   <!-- deepmodel:dmx:start -->
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   # dmx — Active Rules
   
   - **system-prompt**: Always-apply engineering persona.
@@ -70,7 +70,7 @@
   alwaysApply: true
   ---
   
-  <!-- dmx-workflow-version: 0.6.0 -->
+  <!-- dmx-workflow-version: 0.7.0 -->
   
   # Persona
   

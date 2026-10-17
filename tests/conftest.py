@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
-if TYPE_CHECKING:
-    from pathlib import Path
+# The sample repos under fixtures/ carry their own tests, which belong to
+# them, not to dmx.
+collect_ignore_glob = ["fixtures/*"]
+
+REFERENCE_MONOREPO = Path(__file__).parent / "fixtures" / "reference-monorepo"
 
 
 @pytest.fixture(autouse=True)
@@ -103,3 +108,19 @@ def tmp_rules_dir(tmp_path: Path) -> Path:
     )
 
     return rules
+
+
+@pytest.fixture()
+def reference_monorepo(tmp_path: Path) -> Path:
+    """The reference monorepo (#81) in a fresh git repo, committed on ``main``."""
+    root = tmp_path / "mono"
+    shutil.copytree(REFERENCE_MONOREPO, root)
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+        ("add", "-A"),
+        ("commit", "-q", "-m", "reference monorepo"),
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    return root

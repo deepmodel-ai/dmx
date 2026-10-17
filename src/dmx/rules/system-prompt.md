@@ -39,6 +39,9 @@ Before every task, I MUST read the repo-wide memory bank files and the current t
   productContext.md      ← why the product exists, how it works    [durable]
   systemPatterns.md      ← architecture, design patterns           [durable]
   techContext.md         ← stack, dependencies, constraints         [durable]
+  components/<id>/       ← one folder per service or package (monorepos only)
+    component.yaml       ← description, paths, depends_on
+    *.md                 ← memory about that component                [durable]
   jobs/<job>/            ← one folder per ticket
     spec.md              ← requirements, Q&A, approach
     tasks.md             ← phased plan with checkboxes
@@ -46,6 +49,8 @@ Before every task, I MUST read the repo-wide memory bank files and the current t
 ```
 
 `spec.md`, `tasks.md` and `activeContext.md` belong to one ticket and live in its job folder, `.dmx/jobs/<job>/`. The current job is the one in the loop runtime instruction (its `Job:` and `Ticket files:` lines). Outside a loop, it is the folder whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still have them at the `.dmx/` root; dmx moves them into the job folder. They are committed with the branch and merged with the PR. Durable knowledge is promoted from the ticket's `activeContext.md` into the core files during `commit` and `create-pr`.
+
+**Components.** When `.dmx/components/` exists, the repo is split into components, and I do not read the fixed list above. Before every task I call `get_context` on `user-dmx` and read every file in its `memory_files` and `ticket_files`. It names the ticket's components, which also head every loop message (`Components: ...`). When the developer says the ticket also covers a component, or no longer covers one, I edit the `components` list in the ticket's `spec.md` frontmatter; a component whose files the branch changed always stays. When `.dmx/components/` does not exist, none of this applies.
 
 ## Auto-initialization
 

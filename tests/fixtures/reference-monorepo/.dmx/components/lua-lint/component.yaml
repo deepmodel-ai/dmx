@@ -1,0 +1,5 @@
+description: Lua line-length lint
+paths: ["tools/lua-lint/**"]
+test:
+  cmd: ./test.sh
+  cwd: tools/lua-lint

@@ -1,0 +1,2 @@
+description: Ledger service, balances in minor units
+paths: ["services/ledger/**"]

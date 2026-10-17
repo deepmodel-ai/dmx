@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **(GH-86)** Components: a monorepo can declare each service or package in `.dmx/components/<id>/component.yaml`, with a required `description` and `paths`, and optional `depends_on`, `test`, `validators` and `ticket` that later 0.7 releases use. `paths` are gitignore-style globs from the repo root, and when they nest, such as `services/payments/**` and `services/payments/sdk/**`, the most specific one owns the file; files no component matches are repo-wide. A ticket's components are the `components` list in its `spec.md` frontmatter, which `create-ticket`, `derive-ticket`, `create-branch` and `/dmx/hotfix` write and ask about when unclear, plus every component whose files the branch changed (committed or not, both sides of a rename, never `.dmx/` itself). With no list in the spec, the component holding the folder the IDE opened is used. In a repo with components, the first line of every `run_loop`, `loop_advance`, `loop_continue` and `loop_status` message names them, such as `Components: ledger (.dmx/components/ledger/), payments (.dmx/components/payments/)`, or `Components: none (repo-wide)`; editing the list corrects it on the next message. A new `get_context` tool returns the ticket's components and why each is included, the repo-wide files it changed, the memory files to read (repo-wide, then each component's `*.md`), the ticket's files, and the skills and validators that apply with their paths. The rule calls it before a task when `.dmx/components/` exists, and a broken `component.yaml` is skipped and named once. A repo without `.dmx/components/` behaves as before. The rule changed, so the workflow version is 0.7.0; run `/dmx/upgrade` once after updating.
+
 ## [0.6.0] — 2026-10-17
 
 **Upgrading from 0.5.** 0.6 changes the `.dmx/` layout, so each repo migrates once:

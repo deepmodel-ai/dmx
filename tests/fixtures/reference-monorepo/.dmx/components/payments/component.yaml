@@ -1,0 +1,3 @@
+description: Payment processing service
+paths: ["services/payments/**"]
+depends_on: [ledger]

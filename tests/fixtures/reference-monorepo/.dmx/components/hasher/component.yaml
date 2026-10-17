@@ -1,0 +1,2 @@
+description: Stable content hashes
+paths: ["crates/hasher/**"]
