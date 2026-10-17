@@ -284,24 +284,33 @@ def vendor_lock_path(workspace_root: Path, name: str) -> Path:
 def source_root(workspace_root: Path, source: SharedSource) -> Path:
     """The resolved search root for a shared source: its tree + its ``subdir``.
 
-    When ``.dmx/shared-sources.lock`` has an entry for *source* locked from
-    the same address, that is the cached tree at the locked commit, fetched
-    on first use (see :func:`dmx.source_cache.ensure_fetched`). Otherwise it
-    is the 0.5 vendored copy, ``.dmx/vendor/{name}/``, which may not exist.
-    ``subdir`` (from ``//<subdir>`` in the source address) narrows where
-    within that tree loops/skills/validators are actually searched for,
-    mirroring how the ``git::...//<subdir>`` address works in Terraform.
+    When ``.dmx/shared-sources.lock`` has an entry for *source*, that is the
+    cached tree at the locked commit, fetched on first use (see
+    :func:`dmx.source_cache.ensure_fetched`). The lock is the only source of
+    truth: if ``shared-sources.yaml`` changed the address since, the locked
+    address and commit are still used until ``/dmx/update-shared-sources``
+    runs. Without an entry it is the 0.5 vendored copy,
+    ``.dmx/vendor/{name}/``, which may not exist. ``subdir`` (from
+    ``//<subdir>`` in the address) narrows where within that tree
+    loops/skills/validators are actually searched for, mirroring how the
+    ``git::...//<subdir>`` address works in Terraform.
 
     Raises:
         SharedSourceError: The lock is malformed, or a locked source cannot
             be fetched or does not match its hash.
     """
     entry = read_lock(workspace_root).get(source.name)
-    if entry is not None and entry.source == source.source:
-        # source_cache imports this module, so the import stays here.
-        from dmx.source_cache import ensure_fetched
-
-        root = ensure_fetched(workspace_root, source, entry)
-    else:
+    if entry is None:
         root = vendor_dir(workspace_root, source.name)
-    return (root / source.subdir) if source.subdir else root
+        return (root / source.subdir) if source.subdir else root
+    # source_cache imports this module, so the import stays here.
+    from dmx.source_cache import ensure_fetched
+
+    locked = source
+    if entry.source != source.source:
+        url, subdir, ref = parse_source_address(entry.source)
+        locked = SharedSource(
+            name=source.name, source=entry.source, url=url, subdir=subdir, ref=ref
+        )
+    root = ensure_fetched(workspace_root, locked, entry)
+    return (root / locked.subdir) if locked.subdir else root

@@ -138,6 +138,22 @@ class TestUpdateWritesTheLock:
         assert [change.name for change in report.changes] == ["acme"]
         assert read_lock(workspace)["acme"].commit == v2
 
+    def test_an_edited_address_keeps_the_locked_tree_until_updated(self, tmp_path: Path) -> None:
+        repo = tmp_path / "skills-repo"
+        _source_repo(repo, {"skills/a.md": _SKILL.format(text="locked")})
+        other = tmp_path / "other-repo"
+        _source_repo(other, {"skills/b.md": _SKILL.format(text="other")})
+        workspace = tmp_path / "app"
+        _declare(workspace, {"acme": f"git::{repo}?ref=main"})
+        update_shared_sources(workspace)
+
+        _declare(workspace, {"acme": f"git::{other}?ref=main"})  # not updated yet
+        root = source_root(workspace, _source(workspace, "acme"))
+
+        assert (root / "skills" / "a.md").is_file()
+        lines, ok = fetch_shared_sources(workspace)
+        assert not ok and "not in `.dmx/shared-sources.lock`" in lines[0]
+
     def test_a_source_no_longer_declared_is_dropped(self, tmp_path: Path) -> None:
         repo = tmp_path / "skills-repo"
         _source_repo(repo, {"skills/a.md": _SKILL.format(text="a")})
