@@ -159,6 +159,8 @@ Do not copy-paste commit messages or spec sections verbatim. Synthesise into one
 
 If the PR is small and straightforward, write "Review the full diff — it is small."
 
+If the commits from Step 6 include the release loop's job cleanup, titled like `chore: remove 3 finished jobs` (or `chore: remove 1 finished job`), add one line naming that commit by its title: "The `{title}` commit only deletes finished job folders under `.dmx/jobs/`; skip it." A repo template without a Review focus section gets the line in its closest section. Do not list that commit under Changes.
+
 ## Step 9 — Write the Changes section
 
 Bullet list of meaningful changes from the reviewer's perspective. One bullet per logical concern, not one per commit. Group related commits. Be specific — file names, config keys, function names where useful. If `tasks.md` is available, use completed phase names to organise bullets. Do not list trivial formatting or whitespace changes.

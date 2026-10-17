@@ -32,7 +32,7 @@ spec  →  plan  →  dev  →  validate  →  release
 | **plan** | Turns the spec into a phased `tasks.md` | The plan has phases and real tasks |
 | **dev** | Implements one phase at a time and commits it, until every phase is done | Tests pass |
 | **validate** | Reviews the change for completeness, code quality, and security | Tests pass, the change matches the spec, no regressions |
-| **release** | Syncs the memory bank and opens the PR | The PR exists and memory is committed |
+| **release** | Removes finished jobs older than 30 days, syncs the memory bank, and opens the PR | The PR exists and memory is committed |
 
 Each loop pauses after every skill so you can review. Run `/dmx/loop-continue` to move on. Validators run deterministically, outside the model: a required check that fails stops the loop and tells you why. When a loop passes, the next one starts on its own.
 

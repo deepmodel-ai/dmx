@@ -108,6 +108,7 @@ A state file is an active loop when its `status` is `running`, `paused`, `iterat
 | `/dmx/implement-next-phase` | Execute full next phase, stop |
 | `/dmx/implement-next-task` | Execute single next task, stop |
 | `/dmx/validate` | Validate implementation against spec |
+| `/dmx/prune-jobs` | Remove finished jobs from `.dmx/jobs/` in one commit |
 | `/dmx/create-pr` | Full memory sync, draft PR description, open PR |
 | `/dmx/close-ticket` | External cleanup: close ticket, delete branch |
 | `/dmx/draft-release-note` | Generate release notes |

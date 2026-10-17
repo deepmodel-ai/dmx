@@ -229,9 +229,16 @@ class TestFullPipeline:
             msg = await call("loop_continue")
             assert "chaining automatically to **release**" in msg.lower()
             assert "get_skill_definition" in msg
+            assert "prune-jobs" in msg
+
+            # --- release (2 skills; on_complete has no trigger_loop) ---
+            msg = await call(
+                "loop_advance", output="no finished jobs to remove", skill="prune-jobs"
+            )
+            assert "paused" in msg.lower()
+            msg = await call("loop_continue")
             assert "create-pr" in msg
 
-            # --- release (1 skill; on_complete has no trigger_loop) ---
             # create-pr does its own memory-bank sync + commit (Steps 4-5) —
             # update-memory is intentionally NOT chained after it, since that
             # left dangling uncommitted .dmx/ changes after the PR was
@@ -649,6 +656,8 @@ class TestReleaseSnapshot:
                 return await _call(client, tool, tmp_path, **kwargs)
 
             await call("run_loop", name="release")
+            await call("loop_advance", output="no finished jobs to remove", skill="prune-jobs")
+            await call("loop_continue")
             await call("snapshot_loop_for_pr")
             message = await call("loop_advance", output="opened PR #42", skill="create-pr")
 
@@ -658,7 +667,7 @@ class TestReleaseSnapshot:
         assert state["status"] == "complete"
         assert state["outcome"] is None
         assert state["validator_results"] == []
-        assert state["skills_completed"] == ["create-pr"]
+        assert state["skills_completed"] == ["prune-jobs", "create-pr"]
 
     @pytest.mark.asyncio
     async def test_loop_continue_records_check_pr_ready(
@@ -676,6 +685,8 @@ class TestReleaseSnapshot:
                 return await _call(client, tool, tmp_path, **kwargs)
 
             await call("run_loop", name="release")
+            await call("loop_advance", output="no finished jobs to remove", skill="prune-jobs")
+            await call("loop_continue")
             await call("snapshot_loop_for_pr")
             await call("loop_advance", output="opened PR #42", skill="create-pr")
             message = await call("loop_continue")
@@ -702,13 +713,17 @@ class TestReleaseSnapshot:
                 return await _call(client, tool, tmp_path, **kwargs)
 
             await call("run_loop", name="release")
+            await call("loop_advance", output="no finished jobs to remove", skill="prune-jobs")
+            await call("loop_continue")
             await call("snapshot_loop_for_pr")
             await call("loop_advance", output="opened PR #42", skill="create-pr")
 
             await call("run_loop", name="validate")
             await call("loop_advance", output="all checks green", skill="validate")
             chained = await call("loop_continue")
-            assert "create-pr" in chained
+            assert "prune-jobs" in chained
+            await call("loop_advance", output="no finished jobs to remove", skill="prune-jobs")
+            await call("loop_continue")
 
             await call("snapshot_loop_for_pr")
             message = await call("loop_advance", output="opened PR #43", skill="create-pr")

@@ -1,9 +1,10 @@
 name: release
 skills:
+  - prune-jobs
   - create-pr
 trigger:
   type: on_complete
-goal_state: "PR created, ticket transitioned to review, memory bank updated"
+goal_state: "Finished jobs removed, PR created, ticket transitioned to review, memory bank updated"
 validators:
   - tool: check_pr_ready
     checks:

@@ -219,6 +219,66 @@ def fetch_shared_sources(*, workspace_root: Path | None) -> None:
         raise SystemExit(1)
 
 
+def _parse_days(_ctx: click.Context, _param: click.Parameter, value: str) -> int:
+    days = value.strip().removesuffix("d")
+    if not days.isdigit():
+        raise click.BadParameter(f"{value!r} is not a number of days, like 30d or 7.")
+    return int(days)
+
+
+@main.command(name="prune-jobs")
+@click.option(
+    "--older-than",
+    "older_than_days",
+    default="30d",
+    show_default=True,
+    callback=_parse_days,
+    help="Remove finished jobs whose newest run finished longer ago than this, e.g. 7d.",
+)
+@click.option("--dry-run", is_flag=True, help="Show what would be removed and change nothing.")
+@click.option(
+    "--workspace-root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="A folder in the repo (default: the current directory). Its .dmx/ is found from there.",
+)
+def prune_jobs(*, older_than_days: int, dry_run: bool, workspace_root: Path | None) -> None:
+    """Remove finished jobs from .dmx/jobs/ in one commit.
+
+    A job is finished when all its loop runs are, and it is on branch_base.
+    The current ticket, jobs with open learnings or decisions, and jobs with
+    uncommitted changes are kept. The release loop runs this before create-pr.
+    """
+    from datetime import timedelta
+
+    from dmx.job_pruning import PruneError, plan_prune
+    from dmx.job_pruning import prune_jobs as prune
+    from dmx.workspace import find_dmx_root
+
+    root, _skipped = find_dmx_root((workspace_root or Path.cwd()).resolve())
+    older_than = timedelta(days=older_than_days)
+    try:
+        plan = plan_prune(root, older_than) if dry_run else prune(root, older_than)
+    except PruneError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if plan.blocked is not None:
+        click.echo(plan.blocked, err=True)
+        raise SystemExit(1)
+
+    count = len(plan.removes)
+    noun = "job" if count == 1 else "jobs"
+    if not plan.removes:
+        click.echo("No finished jobs to remove.")
+    elif dry_run:
+        click.echo(f"Would remove {count} finished {noun}: {', '.join(plan.removes)}")
+    else:
+        click.echo(f"Removed {count} finished {noun} in {plan.commit}: {', '.join(plan.removes)}")
+    if plan.kept:
+        click.echo("Kept:")
+        for job, reason in plan.kept:
+            click.echo(f"  {job}: {reason}")
+
+
 @main.command()
 def version() -> None:
     """Print version and exit."""

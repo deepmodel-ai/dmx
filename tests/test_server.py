@@ -19,7 +19,7 @@ class TestCreateApp:
     def test_registers_all_bundled_skills(self) -> None:
         app = create_app()
         prompts = asyncio.run(app.list_prompts())
-        assert len(prompts) == 28
+        assert len(prompts) == 29
 
     def test_all_prompt_names_are_valid_slugs(self) -> None:
         import re  # noqa: PLC0415
@@ -54,6 +54,7 @@ class TestCreateApp:
         assert "get_skill_definition" in names
         assert "update_shared_sources" in names
         assert "migrate_dmx_layout" in names
+        assert "prune_jobs" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"
