@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-16
+
 ### Added
 
 - **(GH-82)** `run_tests` runs `go test ./...` when the repo root has a `go.mod`. It checks for `go.mod` after `pyproject.toml`, a `package.json` test script, and a `Makefile` test target, so a repo that already ran one of those keeps the same command. When `go` is not installed, the result says "Test command `go test ./...` not found on PATH", not that tests failed.
