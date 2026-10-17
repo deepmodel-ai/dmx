@@ -83,6 +83,8 @@ Conflicts detected. Resolve the following files manually:
 {list of conflicting files}
 {if every conflicting file is a ticket file — .dmx/spec.md, .dmx/tasks.md, .dmx/activeContext.md, or a file under .dmx/jobs/:}
 These are dmx ticket files, moved in the 0.6 layout change. Keep this branch's version of each (`git add <file>`); a root file left this way is moved into its job folder on the next loop step.
+{if a conflicting file is a memory file — .dmx/*.md or .dmx/components/*/*.md — or another ticket's activeContext.md:}
+Both sides edited memory. Merge the two versions by hand: keep every learning once. If both sides folded in the same learning, keep one copy; if both marked the same item (`→ owner, ref`), keep one mark.
 
 After resolving:
 - For merge:  git add . && git merge --continue

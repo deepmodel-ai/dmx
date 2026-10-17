@@ -230,3 +230,129 @@ class TestRuleAndSkills:
         assert "components: [{component ids}]\n---" in text
         assert "ask the developer before writing the spec" in text
         assert "Leave the line out when the repo has no `.dmx/components/` folder." in text
+
+
+def _job_inbox(root: Path, job: str, items: str) -> None:
+    folder = root / ".dmx" / "jobs" / job
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "activeContext.md").write_text(
+        f"## Open Learnings\n{items}\n## Open Decisions\n\n## Session Notes\n", encoding="utf-8"
+    )
+
+
+class TestMemoryScope:
+    @pytest.mark.asyncio
+    async def test_a_payments_ticket_also_reads_ledger(self, reference_monorepo: Path) -> None:
+        _ticket(reference_monorepo, "[payments]")
+        (reference_monorepo / ".dmx/components/payments/techContext.md").write_text(
+            "# Payments\n", encoding="utf-8"
+        )
+
+        async with Client(create_app()) as client:
+            context = await _call(client, "get_context", reference_monorepo)
+
+        assert context["memory_files"] == [
+            ".dmx/systemPatterns.md",
+            ".dmx/components/payments/techContext.md",
+            ".dmx/components/ledger/systemPatterns.md",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_ledger_ticket_does_not_read_payments(self, reference_monorepo: Path) -> None:
+        _ticket(reference_monorepo, "[ledger]")
+        (reference_monorepo / ".dmx/components/payments/techContext.md").write_text(
+            "# Payments\n", encoding="utf-8"
+        )
+
+        async with Client(create_app()) as client:
+            context = await _call(client, "get_context", reference_monorepo)
+
+        assert context["memory_files"] == [
+            ".dmx/systemPatterns.md",
+            ".dmx/components/ledger/systemPatterns.md",
+        ]
+
+    @pytest.mark.parametrize(
+        ("changed", "editable"),
+        [
+            (["services/ledger/ledger.go"], ["ledger"]),
+            (["services/ledger/ledger.go", ".dmx/loops/deploy.yaml"], ["ledger", "repo-wide"]),
+            (["validators/no_floats.py"], ["repo-wide"]),
+            ([".dmx/shared-sources.yaml"], ["repo-wide"]),
+            ([".dmx/systemPatterns.md", ".dmx/components/ledger/x.md"], []),
+            (["Makefile"], []),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_editable_memory(
+        self, reference_monorepo: Path, changed: list[str], editable: list[str]
+    ) -> None:
+        _ticket(reference_monorepo, "[payments]")
+        for rel in changed:
+            path = reference_monorepo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n")
+
+        async with Client(create_app()) as client:
+            context = await _call(client, "get_context", reference_monorepo)
+
+        assert context["editable_memory"] == editable
+
+    @pytest.mark.asyncio
+    async def test_waiting_learnings_for_the_ticket_and_its_dependencies(
+        self, reference_monorepo: Path
+    ) -> None:
+        _ticket(reference_monorepo, "[payments]")
+        _job_inbox(
+            reference_monorepo,
+            "GH-1",
+            "- [ledger] Balances never go negative.\n- [billing-ui] Use cents.\n"
+            "- [repo-wide] One queue.\n- [ledger] Done → ledger, #3\n",
+        )
+        _job_inbox(reference_monorepo, "GH-7", "- [payments] The ticket's own note.\n")
+
+        async with Client(create_app()) as client:
+            context = await _call(client, "get_context", reference_monorepo)
+
+        assert context["waiting_learnings"] == [
+            {
+                "job": "GH-1",
+                "owner": "ledger",
+                "section": "Open Learnings",
+                "text": "Balances never go negative.",
+            },
+            {
+                "job": "GH-1",
+                "owner": "repo-wide",
+                "section": "Open Learnings",
+                "text": "One queue.",
+            },
+        ]
+        assert context["waiting_counts"] == {"billing-ui": 1, "ledger": 1, "repo-wide": 1}
+
+    @pytest.mark.asyncio
+    async def test_without_components_memory_stays_repo_wide(self, tmp_path: Path) -> None:
+        _git(tmp_path, "init", "-q", "-b", "main")
+        (tmp_path / ".dmx").mkdir()
+        (tmp_path / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        _job_inbox(tmp_path, "GH-1", "- Untagged.\n")
+
+        async with Client(create_app()) as client:
+            context = await _call(client, "get_context", tmp_path)
+
+        assert context["editable_memory"] == ["repo-wide"]
+        assert context["waiting_learnings"] == []
+        assert context["waiting_counts"] == {}
+
+    @pytest.mark.asyncio
+    async def test_waiting_for_one_owner(self, reference_monorepo: Path) -> None:
+        _ticket(reference_monorepo, "[payments]")
+        _job_inbox(reference_monorepo, "GH-1", "- [billing-ui] Use cents.\n- [ledger] Other.\n")
+
+        async with Client(create_app()) as client:
+            context = await _call(
+                client, "get_context", reference_monorepo, waiting_for=["billing-ui"]
+            )
+
+        assert [item["text"] for item in context["waiting_learnings"]] == ["Use cents."]

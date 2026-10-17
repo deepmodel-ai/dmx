@@ -10,7 +10,7 @@ arguments:
 
 You are removing finished job folders from `.dmx/jobs/` before the PR opens. Each merged ticket leaves its folder there; this keeps the folder from growing without end. Git history keeps the files. Follow every step in order.
 
-A job is removed when all its loop runs finished, its folder is on `branch_base` (its PR merged), and its newest run finished more than `older_than` ago. dmx never removes the current ticket, a job with an unfinished run, a job whose `activeContext.md` still has Open Learnings or Open Decisions, or a job with uncommitted changes.
+A job is removed when all its loop runs finished, its folder is on `branch_base` (its PR merged), and its newest run finished more than `older_than` ago. dmx never removes the current ticket, a job with an unfinished run, a job whose `activeContext.md` still has open learnings or decisions not yet marked as folded (`→ owner, ref`), or a job with uncommitted changes.
 
 ## Step 1 — Remove finished jobs
 

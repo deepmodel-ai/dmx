@@ -58,6 +58,7 @@ class TestCreateApp:
         assert "get_context" in names
         assert "detect_components" in names
         assert "add_component" in names
+        assert "mark_learnings_folded" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"

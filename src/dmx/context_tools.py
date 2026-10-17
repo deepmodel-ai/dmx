@@ -17,8 +17,9 @@ from fastmcp import (
     FastMCP,  # noqa: TCH002 — needed at runtime for FastMCP annotation resolution
 )
 
-from dmx.components import has_components
+from dmx.components import ComponentSet, has_components, load_components
 from dmx.exceptions import WorkspaceRootInvalid
+from dmx.learnings import REPO_WIDE, waiting_counts, waiting_learnings
 from dmx.loop_schema import load_loops_dir
 from dmx.loop_state import TICKET_FILES, ticket_file
 from dmx.loop_tools import (  # noqa: PLC2701 — same package, no public API split
@@ -27,17 +28,33 @@ from dmx.loop_tools import (  # noqa: PLC2701 — same package, no public API sp
     _skill_catalog,
 )
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
-from dmx.ticket_components import TicketComponents, current_job, ticket_components
+from dmx.ticket_components import (
+    TicketComponents,
+    changed_files,
+    current_job,
+    ticket_components,
+)
 from dmx.validator_runner import ValidatorRunError, resolve_validator_path
 from dmx.workspace import ide_folder, resolve_workspace_root
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["CORE_MEMORY_FILES", "build_context", "register_context_tools"]
+__all__ = ["CORE_MEMORY_FILES", "build_context", "editable_memory", "register_context_tools"]
 
 # The repo-wide memory files, in the order the rule lists them.
 CORE_MEMORY_FILES = ("projectbrief.md", "productContext.md", "systemPatterns.md", "techContext.md")
+
+# Changing any of these is a change to the repo-wide dmx setup, which lets a
+# PR edit repo-wide memory too (GH-88). Memory edits themselves don't count.
+_REPO_WIDE_SETUP = (
+    ".dmx/config.md",
+    ".dmx/loops/",
+    ".dmx/skills/",
+    "validators/",
+    ".dmx/shared-sources.yaml",
+    ".dmx/shared-sources.lock",
+)
 
 
 def _shown(root: Path, path: Path) -> str:
@@ -48,7 +65,17 @@ def _shown(root: Path, path: Path) -> str:
         return str(path)
 
 
-def _memory_files(root: Path, found: TicketComponents) -> list[str]:
+def _with_dependencies(found: TicketComponents, components: ComponentSet) -> list[str]:
+    """The ticket's component ids, then the ids they directly depend on, each once."""
+    ids = [component.id for component in found.components]
+    for component in found.components:
+        for dep in component.depends_on:
+            if dep not in ids and components.get(dep) is not None:
+                ids.append(dep)
+    return ids
+
+
+def _memory_files(root: Path, ids: list[str]) -> list[str]:
     dmx = root / ".dmx"
     core = [dmx / name for name in CORE_MEMORY_FILES if (dmx / name).is_file()]
     others = sorted(
@@ -57,10 +84,26 @@ def _memory_files(root: Path, found: TicketComponents) -> list[str]:
         if path.name != "config.md" and path.name not in CORE_MEMORY_FILES
     )
     files = [_shown(root, path) for path in (*core, *others)]
-    for component in found.components:
-        folder = root / component.folder
+    for component_id in ids:
+        folder = root / ".dmx" / "components" / component_id
         files.extend(_shown(root, path) for path in sorted(folder.glob("*.md")))
     return files
+
+
+def editable_memory(root: Path) -> list[str]:
+    """The memory a PR from this branch may edit (GH-88).
+
+    The components whose files the branch changed, plus ``repo-wide`` when
+    it also changes the repo-wide dmx setup. Without components, all memory
+    is repo-wide, as before.
+    """
+    if not has_components(root):
+        return [REPO_WIDE]
+    owners, _repo_wide = load_components(root).components_for(changed_files(root))
+    editable = [owner.id for owner in owners]
+    if any(path.startswith(_REPO_WIDE_SETUP) for path in changed_files(root, include_dmx=True)):
+        editable.append(REPO_WIDE)
+    return editable
 
 
 def _skills(root: Path) -> list[dict[str, Any]]:
@@ -110,12 +153,28 @@ def _validators(root: Path) -> list[dict[str, Any]]:
     return entries
 
 
-def build_context(root: Path, *, folder: Path | None = None) -> dict[str, Any]:
-    """Everything ``get_context`` returns, for *root*."""
+def build_context(
+    root: Path, *, folder: Path | None = None, waiting_for: list[str] | None = None
+) -> dict[str, Any]:
+    """Everything ``get_context`` returns, for *root*.
+
+    ``waiting_for`` replaces whose waiting learnings are listed, for
+    ``/dmx/update-memory <owner>``.
+    """
     job_id = current_job(root)
     with_components = has_components(root)
     found = (
         ticket_components(root, job_id, folder=folder) if with_components else TicketComponents()
+    )
+    read_ids = _with_dependencies(found, load_components(root)) if with_components else []
+    waiting = (
+        waiting_learnings(
+            root,
+            set(waiting_for) if waiting_for is not None else {*read_ids, REPO_WIDE},
+            exclude_job=job_id,
+        )
+        if with_components
+        else []
     )
     return {
         "job_id": job_id,
@@ -136,7 +195,8 @@ def build_context(root: Path, *, folder: Path | None = None) -> dict[str, Any]:
             {"path": skipped.path, "reason": skipped.reason} for skipped in found.skipped
         ],
         "repo_wide_files": list(found.repo_wide_files),
-        "memory_files": _memory_files(root, found),
+        "memory_files": _memory_files(root, read_ids),
+        "editable_memory": editable_memory(root),
         "ticket_files": (
             [_shown(root, ticket_file(root, job_id, name)) for name in TICKET_FILES]
             if job_id
@@ -144,7 +204,8 @@ def build_context(root: Path, *, folder: Path | None = None) -> dict[str, Any]:
         ),
         "skills": _skills(root),
         "validators": _validators(root),
-        "waiting_learnings": [],
+        "waiting_learnings": [item.as_dict() for item in waiting],
+        "waiting_counts": waiting_counts(root, exclude_job=job_id) if with_components else {},
     }
 
 
@@ -152,7 +213,9 @@ def register_context_tools(app: FastMCP) -> None:
     """Register ``get_context`` on *app*."""
 
     @app.tool
-    async def get_context(ctx: Context, workspace_root: str | None = None) -> dict[str, Any]:
+    async def get_context(
+        ctx: Context, waiting_for: list[str] | None = None, workspace_root: str | None = None
+    ) -> dict[str, Any]:
         """What the current ticket should read, and what applies to it.
 
         In a repo with ``.dmx/components/``, call this before a task and read
@@ -160,7 +223,17 @@ def register_context_tools(app: FastMCP) -> None:
         fixed list. Without components it returns the repo-wide memory
         files, so the result is the same as the fixed list.
 
+        ``memory_files`` covers the ticket's components and the ones they
+        directly depend on. ``editable_memory`` is the memory a PR from this
+        branch may edit: the components whose files it changed, plus
+        ``repo-wide`` when it changes the repo-wide dmx setup.
+        ``waiting_learnings`` are other tickets' unmarked learnings for those
+        components and ``repo-wide``; fold one in, then mark it with
+        ``mark_learnings_folded``.
+
         Args:
+            waiting_for: List the waiting learnings of these owners (component
+                ids or ``repo-wide``) instead, for ``/dmx/update-memory <owner>``.
             workspace_root: Repo root path override. Auto-detected if omitted.
 
         Returns:
@@ -168,12 +241,12 @@ def register_context_tools(app: FastMCP) -> None:
             ``components`` (each with ``id``, ``reason``, ``folder``,
             ``description`` and ``depends_on``), ``unknown_components``,
             ``skipped_components``, ``repo_wide_files``, ``memory_files``,
-            ``ticket_files``, ``skills``, ``validators`` and
-            ``waiting_learnings``. Paths are relative to the repo root, except
-            bundled files, which are absolute.
+            ``editable_memory``, ``ticket_files``, ``skills``, ``validators``,
+            ``waiting_learnings`` and ``waiting_counts``. Paths are relative
+            to the repo root, except bundled files, which are absolute.
         """
         try:
             root = await resolve_workspace_root(ctx, workspace_root)
         except WorkspaceRootInvalid as exc:
             return {"error": f"Could not resolve a valid workspace root: {exc}"}
-        return build_context(root, folder=ide_folder())
+        return build_context(root, folder=ide_folder(), waiting_for=waiting_for)

@@ -140,12 +140,12 @@ def _base_ref(root: Path) -> str | None:
     return None
 
 
-def changed_files(root: Path) -> tuple[str, ...]:
+def changed_files(root: Path, *, include_dmx: bool = False) -> tuple[str, ...]:
     """Files the branch changed since it left ``branch_base``, sorted.
 
     Committed, staged, unstaged and untracked changes, relative to *root*
     (the folder holding ``.dmx/``) and limited to it. Both sides of a
-    rename count. Files under ``.dmx/`` are left out.
+    rename count. Files under ``.dmx/`` are left out unless *include_dmx*.
     """
     found: set[str] = set()
     ref = _base_ref(root)
@@ -159,7 +159,9 @@ def changed_files(root: Path) -> tuple[str, ...]:
             )
     found.update(_git(root, "diff", "--name-only", "--no-renames", "--relative", "HEAD"))
     found.update(_git(root, "ls-files", "--others", "--exclude-standard"))
-    return tuple(sorted(path for path in found if path and not path.startswith(".dmx/")))
+    return tuple(
+        sorted(path for path in found if path and (include_dmx or not path.startswith(".dmx/")))
+    )
 
 
 def _folder_component(root: Path, folder: Path | None, components: ComponentSet) -> str | None:

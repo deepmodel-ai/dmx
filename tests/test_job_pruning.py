@@ -233,6 +233,24 @@ class TestKeep:
 
         assert _kept(tmp_path) == {"GH-1": "open learnings or decisions in activeContext.md"}
 
+    def test_learnings_that_were_all_folded(self, tmp_path: Path) -> None:
+        _repo(tmp_path)
+        _merged(tmp_path, "GH-1", learnings="- [ledger] the cache needs a lock → ledger, #12\n")
+        _on_ticket(tmp_path)
+
+        assert plan_prune(tmp_path, _MONTH, now=_NOW).removes == ("GH-1",)
+
+    def test_one_learning_still_waiting(self, tmp_path: Path) -> None:
+        _repo(tmp_path)
+        _merged(
+            tmp_path,
+            "GH-1",
+            learnings="- [ledger] folded → ledger, #12\n- [billing-ui] still waiting\n",
+        )
+        _on_ticket(tmp_path)
+
+        assert _kept(tmp_path) == {"GH-1": "open learnings or decisions in activeContext.md"}
+
     def test_open_decisions(self, tmp_path: Path) -> None:
         _repo(tmp_path)
         folder = _job(tmp_path, "GH-1")

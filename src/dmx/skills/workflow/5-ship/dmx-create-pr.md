@@ -80,6 +80,17 @@ Read all of the following:
 - `spec.md` — already read in Step 3
 - `tasks.md` — if it exists
 
+**In a repo with components** (`.dmx/components/` exists), memory belongs to its owners, and this replaces the promotion rules below. Call `get_context` on `user-dmx` and use its `editable_memory`: the components whose files this branch changed, plus `repo-wide` only when the branch also changes the repo-wide dmx setup. For each item under `## Open Learnings` and `## Open Decisions` in `activeContext.md`:
+- Make sure it starts with its owner, `[<component id>]` or `[repo-wide]`. Add the tag if it is missing.
+- If its owner is in `editable_memory`, write it into that owner's memory and remove it from `activeContext.md`. A component's memory is `.dmx/components/<id>/`, in a file named like the core file it belongs in (create it if needed); `repo-wide` memory is the core files.
+- Otherwise leave it, tagged. It merges with this branch and waits for its owner's next PR.
+
+Never edit the memory of an owner that is not in `editable_memory`, and never edit core files when `repo-wide` is not in it.
+
+Then fold in learnings waiting from earlier tickets. For each entry in `get_context`'s `waiting_learnings` whose `owner` is in `editable_memory`, write it into that owner's memory, edited and deduplicated against what is already there. Then call `mark_learnings_folded` on `user-dmx` once per job, with that `job`, the entries' `text` as `items`, the owner as `target`, and the current branch name as `ref`, so they stop counting as waiting.
+
+Keep a list of where each learning went: written to which memory, or left waiting for which owner. It goes in the result (Step 13) and in the PR description's Notes (Step 8).
+
 **Promote all qualifying inbox items from `activeContext.md`:**
 
 Scan `## Open Learnings` and `## Open Decisions`. For each item, ask: _"Is this durable beyond this branch?"_ If yes, append it to the appropriate core file:
@@ -148,6 +159,8 @@ If not, invoke `dmx-draft-pr-description` with:
 - `base`: `{{base}}`
 
 The draft-pr-description skill will read `spec.md` and `tasks.md` directly for PR body content.
+
+In a repo with components, add one **Memory:** line to the description's Notes with the list from Step 4, for example "Memory: 2 learnings → ledger; 1 waiting for billing-ui; 3 folded from GH-401 → ledger."
 
 ## Step 9 — Fetch ticket details for the PR title
 
@@ -226,6 +239,7 @@ labels:       ["in-review"]
 PR created: {PR URL}
 {if ticketing ≠ none} Ticket: {ticket_ref} → In Review
 {if memory committed in Step 5} Memory: synced and committed on this branch
+{in a repo with components:} Learnings: {where each went, from Step 4}
 
 Next:
   - Share the PR link for review.

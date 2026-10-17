@@ -76,6 +76,8 @@ Run `git branch --show-current`.
 
 Find the current ticket's job folder: the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch. If there is none, use `.dmx/jobs/{branch}/` when that folder exists, else leave it out of the report.
 
+In a repo with components (`.dmx/components/` exists), also call `get_context` on `user-dmx` and keep its `waiting_counts`: how many learnings wait in merged tickets for each owner.
+
 ## Step 7 — Assemble the report
 
 ```
@@ -110,6 +112,13 @@ Current branch: {branch}
   {[DRAFT] if draft} {[APPROVED] if approved}
 
 {if none: (no open pull requests)}
+
+---
+
+{in a repo with components, if waiting_counts is not empty:}
+## Learnings waiting for their owner
+{for each owner, count:}
+  {owner}: {count} (run /dmx/update-memory {owner})
 
 ---
 

@@ -63,6 +63,13 @@ Read:
 - `activeContext.md` — learning inbox (Open Learnings, Open Decisions, Session Notes)
 - `spec.md` — if it exists, read for branch context (frontmatter `summary`)
 
+**In a repo with components** (`.dmx/components/` exists), memory belongs to its owners, and this replaces the promotion rules below. Call `get_context` on `user-dmx` and use its `editable_memory`: the components whose files this branch changed, plus `repo-wide` only when the branch also changes the repo-wide dmx setup. For each item under `## Open Learnings` and `## Open Decisions` in `activeContext.md`:
+- Make sure it starts with its owner, `[<component id>]` or `[repo-wide]`. Add the tag if it is missing.
+- If its owner is in `editable_memory`, write it into that owner's memory and remove it from `activeContext.md`. A component's memory is `.dmx/components/<id>/`, in a file named like the core file it belongs in (create it if needed); `repo-wide` memory is the core files.
+- Otherwise leave it, tagged. It merges with this branch and waits for its owner's next PR.
+
+Never edit the memory of an owner that is not in `editable_memory`, and never edit core files when `repo-wide` is not in it.
+
 **Promote qualifying inbox items to core files:**
 
 Scan `## Open Learnings` and `## Open Decisions` in `activeContext.md`. For each item, ask: _"Is this still true beyond this branch's lifetime?"_ If yes, promote it to the appropriate core file:

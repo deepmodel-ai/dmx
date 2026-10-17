@@ -1,12 +1,21 @@
 ---
 name: update-memory
 title: Update Memory Bank
-description: Review spec.md, tasks.md, and the activeContext learning inbox; extract durable project learnings; reconcile contradictions; and sync everything into the core memory bank files. On-demand escape hatch — /dmx/commit and /dmx/create-pr handle automatic updates during normal workflow.
+description: Review spec.md, tasks.md, and the activeContext learning inbox; extract durable project learnings; reconcile contradictions; and sync everything into the core memory bank files. On-demand escape hatch — /dmx/commit and /dmx/create-pr handle automatic updates during normal workflow. In a monorepo, /dmx/update-memory <component> or /dmx/update-memory repo-wide folds that owner's waiting learnings.
+arguments:
+  - name: target
+    description: "In a repo with components: a component id, or repo-wide, whose waiting learnings to fold into its memory."
+    required: false
 ---
 
 You are updating the project memory bank with durable learnings from recent work. Follow every step in order. Be precise — only write things that will still be true and useful in future sessions.
 
 **Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+
+**Components.** When `.dmx/components/` exists, memory belongs to its owners:
+
+- **If `{{target}}` was provided** (a component id or `repo-wide`): fold that owner's waiting learnings, whatever this branch changed. Call `get_context` on `user-dmx` with `waiting_for` set to `["{{target}}"]`. Read that owner's memory (`.dmx/components/{{target}}/*.md`, or the core files for `repo-wide`). Write each entry in `waiting_learnings` into it, edited and deduplicated, then call `mark_learnings_folded` once per job with that `job`, the entries' `text` as `items`, `{{target}}` as `target`, and the current branch name as `ref`. Skip Steps 1–5, then commit (Step 6) and report what was folded from which jobs (Step 7).
+- **Otherwise:** follow the steps below, but write only to the memory of owners in `get_context`'s `editable_memory`, and tag every item you leave in `activeContext.md` with its owner, as `/dmx/commit` does. Items for other owners stay, tagged, to wait.
 
 ## Step 1 — Read all core memory bank files
 

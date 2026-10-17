@@ -35,7 +35,7 @@ from fastmcp import (
 )
 
 from dmx.exceptions import AmbiguousActiveRun, DmxError, WorkspaceRootInvalid
-from dmx.loop_memory import read_open_items
+from dmx.learnings import has_waiting
 from dmx.loop_state import (
     ACTIVE_CONTEXT_FILE,
     LoopStatus,
@@ -198,7 +198,7 @@ def _keep_reason(
     unfinished, finished = _runs_verdict(folder)
     if unfinished is not None:
         return unfinished
-    if read_open_items(folder / ACTIVE_CONTEXT_FILE):
+    if has_waiting(folder / ACTIVE_CONTEXT_FILE):
         return "open learnings or decisions in activeContext.md"
     finished = finished or _last_commit_time(root, ref, rel)
     if finished is None:
