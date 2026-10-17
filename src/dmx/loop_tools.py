@@ -2242,7 +2242,7 @@ def register_loop_tools(app: FastMCP) -> None:
             return f"Could not resolve a valid workspace root: {exc}"
 
         def finish(message: str) -> str:
-            return _with_legacy_note(message)
+            return with_skipped_dmx_note(root, _with_legacy_note(message))
 
         try:
             found = _find_active(root)
@@ -2369,7 +2369,7 @@ def register_loop_tools(app: FastMCP) -> None:
             return f"Could not resolve a valid workspace root: {exc}"
 
         def finish(message: str) -> str:
-            return _with_legacy_note(message)
+            return with_skipped_dmx_note(root, _with_legacy_note(message))
 
         try:
             found = _find_active(root)

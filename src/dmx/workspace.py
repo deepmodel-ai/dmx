@@ -169,7 +169,8 @@ def with_skipped_dmx_note(root: Path, message: str) -> str:
         shown = folder.relative_to(root) if folder.is_relative_to(root) else folder
         lines.append(
             f"Ignored `{shown}/.dmx/`: it has no `config.md`, and this repo's `.dmx/` "
-            f"is at `{root}`. Delete that folder."
+            f"is at `{root}`. Runs started from that folder are not picked up; "
+            "restart them from here, then delete the folder."
         )
     if not lines:
         return message

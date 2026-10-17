@@ -11,6 +11,7 @@ import pytest
 
 from dmx import workspace
 from dmx.exceptions import WorkspaceRootInvalid
+from dmx.loop_state import write_initial_state
 from dmx.workspace import (
     find_dmx_root,
     ide_folder,
@@ -290,6 +291,14 @@ def _monorepo(tmp_path: Path) -> Path:
     return repo
 
 
+def _billing_note(repo: Path) -> str:
+    return (
+        "Ignored `packages/billing/.dmx/`: it has no `config.md`, and this repo's "
+        f"`.dmx/` is at `{repo}`. Runs started from that folder are not picked up; "
+        "restart them from here, then delete the folder."
+    )
+
+
 class TestToolCallFromASubfolder:
     @pytest.mark.asyncio
     async def test_run_loop_from_a_package_folder_uses_the_repo_dmx(self, tmp_path: Path) -> None:
@@ -316,10 +325,7 @@ class TestToolCallFromASubfolder:
         repo = _monorepo(tmp_path)
         billing = repo / "packages" / "billing"
         (billing / ".dmx" / "jobs" / "unknown").mkdir(parents=True)
-        note = (
-            "Ignored `packages/billing/.dmx/`: it has no `config.md`, and this repo's "
-            f"`.dmx/` is at `{repo}`. Delete that folder."
-        )
+        note = _billing_note(repo)
 
         from fastmcp import Client
 
@@ -333,6 +339,34 @@ class TestToolCallFromASubfolder:
         assert first.data == f"No local or shared skills.\n\n{note}"
         assert second.data == "No local or shared skills."
         assert note not in str(status.data)
+
+    @pytest.mark.asyncio
+    async def test_mid_loop_tools_explain_a_run_left_in_a_stray_dmx(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The old behaviour started this run inside the package folder.
+        monkeypatch.setattr(workspace, "_REPORTED_SKIPPED_DMX", set())
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+        write_initial_state(billing, "dev", "unknown", "task-old", ["implement-next-phase"])
+        note = _billing_note(repo)
+
+        from fastmcp import Client
+
+        from dmx.server import create_app
+
+        async with Client(create_app()) as client:
+            advance = await client.call_tool(
+                "loop_advance",
+                {"output": "done", "skill": "implement-next-phase", "workspace_root": str(billing)},
+            )
+            monkeypatch.setattr(workspace, "_REPORTED_SKIPPED_DMX", set())
+            resumed = await client.call_tool("loop_continue", {"workspace_root": str(billing)})
+
+        assert advance.data == (
+            f"No active loop run found. Start a loop with `run_loop` first.\n\n{note}"
+        )
+        assert str(resumed.data).endswith(f"\n\n{note}")
 
     @pytest.mark.asyncio
     async def test_upgrade_from_a_package_folder_clears_the_rules_reminder(
@@ -474,6 +508,22 @@ class TestResolveFromASubfolder:
         ctx.list_roots = AsyncMock(return_value=[first, second])
 
         assert await resolve_workspace_root(ctx, None) == repo
+
+    @pytest.mark.asyncio
+    async def test_multi_root_prefers_any_dmx_over_none(self, tmp_path: Path) -> None:
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        _git(notes, "init", "-q")
+        draft = tmp_path / "draft"
+        (draft / ".dmx").mkdir(parents=True)
+        _git(draft, "init", "-q")
+        first, second = MagicMock(), MagicMock()
+        first.uri = f"file://{notes}"
+        second.uri = f"file://{draft}"
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[first, second])
+
+        assert await resolve_workspace_root(ctx, None) == draft
 
     @pytest.mark.asyncio
     async def test_explicit_still_wins_over_mcp_roots(self, tmp_path: Path) -> None:
