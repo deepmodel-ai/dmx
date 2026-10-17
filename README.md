@@ -104,6 +104,8 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 `.dmx/jobs/` has no owner, so a ticket's own spec and plan never need platform approval. A repo without `.dmx/components/` works as before.
 
+`dmx check` (or `/dmx/check`) validates the whole setup, such as unknown `depends_on` ids, paths that match no files, components without a test command, out-of-date locks, and missing `CODEOWNERS` lines, and shows what the current branch will load, check, and run. It never changes a file and exits 1 on an error, so it can run in CI.
+
 **Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and lock them into every project with `/dmx/update-shared-sources`; dmx fetches them into a git-ignored cache. Layer team config over an org baseline; each repo can still override what it needs. A component can declare its own sources in `.dmx/components/<id>/shared-sources.yaml`, locked in its folder, so its team bumps them without platform approval; add `/.dmx/components/*/shared-sources.lock @acme/platform` to `CODEOWNERS` if platform should review every component bump instead. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)
 
 **Skill discovery.** Ask your agent "which skills can update helm?" and it finds matching skills from your repo and every shared source. Ask for the task and it runs the right one. [Custom skills →](https://dmx.deepmodel.ai/configuration/custom-skills)

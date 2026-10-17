@@ -281,6 +281,28 @@ def prune_jobs(*, older_than_days: int, dry_run: bool, workspace_root: Path | No
             click.echo(f"  {job}: {reason}")
 
 
+@main.command(name="check")
+@click.option(
+    "--workspace-root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="A folder in the repo (default: the current directory). Its .dmx/ is found from there.",
+)
+def check(*, workspace_root: Path | None) -> None:
+    """Check the dmx setup and show what this branch will load, check and run.
+
+    Never changes a file. Exits 1 when the setup has an error.
+    """
+    from dmx.setup_check import branch_plan, check_setup, has_errors, render
+    from dmx.workspace import find_dmx_root
+
+    root, _skipped = find_dmx_root((workspace_root or Path.cwd()).resolve())
+    findings = check_setup(root)
+    click.echo(render(findings, branch_plan(root)))
+    if has_errors(findings):
+        raise SystemExit(1)
+
+
 @main.command()
 def version() -> None:
     """Print version and exit."""
