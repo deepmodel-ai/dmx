@@ -402,6 +402,28 @@ class TestSpecAdherence:
 # ---------------------------------------------------------------------------
 
 
+_NEEDS_GO = pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+
+
+@pytest.fixture(scope="session")
+def _go_cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("go-cache")
+
+
+@pytest.fixture
+def isolated_go(_go_cache: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's Go settings out of a real ``go test`` run.
+
+    A ``GOWORK`` file elsewhere, ``go env -w`` flags, or a cache that is not
+    writable would otherwise fail these tests instead of the code under test.
+    """
+    monkeypatch.setenv("GOENV", "off")
+    monkeypatch.setenv("GOWORK", "off")
+    monkeypatch.setenv("GOFLAGS", "")
+    monkeypatch.setenv("GOTOOLCHAIN", "local")
+    monkeypatch.setenv("GOCACHE", str(_go_cache))
+
+
 def _write_go_module(root: Path, test_body: str | None = None) -> None:
     """Write a ``go.mod``, plus one ``_test.go`` file when *test_body* is given."""
     (root / "go.mod").write_text("module example.com/gh82\n\ngo 1.18\n", encoding="utf-8")
@@ -487,7 +509,8 @@ class TestRunTests:
         assert result["message"] == "Test command `go test ./...` not found on PATH"
         assert result["checks"] == [{"name": "tests_pass", "pass": False}]
 
-    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    @_NEEDS_GO
+    @pytest.mark.usefixtures("isolated_go")
     def test_go_module_passing(self, tmp_path: Path) -> None:
         _write_go_module(tmp_path, "func TestOK(t *testing.T) {}\n")
         result = run_tests.run(tmp_path)
@@ -495,7 +518,8 @@ class TestRunTests:
         assert "ran `go test ./...`" in result["message"]
         assert result["checks"][0]["pass"] is True
 
-    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    @_NEEDS_GO
+    @pytest.mark.usefixtures("isolated_go")
     def test_go_module_failing(self, tmp_path: Path) -> None:
         _write_go_module(tmp_path, 'func TestFails(t *testing.T) { t.Fatal("boom") }\n')
         result = run_tests.run(tmp_path)
@@ -772,7 +796,8 @@ class TestBundledValidatorSubprocessContract:
         names = {c["name"] for c in result["checks"]}
         assert names == {"pr_exists", "ticket_transitioned", "memory_updated"}
 
-    @pytest.mark.skipif(shutil.which("go") is None, reason="needs the go toolchain")
+    @_NEEDS_GO
+    @pytest.mark.usefixtures("isolated_go")
     def test_run_tests_on_a_go_module_via_subprocess(self, tmp_path: Path) -> None:
         _write_go_module(tmp_path, "func TestOK(t *testing.T) {}\n")
         result = run_validator("run_tests", tmp_path, {}, "goal", {"job_id": "J"})

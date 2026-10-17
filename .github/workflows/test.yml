@@ -23,6 +23,13 @@ jobs:
           version: "latest"
           python-version: ${{ matrix.python-version }}
 
+      # run_tests detects go.mod; the macOS runners have no Go, so those
+      # tests would skip there without this.
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "stable"
+          cache: false
+
       - name: Install dependencies
         run: uv sync --extra dev
 
