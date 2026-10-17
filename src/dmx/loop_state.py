@@ -200,6 +200,11 @@ def _spec_identity_in(spec: Path) -> tuple[str | None, str | None]:
         content = spec.read_text(encoding="utf-8")
     except OSError:
         return None, None
+    return spec_identity_in_text(content)
+
+
+def spec_identity_in_text(content: str) -> tuple[str | None, str | None]:
+    """``(ticket, branch)`` from the frontmatter of a ``spec.md``'s text."""
     fm_match = _FRONTMATTER_RE.match(content)
     if not fm_match:
         return None, None
@@ -297,6 +302,23 @@ def resolve_job_id(workspace_root: Path) -> str:
     if identity and spec_branch == branch:
         return identity
     return branch
+
+
+def root_ticket_files_belong_to(workspace_root: Path, job_id: str) -> bool:
+    """True when a 0.5 repo's root ticket files are *job_id*'s (GH-84).
+
+    Either the root ``.dmx/spec.md`` names the current branch and its ticket
+    (or that branch) is *job_id*; or there is no root ``spec.md`` and
+    *job_id*'s own ``spec.md`` names the current branch, so a root
+    ``tasks.md`` or ``activeContext.md`` left beside it is this ticket's.
+    """
+    branch = current_branch(workspace_root)
+    if not branch:
+        return False
+    if root_ticket_file(workspace_root, SPEC_FILE).is_file():
+        ticket, spec_branch = read_spec_identity(workspace_root)
+        return spec_branch == branch and (usable_ticket(ticket) or branch) == job_id
+    return read_spec_identity(workspace_root, job_id)[1] == branch
 
 
 def job_has_loop_runs(workspace_root: Path, job_id: str) -> bool:

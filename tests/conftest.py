@@ -18,9 +18,14 @@ def _clear_one_time_notes() -> None:
     notes without returning a tool reply that clears them. The server runs
     each tool call in its own context, so they never leak there.
     """
-    from dmx.loop_tools import _LEGACY_MOVE_NOTE, _TICKET_FILES_MOVE_NOTE
+    from dmx.loop_tools import (
+        _LEGACY_MOVE_NOTE,
+        _MISPLACED_FILES_NOTE,
+        _TICKET_FILES_MOVE_NOTE,
+    )
 
     _LEGACY_MOVE_NOTE.set(None)
+    _MISPLACED_FILES_NOTE.set(None)
     _TICKET_FILES_MOVE_NOTE.set(None)
 
 

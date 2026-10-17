@@ -12,6 +12,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from dmx.catalog import SkillDefinition, load_rules, load_skills, substitute_args
+from dmx.layout_migration import register_layout_migration_tools
 from dmx.loop_tools import register_loop_tools
 from dmx.sync_tools import register_sync_tools
 from dmx.tools import register_tools
@@ -107,6 +108,7 @@ def create_app(
     register_tools(app, rules)
     register_loop_tools(app)
     register_sync_tools(app)
+    register_layout_migration_tools(app)
     return app
 
 

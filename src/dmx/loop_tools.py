@@ -90,6 +90,7 @@ from dmx.loop_state import (
     is_pending_job_id,
     is_pr_snapshot,
     job_has_loop_runs,
+    jobs_for_branch,
     list_open_runs,
     make_pending_job_id,
     make_task_id,
@@ -99,6 +100,8 @@ from dmx.loop_state import (
     rename_job,
     resolve_job_id,
     root_ticket_file,
+    root_ticket_files_belong_to,
+    spec_identity_in_text,
     supersede_pr_snapshots,
     ticket_file,
     usable_ticket,
@@ -124,11 +127,15 @@ _LEGACY_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _TICKET_FILES_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "dmx_ticket_files_move", default=None
 )
+# Set when a merge had filed this branch's ticket files under another ticket.
+_MISPLACED_FILES_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dmx_misplaced_ticket_files", default=None
+)
 
 
 def _with_legacy_note(message: str) -> str:
-    """Append the job-move and ticket-file-move lines once, then clear them."""
-    for var in (_LEGACY_MOVE_NOTE, _TICKET_FILES_MOVE_NOTE):
+    """Append the job-move and ticket-file lines once, then clear them."""
+    for var in (_LEGACY_MOVE_NOTE, _MISPLACED_FILES_NOTE, _TICKET_FILES_MOVE_NOTE):
         note = var.get()
         if not note:
             continue
@@ -818,14 +825,7 @@ def _move_root_ticket_files(root: Path, job_id: str) -> list[str]:
     Returns:
         The names of the files moved.
     """
-    branch = current_branch(root)
-    if not branch:
-        return []
-    if root_ticket_file(root, SPEC_FILE).is_file():
-        ticket, spec_branch = read_spec_identity(root)
-        if spec_branch != branch or (usable_ticket(ticket) or branch) != job_id:
-            return []
-    elif read_spec_identity(root, job_id)[1] != branch:
+    if not root_ticket_files_belong_to(root, job_id):
         return []
     moved: list[str] = []
     for name in TICKET_FILES:
@@ -844,6 +844,79 @@ def _move_root_ticket_files(root: Path, job_id: str) -> list[str]:
             "(ticket files live in the job folder since 0.6)."
         )
     return moved
+
+
+def _file_on_ref(root: Path, ref: str, rel: str) -> str | None:
+    """Text of *rel* at *ref*, or None when git cannot show it."""
+    shown = _run_git(root, "show", f"{ref}:{rel}")
+    if shown is None or shown.returncode != 0:
+        return None
+    return shown.stdout
+
+
+def _base_ticket_file(root: Path, base: str, job_id: str, name: str) -> str | None:
+    rel = f".dmx/jobs/{job_id}/{name}"
+    for ref in (base, f"origin/{base}"):
+        text = _file_on_ref(root, ref, rel)
+        if text is not None:
+            return text
+    return None
+
+
+def _repair_misplaced_ticket_files(root: Path) -> None:
+    """Put this branch's ticket files back where a merge moved them (GH-84).
+
+    When the integration branch moved a merged ticket's root files into that
+    ticket's job folder, git treats it as a rename. A branch still on the
+    0.5 layout that merges or rebases onto it gets its own root edits applied
+    to the renamed files, so its ``spec.md`` lands in the other ticket's
+    folder with no conflict reported.
+
+    Detected as a job folder whose ``spec.md`` names the current branch but
+    belongs to another ticket (its ticket or branch is not the folder name),
+    where the same folder on ``branch_base`` names a different branch. The
+    branch's changed files move into its own job folder, and the other
+    ticket's files are restored from ``branch_base``. Called before the
+    writing tools look up the active run; never on a protected branch. Sets
+    :data:`_MISPLACED_FILES_NOTE` when something moved.
+    """
+    branch = current_branch(root)
+    base = _read_branch_base(root)
+    if not branch or not base or _on_protected_branch(root):
+        return
+    for job_id in jobs_for_branch(root, branch):
+        ticket, _spec_branch = read_spec_identity(root, job_id)
+        own_job = usable_ticket(ticket) or branch
+        if own_job == job_id:
+            continue
+        base_spec = _base_ticket_file(root, base, job_id, SPEC_FILE)
+        if base_spec is None:
+            continue
+        _base_ticket, base_branch = spec_identity_in_text(base_spec)
+        if base_branch in (None, branch):
+            continue
+        moved: list[str] = []
+        for name in TICKET_FILES:
+            here = ticket_file(root, job_id, name)
+            original = _base_ticket_file(root, base, job_id, name)
+            if here.is_file() and here.read_text(encoding="utf-8") != original:
+                target = ticket_file(root, own_job, name)
+                if target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                here.replace(target)
+                moved.append(name)
+            if original is not None and not here.exists():
+                here.parent.mkdir(parents=True, exist_ok=True)
+                here.write_text(original, encoding="utf-8")
+        if moved:
+            listed = ", ".join(f"`{name}`" for name in moved)
+            logger.info("moved misplaced %s from jobs/%s to jobs/%s", moved, job_id, own_job)
+            _MISPLACED_FILES_NOTE.set(
+                f"A merge had put this branch's {listed} in `.dmx/jobs/{job_id}/`. "
+                f"Moved them to `.dmx/jobs/{own_job}/` and restored `.dmx/jobs/{job_id}/` "
+                f"from `{base}`. Commit both folders."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1358,6 +1431,7 @@ def _start_loop(
             )
         job_id = make_pending_job_id(task_id)
     else:
+        _repair_misplaced_ticket_files(root)
         try:
             job_id = resolve_job_id(root)
         except AmbiguousActiveRun as exc:
@@ -2328,6 +2402,7 @@ def register_loop_tools(app: FastMCP) -> None:
         def finish(message: str) -> str:
             return with_skipped_dmx_note(root, _with_legacy_note(message))
 
+        _repair_misplaced_ticket_files(root)
         try:
             found = _find_active(root)
         except AmbiguousActiveRun as exc:
@@ -2456,6 +2531,7 @@ def register_loop_tools(app: FastMCP) -> None:
         def finish(message: str) -> str:
             return with_skipped_dmx_note(root, _with_legacy_note(message))
 
+        _repair_misplaced_ticket_files(root)
         try:
             found = _find_active(root)
         except AmbiguousActiveRun as exc:

@@ -205,15 +205,17 @@ def _bundled_skill(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_upgrade_skill_refreshes_rules_and_leaves_the_repo_state() -> None:
+def test_upgrade_skill_refreshes_rules_then_migrates_the_layout() -> None:
     skill = _bundled_skill("dmx-upgrade.md")
 
     assert "name: upgrade" in skill
     assert "include_existing" in skill
     assert "already_current" in skill
-    assert "Do not ask questions." in skill
-    assert ".dmx/config.md" in skill
-    assert "memory bank" in skill
+    assert "Ask only the one question in Step 6." in skill
+    assert "Do not touch `.dmx/config.md` or loop state." in skill
+    assert "Call `migrate_dmx_layout` with `dry_run` set to true." in skill
+    assert 'Ask once: "Apply this migration? (yes/no)".' in skill
+    assert "the way `/dmx/update-memory` does" in skill
     assert ".dmx/jobs/" in skill
     assert "Do not commit" in skill
     assert "invoking IDE" in skill

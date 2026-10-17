@@ -28,7 +28,7 @@ from dmx.loop_state import ACTIVE_CONTEXT_FILE, ticket_file
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["read_memory_context", "append_session_note"]
+__all__ = ["append_session_note", "read_memory_context", "read_open_items"]
 
 _SKELETON = "## Open Learnings\n\n## Open Decisions\n\n## Session Notes\n"
 
@@ -53,7 +53,14 @@ def read_memory_context(workspace_root: Path, job_id: str) -> str:
     Returns an empty string if the job's ``activeContext.md`` doesn't exist
     or both sections are empty — nothing worth surfacing to the agent.
     """
-    path = _active_context_path(workspace_root, job_id)
+    return read_open_items(_active_context_path(workspace_root, job_id))
+
+
+def read_open_items(path: Path) -> str:
+    """Open Learnings + Open Decisions in one ``activeContext.md``, formatted.
+
+    An empty string when the file is missing or both sections are empty.
+    """
     if not path.exists():
         return ""
 

@@ -46,6 +46,18 @@ If there are uncommitted changes, stop:
 - To commit: run /dmx/commit
 - To stash:  run git stash"
 
+## Step 4b — Move this branch's ticket files first
+
+If `.dmx/spec.md`, `.dmx/tasks.md` or `.dmx/activeContext.md` exists, this branch still uses the 0.5 layout. Moving its files into its job folder before integrating keeps git from applying its edits to another ticket's files:
+
+1. Call `migrate_dmx_layout` with `dry_run` set to true. If `blocked` is set, tell the developer and stop.
+2. Show `moves`, `deletes` and `references`, and ask once: "Move this branch's ticket files before syncing? (yes/no)". If not yes, stop.
+3. Call `migrate_dmx_layout` with `dry_run` set to false, then commit:
+```
+git add -A .dmx .gitattributes
+git commit -m "chore: move ticket files into the job folder"
+```
+
 ## Step 5 — Fetch latest from origin
 
 Run:
@@ -69,6 +81,8 @@ git rebase origin/{config.branch_base}
 ```
 Conflicts detected. Resolve the following files manually:
 {list of conflicting files}
+{if every conflicting file is a ticket file — .dmx/spec.md, .dmx/tasks.md, .dmx/activeContext.md, or a file under .dmx/jobs/:}
+These are dmx ticket files, moved in the 0.6 layout change. Keep this branch's version of each (`git add <file>`); a root file left this way is moved into its job folder on the next loop step.
 
 After resolving:
 - For merge:  git add . && git merge --continue
