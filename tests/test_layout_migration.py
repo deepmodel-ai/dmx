@@ -232,12 +232,13 @@ class TestABranchThatSpansTheUpgrade:
         assert not (tmp_path / ".dmx" / "spec.md").exists()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("integrate", ["merge", "rebase"])
     async def test_files_a_merge_put_in_another_tickets_folder_are_moved_back(
-        self, tmp_path: Path
+        self, tmp_path: Path, integrate: str
     ) -> None:
         # Main got GH-1's root files as a rename into jobs/GH-1 (for example
-        # through a merge of a 0.5-era move). Merging that into GH-2's 0.5
-        # branch puts GH-2's edits in jobs/GH-1 with no conflict.
+        # through a merge of a 0.5-era move). Merging or rebasing GH-2's 0.5
+        # branch onto that puts GH-2's edits in jobs/GH-1 with no conflict.
         _repo_on_05(tmp_path)
         _git(tmp_path, "checkout", "-q", "-b", "feature-gh-2")
         _root_files(tmp_path, "GH-2", "feature-gh-2", body="the GH-2 spec")
@@ -252,7 +253,10 @@ class TestABranchThatSpansTheUpgrade:
             tmp_path, "dev", "GH-2", "task-1", ["implement-next-phase"], {"status": "running"}
         )
         _commit(tmp_path, "GH-2 run")
-        _git(tmp_path, "merge", "-q", "--no-edit", "main")
+        if integrate == "merge":
+            _git(tmp_path, "merge", "-q", "--no-edit", "main")
+        else:
+            _git(tmp_path, "rebase", "-q", "main")
         misplaced = ticket_file(tmp_path, "GH-1", "spec.md").read_text(encoding="utf-8")
         assert "the GH-2 spec" in misplaced  # the silent case
 
@@ -271,6 +275,46 @@ class TestABranchThatSpansTheUpgrade:
         assert "the GH-2 spec" in ticket_file(tmp_path, "GH-2", "spec.md").read_text()
         restored = ticket_file(tmp_path, "GH-1", "spec.md").read_text(encoding="utf-8")
         assert restored == _git(tmp_path, "show", "main:.dmx/jobs/GH-1/spec.md") + "\n"
+
+    @pytest.mark.asyncio
+    async def test_a_misplaced_file_its_own_folder_already_has_is_left_for_the_developer(
+        self, tmp_path: Path
+    ) -> None:
+        _repo_on_05(tmp_path)
+        _git(tmp_path, "checkout", "-q", "-b", "feature-gh-2")
+        _root_files(tmp_path, "GH-2", "feature-gh-2", body="the GH-2 spec")
+        _commit(tmp_path, "GH-2 on the 0.5 layout")
+        _git(tmp_path, "checkout", "-q", "main")
+        (tmp_path / ".dmx" / "jobs" / "GH-1").mkdir(parents=True)
+        for name in ("spec.md", "tasks.md", "activeContext.md"):
+            _git(tmp_path, "mv", f".dmx/{name}", f".dmx/jobs/GH-1/{name}")
+        _git(tmp_path, "commit", "-q", "-m", "rename GH-1's files")
+        _git(tmp_path, "checkout", "-q", "feature-gh-2")
+        _git(tmp_path, "merge", "-q", "--no-edit", "main")
+        own_spec = ticket_file(tmp_path, "GH-2", "spec.md")
+        own_spec.parent.mkdir(parents=True, exist_ok=True)
+        own_spec.write_text(
+            _SPEC.format(ticket="GH-2", branch="feature-gh-2", body="a newer GH-2 spec"),
+            encoding="utf-8",
+        )
+        write_initial_state(
+            tmp_path, "dev", "GH-2", "task-1", ["implement-next-phase"], {"status": "running"}
+        )
+
+        from tests.test_ticket_files import _call
+
+        message = await _call(
+            tmp_path, "loop_advance", output="implemented", skill="implement-next-phase"
+        )
+
+        assert (
+            "`.dmx/jobs/GH-1/` also has this branch's `spec.md`, but `.dmx/jobs/GH-2/` "
+            "already has different ones. Merge them into `.dmx/jobs/GH-2/` by hand"
+        ) in message
+        assert "a newer GH-2 spec" in own_spec.read_text(encoding="utf-8")
+        assert "the GH-2 spec" in ticket_file(tmp_path, "GH-1", "spec.md").read_text()
+        # The files with no copy in GH-2's folder still moved.
+        assert ticket_file(tmp_path, "GH-2", "tasks.md").is_file()
 
     def test_moving_first_then_merging_keeps_each_ticket_in_its_folder(
         self, tmp_path: Path

@@ -896,27 +896,44 @@ def _repair_misplaced_ticket_files(root: Path) -> None:
         if base_branch in (None, branch):
             continue
         moved: list[str] = []
+        left: list[str] = []
         for name in TICKET_FILES:
             here = ticket_file(root, job_id, name)
             original = _base_ticket_file(root, base, job_id, name)
-            if here.is_file() and here.read_text(encoding="utf-8") != original:
+            if here.is_file() and (text := here.read_text(encoding="utf-8")) != original:
                 target = ticket_file(root, own_job, name)
-                if target.exists():
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    here.replace(target)
+                    moved.append(name)
+                elif target.read_text(encoding="utf-8") == text:
+                    here.unlink()
+                    moved.append(name)
+                else:
+                    left.append(name)
                     continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                here.replace(target)
-                moved.append(name)
             if original is not None and not here.exists():
                 here.parent.mkdir(parents=True, exist_ok=True)
                 here.write_text(original, encoding="utf-8")
-        if moved:
-            listed = ", ".join(f"`{name}`" for name in moved)
-            logger.info("moved misplaced %s from jobs/%s to jobs/%s", moved, job_id, own_job)
-            _MISPLACED_FILES_NOTE.set(
-                f"A merge had put this branch's {listed} in `.dmx/jobs/{job_id}/`. "
-                f"Moved them to `.dmx/jobs/{own_job}/` and restored `.dmx/jobs/{job_id}/` "
-                f"from `{base}`. Commit both folders."
-            )
+        if moved or left:
+            logger.info("misplaced ticket files in jobs/%s: moved %s, left %s", job_id, moved, left)
+            parts = []
+            if moved:
+                listed = ", ".join(f"`{name}`" for name in moved)
+                parts.append(
+                    f"A merge had put this branch's {listed} in `.dmx/jobs/{job_id}/`. "
+                    f"Moved them to `.dmx/jobs/{own_job}/` and restored `.dmx/jobs/{job_id}/` "
+                    f"from `{base}`. Commit both folders."
+                )
+            if left:
+                listed = ", ".join(f"`{name}`" for name in left)
+                parts.append(
+                    f"`.dmx/jobs/{job_id}/` also has this branch's {listed}, but "
+                    f"`.dmx/jobs/{own_job}/` already has different ones. Merge them into "
+                    f"`.dmx/jobs/{own_job}/` by hand and restore `.dmx/jobs/{job_id}/` "
+                    f"from `{base}`."
+                )
+            _MISPLACED_FILES_NOTE.set(" ".join(parts))
 
 
 # ---------------------------------------------------------------------------
