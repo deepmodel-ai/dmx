@@ -18,6 +18,7 @@ from dmx.layout_migration import register_layout_migration_tools
 from dmx.loop_tools import register_loop_tools
 from dmx.sync_tools import register_sync_tools
 from dmx.tools import register_tools
+from dmx.workspaces import register_workspace_tools
 
 __all__ = ["create_app", "resolve_dirs", "watch_catalog"]
 
@@ -113,6 +114,7 @@ def create_app(
     register_layout_migration_tools(app)
     register_job_pruning_tools(app)
     register_context_tools(app)
+    register_workspace_tools(app)
     return app
 
 

@@ -92,6 +92,18 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 **A memory bank.** `.dmx/` holds project context, the current spec and plan, and loop state, committed to the repo. Every session and every developer starts from the same understanding. [Memory bank →](https://dmx.deepmodel.ai/configuration/memory-bank)
 
+**Components for monorepos.** Declare each service or package in `.dmx/components/<id>/component.yaml` with a `description` and the `paths` it owns, or let `/dmx/init` find them in your pnpm, npm, yarn, `go.work`, `uv`, or Cargo workspace. Every loop message names the ticket's components, and in a repo with components the agent reads only the memory that applies to them. Teams own their component folders through `CODEOWNERS`:
+
+```
+# .github/CODEOWNERS
+/.dmx/                          @acme/platform
+/.dmx/components/ledger/        @acme/ledger
+/.dmx/components/payments*/     @acme/payments
+/.dmx/jobs/
+```
+
+`.dmx/jobs/` has no owner, so a ticket's own spec and plan never need platform approval. A repo without `.dmx/components/` works as before.
+
 **Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and lock them into every project with `/dmx/update-shared-sources`; dmx fetches them into a git-ignored cache. Layer team config over an org baseline; each repo can still override what it needs. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)
 
 **Skill discovery.** Ask your agent "which skills can update helm?" and it finds matching skills from your repo and every shared source. Ask for the task and it runs the right one. [Custom skills →](https://dmx.deepmodel.ai/configuration/custom-skills)

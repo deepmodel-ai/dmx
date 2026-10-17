@@ -4,7 +4,7 @@ title: Init — Set Up Project
 description: One-time project setup. Walks the developer through workflow mode and ticketing configuration interactively, auto-detects GitHub settings and tech stack, writes .dmx/config.md, and scaffolds the memory bank. Safe to re-run — updates config without overwriting memory bank files that already have content.
 ---
 
-You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 3 and 4 require the developer's input — ask, then wait for their answer before continuing.
+You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 3 and 4 require the developer's input, and Step 9 does in a workspace repo — ask, then wait for their answer before continuing.
 
 ## Step 1 — Check for existing setup
 
@@ -333,7 +333,33 @@ Add this line to `.gitattributes` at the repo root, creating the file if needed,
 .dmx/jobs/**/*.json linguist-generated=true
 ```
 
-## Step 9 — Output the result
+## Step 9 — Components (monorepos only)
+
+Call `detect_components` on `user-dmx`. It reads the repo's pnpm, npm, yarn, `go.work`, `uv` and Cargo workspace files and returns the members it would make into components, each with an `id`, `path`, `description` and `component_yaml`, plus `ask` and `codeowners`.
+
+**If `ask` is false**, skip this step without saying anything. A single-product repo, or a workspace with one member, is not asked about components.
+
+**If `ask` is true**, show the list and ask once:
+```
+This repo is a workspace. dmx can treat each package as a component, so each ticket is
+scoped to the packages it touches:
+
+  {id}    {path}    {description}
+  ...
+
+Create these components? (yes / no / list the ids to keep or rename)
+```
+
+Wait for the answer.
+- **no:** skip the rest of this step.
+- **yes, or a list:** call `detect_components` again with `apply` true and `ids` set to the ids to keep. To rename one, write its `component_yaml` to `.dmx/components/{new id}/component.yaml` yourself instead (ids are lowercase letters, digits, `-` and `_`). Existing component files are never overwritten.
+
+Then:
+1. Tell the developer to fill in `depends_on` in each `component.yaml` where one component uses another (for example `depends_on: [ledger]`), so its tests run when that dependency changes. dmx does not guess dependencies.
+2. Show the `codeowners` lines from the tool and suggest adding them to `.github/CODEOWNERS`, replacing each `@<...-team>` with the real team. `.dmx/` belongs to the platform team, each component folder to its team, and `.dmx/jobs/` has no owner, so a ticket's own files never need platform approval.
+3. Offer to move component-specific memory. Read the repo-wide memory files written in Step 8. For each new component, find the parts that are only about it (its architecture, its dependencies, its constraints). Show the move as a diff: removed from `.dmx/{file}`, added to `.dmx/components/{id}/{file}` under the same heading. Ask once for all of them. Apply only what the developer accepts. Content about more than one component stays repo-wide.
+
+## Step 10 — Output the result
 
 ```
 Setup complete.
@@ -349,6 +375,9 @@ Setup complete.
     .dmx/productContext.md     ← durable project knowledge
     .dmx/systemPatterns.md     ← durable project knowledge
     .dmx/techContext.md        ← durable project knowledge
+
+  {if components were created:}
+  Components:          {ids, comma-separated} in .dmx/components/
 
   Each ticket's spec.md, tasks.md and activeContext.md are created in .dmx/jobs/<job>/.
 ```
