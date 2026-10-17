@@ -100,7 +100,7 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 ## Upgrading
 
-Pin a version in your MCP config (`deepmodel-dmx==0.5.1`) or use `@latest`, restart your IDE, then run `/dmx/upgrade` once in each repo and commit the refreshed rule files. [Upgrading dmx →](https://dmx.deepmodel.ai/upgrading)
+Pin a version in your MCP config (`deepmodel-dmx==0.6.0`) or use `@latest`, restart your IDE, then run `/dmx/upgrade` once in each repo, on a branch, and commit what it changes as one PR. 0.6 moves each ticket's files into its job folder and locks shared sources instead of copying them; `/dmx/upgrade` migrates both. See the [0.6.0 upgrade notes](https://github.com/deepmodel-ai/dmx/blob/main/CHANGELOG.md#060--2026-10-17). [Upgrading dmx →](https://dmx.deepmodel.ai/upgrading)
 
 ## Roadmap
 

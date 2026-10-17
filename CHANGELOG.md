@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-17
+
+**Upgrading from 0.5.** 0.6 changes the `.dmx/` layout, so each repo migrates once:
+
+1. On a branch, run `/dmx/upgrade`. It refreshes the rule files, shows the migration plan (ticket files moving into job folders, shared sources locked instead of vendored, custom code that still names the old paths), asks once, and applies it. Fix any custom code it lists, then commit everything as one PR.
+2. Before merging the upgraded `branch_base` into a branch cut earlier, run `/dmx/sync-branch` or any loop step on that branch, so its own ticket files move into its job folder first. If a merge still stops on a modify/delete conflict in `.dmx/spec.md`, `.dmx/tasks.md`, or `.dmx/activeContext.md`, keep the branch's version; the next loop step moves it.
+3. CI that runs shared validators needs read access to the shared-source repos: give it a read token and run `dmx fetch-shared-sources` before the tests.
+4. The first PR opened by the release loop after the upgrade may remove many old finished jobs in one commit. To keep them, add your own `.dmx/loops/release.yaml` without the `prune-jobs` step.
+
+`/dmx/sync` still works in 0.6 as an alias for `/dmx/update-shared-sources`.
+
 ### Added
 
 - **(GH-84)** The release loop removes finished jobs before it opens the PR. A new `prune-jobs` step runs before `create-pr` and removes each job folder in `.dmx/jobs/` whose loop runs have all finished, that is on `branch_base` (its PR merged), and whose newest run finished more than 30 days ago; a folder with no runs uses the date of its last commit on `branch_base`. It never removes the current ticket, a job with an unfinished or unreadable run, a job whose `activeContext.md` still has Open Learnings or Open Decisions, or a job with uncommitted changes. The removals are their own commit, "chore: remove N finished jobs", which holds nothing else even when other changes are staged, and the drafted PR description gets one line telling reviewers they can skip it. Git history keeps the files. Nothing is removed on `branch_base`, `production_branch`, or a detached HEAD. A repo that wants to keep job history uses its own `.dmx/loops/release.yaml` without the step. `dmx prune-jobs --older-than 7d` runs it by hand, and `--dry-run` shows what would go and why each other job stays.
@@ -197,7 +208,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/deepmodel-ai/dmx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/deepmodel-ai/dmx/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/deepmodel-ai/dmx/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/deepmodel-ai/dmx/compare/v0.4.1...v0.4.2
