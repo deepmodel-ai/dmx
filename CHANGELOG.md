@@ -9,11 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.5.1] — 2026-10-16
-
-### Added
-
-- **(GH-82)** `run_tests` runs `go test ./...` when the repo root has a `go.mod`. It checks for `go.mod` after `pyproject.toml`, a `package.json` test script, and a `Makefile` test target, so a repo that already ran one of those keeps the same command. When `go` is not installed, the result says "Test command `go test ./...` not found on PATH", not that tests failed.
+## [0.5.1] — 2026-10-17
 
 ### Changed
 
@@ -22,6 +18,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **(GH-83)** A tool call that points at a subfolder of the repo, such as one package of a monorepo, uses the repo's `.dmx/`. dmx walks up from the folder, within the same git repository, to the nearest `.dmx/` that has a `config.md`. This applies to an explicit `workspace_root`, an MCP root, and the cwd fallback, so a loop started from `packages/billing` no longer writes `packages/billing/.dmx/jobs/`, and an MCP root at a subfolder is no longer rejected. A `.dmx/` without `config.md` below the repo's `.dmx/`, such as one an earlier version left in a package folder, is skipped. `run_loop`, `loop_advance`, `loop_continue`, `list_skills`, and `loop_status` name it once per server. The line says that runs started from that folder are not picked up, so restart them from the repo before deleting it. When no `.dmx/` has a `config.md`, the nearest `.dmx/` is used. A nested dmx project with its own `config.md` and each git worktree still resolve to themselves, and nothing is walked outside a git repository. In a multi-root workspace, the first root whose walk-up finds a `.dmx/` is used. `setup_ide_rules`, which `/dmx/init` and `/dmx/upgrade` call, keeps the exact folder, and the stale-rules reminder reads the rule files there too, so upgrading from a package folder clears it.
+
+- **(GH-82)** A Go repo without a Makefile runs its tests. `run_tests` reported "No recognized test command found" for it; it now runs `go test ./...` when the repo root has a `go.mod`. It checks for `go.mod` after `pyproject.toml`, a `package.json` test script, and a `Makefile` test target, so a repo that already ran one of those keeps the same command. When `go` is not installed, the result says "Test command `go test ./...` not found on PATH", not that tests failed.
 
 ## [0.5.0] — 2026-10-07
 
