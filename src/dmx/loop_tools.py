@@ -102,7 +102,7 @@ from dmx.loop_state import (
 from dmx.repeat_until import evaluate_repeat_until
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 from dmx.validator_runner import evaluate_validator_results, run_validators
-from dmx.workspace import resolve_workspace_root, with_skipped_dmx_note
+from dmx.workspace import ide_folder, resolve_workspace_root, with_skipped_dmx_note
 
 __all__ = ["register_loop_tools"]
 
@@ -126,9 +126,13 @@ def _with_legacy_note(message: str) -> str:
 
 
 def _with_rules_reminder(root: Path, message: str) -> str:
-    """Append the stale-rules line once. A read error leaves *message* as it is."""
+    """Append the stale-rules line once. A read error leaves *message* as it is.
+
+    The rule files are read where the IDE opened, which is where
+    ``setup_ide_rules`` writes them, not the repo root a subfolder resolved to.
+    """
     try:
-        reminder = rules_reminder(root)
+        reminder = rules_reminder(ide_folder() or root)
     except OSError:
         return message
     if not reminder or reminder in message:

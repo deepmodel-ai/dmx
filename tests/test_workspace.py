@@ -334,6 +334,39 @@ class TestToolCallFromASubfolder:
         assert second.data == "No local or shared skills."
         assert note not in str(status.data)
 
+    @pytest.mark.asyncio
+    async def test_upgrade_from_a_package_folder_clears_the_rules_reminder(
+        self, tmp_path: Path
+    ) -> None:
+        # Rules live where the IDE opened, so the reminder reads them there,
+        # not at the repo root the folder resolved to.
+        repo = _monorepo(tmp_path)
+        billing = repo / "packages" / "billing"
+        old_rules = "<!-- deepmodel:dmx:start 0.4.0 -->\nold\n<!-- deepmodel:dmx:end -->\n"
+        for folder in (repo, billing):
+            (folder / ".cursor").mkdir()
+            (folder / ".cursor" / "AGENTS.md").write_text(old_rules, encoding="utf-8")
+
+        from fastmcp import Client
+
+        from dmx.server import create_app
+
+        async with Client(create_app()) as client:
+            before = await client.call_tool("list_skills", {"workspace_root": str(billing)})
+            upgrade = await client.call_tool(
+                "setup_ide_rules", {"ides": "cursor", "workspace_root": str(billing)}
+            )
+            target = Path(upgrade.data["workspace_root"])
+            for item in upgrade.data["files"]:
+                path = target / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            after = await client.call_tool("list_skills", {"workspace_root": str(billing)})
+
+        assert "Run `/dmx/upgrade`" in before.data
+        assert target == billing
+        assert after.data == "No local or shared skills."
+
 
 class TestFindDmxRoot:
     def test_subfolder_resolves_to_the_repo_dmx(self, tmp_path: Path) -> None:
