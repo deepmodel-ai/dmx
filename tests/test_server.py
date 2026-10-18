@@ -60,6 +60,7 @@ class TestCreateApp:
         assert "add_component" in names
         assert "mark_learnings_folded" in names
         assert "check_setup" in names
+        assert "ticket_destination" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"

@@ -104,6 +104,8 @@ The [Quick Start](https://dmx.deepmodel.ai/quick-start) walks through every step
 
 `.dmx/jobs/` has no owner, so a ticket's own spec and plan never need platform approval. A repo without `.dmx/components/` works as before.
 
+Components can file tickets in their own Jira project or GitHub repo: list the allowed ones in `config.md` (`jira_projects: [LEDG, PAY]` or `github_issue_repos: [acme/mono, acme/ledger-issues]`) and set `ticket` in a `component.yaml`; dmx asks before using a destination it chose.
+
 `dmx check` (or `/dmx/check`) validates the whole setup, such as unknown `depends_on` ids, paths that match no files, components without a test command, out-of-date locks, and missing `CODEOWNERS` lines, and shows what the current branch will load, check, and run. It never changes a file and exits 1 on an error, so it can run in CI.
 
 **Shared config for the whole organization.** Define loops, skills, and validators once in a git repo and lock them into every project with `/dmx/update-shared-sources`; dmx fetches them into a git-ignored cache. Layer team config over an org baseline; each repo can still override what it needs. A component can declare its own sources in `.dmx/components/<id>/shared-sources.yaml`, locked in its folder, so its team bumps them without platform approval; add `/.dmx/components/*/shared-sources.lock @acme/platform` to `CODEOWNERS` if platform should review every component bump instead. [Shared sources →](https://dmx.deepmodel.ai/configuration/shared-sources)

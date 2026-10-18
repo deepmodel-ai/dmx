@@ -19,6 +19,7 @@ from dmx.learnings import register_learnings_tools
 from dmx.loop_tools import register_loop_tools
 from dmx.setup_check import register_check_tools
 from dmx.sync_tools import register_sync_tools
+from dmx.ticket_routing import register_ticket_routing_tools
 from dmx.tools import register_tools
 from dmx.workspaces import register_workspace_tools
 
@@ -119,6 +120,7 @@ def create_app(
     register_workspace_tools(app)
     register_learnings_tools(app)
     register_check_tools(app)
+    register_ticket_routing_tools(app)
     return app
 
 

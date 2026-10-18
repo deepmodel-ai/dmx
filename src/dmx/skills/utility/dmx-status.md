@@ -43,7 +43,7 @@ Skip if `{{repo_only}}` is `true` or `ticketing` is `none`.
 Call `searchJiraIssuesUsingJql` on `user-atlassian`:
 ```
 cloudId:    {config.cloud_id}
-jql:        project = {config.project_key} AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC
+jql:        project in ({config.project_key} and every project in jira_projects, when set) AND assignee = currentUser() AND status in ("In Progress", "In Review") ORDER BY updated DESC
 fields:     ["summary", "status", "issuetype", "priority", "updated"]
 maxResults: 25
 ```
@@ -56,7 +56,7 @@ repo:     {config.repo}
 state:    open
 assignee: {config.github_username}
 ```
-Filter to issues with label `in-progress` or `in-review`.
+Filter to issues with label `in-progress` or `in-review`. When `github_issue_repos` is set in `.dmx/config.md`, do the same for each listed repo and show each issue as `owner/repo#number`.
 
 ## Step 5 — Fetch open pull requests
 

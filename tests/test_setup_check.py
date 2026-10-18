@@ -283,6 +283,26 @@ class TestSetup:
 
         _has(clean, "info", "ledger: 2 learnings waiting", "run /dmx/update-memory ledger")
 
+    def test_a_ticket_default_outside_the_allowed_list(self, clean: Path) -> None:
+        _write(
+            clean,
+            ".dmx/config.md",
+            "branch_base: main\ntest_command: make test\nticketing: jira\nproject_key: DM\n"
+            "jira_projects: [LEDG]\n",
+        )
+        _write(
+            clean,
+            ".dmx/components/ledger/component.yaml",
+            "description: L\npaths: ['services/ledger/**']\nticket: {jira_project: LEDGR}\n",
+        )
+
+        _has(
+            clean,
+            "warn",
+            "ledger's ticket.jira_project `LEDGR` is not in jira_projects",
+            "fix ticket in its component.yaml, or allow it in .dmx/config.md",
+        )
+
     def test_it_never_changes_a_file(self, clean: Path) -> None:
         _write(clean, "services/ledger/new.go", "package ledger\n")
         before = _git(clean, "status", "--porcelain", "--ignored")

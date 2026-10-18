@@ -60,8 +60,8 @@ to identify which PRs fall within the release range.
 ## Step 4 — Collect ticket references
 
 For each PR, extract ticket references from the title and `head.ref`:
-- Jira: pattern `{project_key}-[0-9]+` (e.g. `DM-1667`)
-- GitHub Issues: pattern `#([0-9]+)` or `gh-([0-9]+)` in branch name
+- Jira: pattern `{project_key}-[0-9]+` (e.g. `DM-1667`), and the same for every project in `jira_projects` in `.dmx/config.md` when it is set (e.g. `LEDG-12`, `BILL-3`)
+- GitHub Issues: pattern `#([0-9]+)` or `gh-([0-9]+)` in branch name; when `github_issue_repos` is set, also `owner/repo#([0-9]+)` and each other repo's branch prefix (`ticket_destination`'s `branch_prefixes` on `user-dmx`, such as `ledger-issues-([0-9]+)`), each fetched from its own repo
 - none: no ticket extraction
 
 Deduplicate the list.

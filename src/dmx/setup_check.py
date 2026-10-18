@@ -347,7 +347,22 @@ def check_setup(root: Path) -> list[Finding]:
     findings += _stray_dmx(root)
     findings += _old_paths(root)
     findings += _learning_tags(root, components)
+    findings += _ticket_defaults(root)
     return findings
+
+
+def _ticket_defaults(root: Path) -> list[Finding]:
+    # Imported here: ticket_routing imports this package's modules.
+    from dmx.ticket_routing import component_ticket_problems  # noqa: PLC0415
+
+    return [
+        Finding(
+            "warn",
+            problem.removesuffix("; ignored."),
+            "fix ticket in its component.yaml, or allow it in .dmx/config.md",
+        )
+        for problem in component_ticket_problems(root)
+    ]
 
 
 def has_errors(findings: list[Finding]) -> bool:

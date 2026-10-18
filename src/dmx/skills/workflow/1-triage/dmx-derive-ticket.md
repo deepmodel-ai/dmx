@@ -92,6 +92,8 @@ Single sentence, maximum 80 characters, imperative present tense, capital first 
 
 ## Step 7 — Create the ticket
 
+**Destination** (GH-92). When `.dmx/config.md` has `jira_projects` or `github_issue_repos`, or a component sets `ticket` in its `component.yaml`, decide the ticket's components first (see **Components.** in the spec step), then call `ticket_destination` on `user-dmx` with `requested` set to the project or repo the developer named, if any, and `components` set to those components. If `blocked` is set, show it and ask which allowed destination to use. If `confirm` is true, ask its `question` and wait; when the developer picks another, call it again with that as `requested`. Then use its `target`: as `projectKey` for Jira, or as `owner` and `repo` for GitHub, with its `labels` added to the issue's labels. For a GitHub repo other than the default, store `ticket_ref` as its `short_ref` with the number filled in (such as `ledger-issues-7`), use that in the branch name in place of `gh-{number}`, add `issue_repo: {target}` to the spec frontmatter after `ticket`, and refer to the issue by its `full_ref` (such as `acme/ledger-issues#7`). Otherwise everything below applies unchanged.
+
 **If `ticketing` is `jira`:**
 
 Call `atlassianUserInfo` on `user-atlassian` to get `account_id`.

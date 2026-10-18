@@ -38,6 +38,8 @@ Treat a name as present if it appears as a local branch or as `origin/{name}` / 
 
 ## Step 2 — Fetch ticket details
 
+**Issue in another repo** (GH-92). When the ticket given is a GitHub issue in an allowed repo other than the default, written `acme/ledger-issues#7` or `ledger-issues-7` (the prefixes are in `ticket_destination`'s `branch_prefixes` on `user-dmx`), fetch it from that repo, use `ledger-issues-7` as `ticket_ref` and in the branch name in place of `gh-{number}`, and add `issue_repo: acme/ledger-issues` to the spec frontmatter after `ticket`. A linked ticket keeps its own reference; never move it.
+
 **If `ticketing` is `jira`:**
 If `{{ticket_id}}` was not provided, stop: "Provide a `ticket_id` for the production incident."
 Call `getJiraIssue` on `user-atlassian`:

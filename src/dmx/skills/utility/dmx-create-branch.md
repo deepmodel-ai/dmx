@@ -34,6 +34,8 @@ If configuration is not available in context, fall back to reading `.dmx/config.
 
 ## Step 3 — Fetch ticket details
 
+**Issue in another repo** (GH-92). When the ticket given is a GitHub issue in an allowed repo other than the default, written `acme/ledger-issues#7` or `ledger-issues-7` (the prefixes are in `ticket_destination`'s `branch_prefixes` on `user-dmx`), fetch it from that repo, use `ledger-issues-7` as `ticket_ref` and in the branch name in place of `gh-{number}`, and add `issue_repo: acme/ledger-issues` to the spec frontmatter after `ticket`. A linked ticket keeps its own reference; never move it.
+
 **If `ticketing` is `jira`:**
 
 If `{{ticket_id}}` was not provided, stop: "Jira ticketing is configured — provide a `ticket_id` (e.g. DM-1662)."

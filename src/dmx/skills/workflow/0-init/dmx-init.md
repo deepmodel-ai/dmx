@@ -269,6 +269,8 @@ cloud_id:          {cloud_id}
 project_key:       {project_key}
 ```
 
+Do not ask about more destinations. Tell the developer that a monorepo whose services file tickets in more than one place can add `jira_projects: [LEDG, PAY]` under `## Jira`, or `github_issue_repos: [owner/repo, owner/other-issues]` under `## GitHub Issues`; `project_key` and `owner/repo` stay the defaults, and a component's `ticket` in its `component.yaml` sets its own default.
+
 ## Step 8 — Populate the memory bank
 
 For each file below: if it already exists and has content beyond its header line, skip it. Otherwise read all available project context and write a substantive file. Do not write TODOs or placeholders — populate with what can be reasonably inferred.
