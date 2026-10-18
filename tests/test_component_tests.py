@@ -433,3 +433,104 @@ class TestTestCommand:
         repo_wide = [r for r in plan_tests(root).runs if r.components == ("repo-wide",)]
 
         assert [r.command for r in repo_wide] == ([command] if command else [])
+
+
+_NODE_TEST = 'const test = require("node:test");\ntest("ok", () => {});\n'
+
+
+def _workspace_repo(root: Path, files: dict[str, str], component: str = "web") -> Path:
+    """A small repo with one component at ``apps/web``, changed on a branch."""
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    _write(root, ".dmx/config.md", "branch_base: main\n")
+    _component(root, component, "description: Web\npaths: ['apps/web/**']\n")
+    for rel, text in files.items():
+        _write(root, rel, text)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "init")
+    _git(root, "checkout", "-q", "-b", _BRANCH)
+    _touch(root, "apps/web/changed.txt")
+    return root
+
+
+@pytest.mark.usefixtures("hermetic_toolchains")
+class TestOtherDefaultForms:
+    """The default commands the reference monorepo doesn't use, run for real."""
+
+    def _passes(self, root: Path, command: str) -> None:
+        [run_] = plan_tests(root).runs
+        assert run_.command == command
+        result = run(root, timeout_seconds=600)
+        assert result["pass"] is True, result["message"]
+
+    def test_npm_workspace(self, tmp_path: Path) -> None:
+        _need("npm")
+        root = _workspace_repo(
+            tmp_path,
+            {
+                "package.json": '{"private": true, "workspaces": ["apps/*"]}',
+                "apps/web/package.json": '{"name": "web", "scripts": {"test": "node --test"}}',
+                "apps/web/test/ok.test.js": _NODE_TEST,
+            },
+        )
+
+        self._passes(root, "npm test -w web")
+
+    def test_yarn_workspace(self, tmp_path: Path) -> None:
+        _need("yarn")
+        root = _workspace_repo(
+            tmp_path,
+            {
+                "package.json": '{"private": true, "workspaces": ["apps/*"]}',
+                "yarn.lock": "",
+                "apps/web/package.json": '{"name": "web", "scripts": {"test": "node --test"}}',
+                "apps/web/test/ok.test.js": _NODE_TEST,
+            },
+        )
+
+        self._passes(root, "yarn workspace web test")
+
+    def test_a_standalone_npm_package(self, tmp_path: Path) -> None:
+        _need("npm")
+        root = _workspace_repo(
+            tmp_path,
+            {
+                "apps/web/package.json": '{"name": "web", "scripts": {"test": "node --test"}}',
+                "apps/web/test/ok.test.js": _NODE_TEST,
+            },
+        )
+
+        self._passes(root, "npm test --silent")
+
+    def test_a_uv_project(self, tmp_path: Path) -> None:
+        _need("uv")
+        root = _workspace_repo(
+            tmp_path,
+            {
+                "apps/web/pyproject.toml": (
+                    '[project]\nname = "web"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n\n'
+                    '[dependency-groups]\ndev = ["pytest"]\n'
+                ),
+                "apps/web/tests/test_ok.py": "def test_ok() -> None:\n    assert True\n",
+            },
+        )
+        subprocess.run(["uv", "lock", "-q"], cwd=root / "apps" / "web", check=True)
+
+        self._passes(root, "uv run pytest -q")
+
+    def test_a_standalone_crate(self, tmp_path: Path) -> None:
+        _need("cargo")
+        root = _workspace_repo(
+            tmp_path,
+            {
+                "apps/web/Cargo.toml": (
+                    '[package]\nname = "web"\nversion = "0.1.0"\nedition = "2021"\n'
+                ),
+                "apps/web/src/lib.rs": (
+                    "#[cfg(test)]\nmod tests {\n    #[test]\n    fn ok() {}\n}\n"
+                ),
+            },
+        )
+
+        self._passes(root, "cargo test")

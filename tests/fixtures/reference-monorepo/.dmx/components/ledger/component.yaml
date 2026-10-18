@@ -1,2 +1,6 @@
 description: Ledger service, balances in minor units
 paths: ["services/ledger/**"]
+validators:
+  validate: [no_float_money]
+ticket:
+  jira_project: LEDG

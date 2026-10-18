@@ -1,0 +1,4 @@
+name: refund-drill
+skills:
+  - payments/refund-check
+human_gate: true

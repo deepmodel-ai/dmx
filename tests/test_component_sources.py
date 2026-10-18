@@ -106,8 +106,9 @@ class TestLock:
         update_shared_sources(reference_monorepo, component="ledger")
         update_shared_sources(reference_monorepo, component="payments")
 
-        trees = list((reference_monorepo / ".dmx" / ".cache").glob("*@*"))
-        assert trees == [cached_tree(reference_monorepo, str(repo), head)]
+        tree = cached_tree(reference_monorepo, str(repo), head)
+        trees = list((reference_monorepo / ".dmx" / ".cache").glob(tree.name.split("@")[0] + "@*"))
+        assert trees == [tree]
 
     def test_fetch_covers_every_lock(
         self, reference_monorepo: Path, team_source: tuple[Path, str]

@@ -36,6 +36,10 @@ jobs:
         with:
           version: 9
 
+      # The yarn workspace default command runs for real too.
+      - name: Ensure yarn
+        run: command -v yarn || npm install -g yarn
+
       - name: Install dependencies
         run: uv sync --extra dev
 

@@ -1,3 +1,7 @@
 description: Payment processing service
 paths: ["services/payments/**"]
 depends_on: [ledger]
+validators:
+  validate: [idempotent_refunds]
+ticket:
+  jira_project: PAY

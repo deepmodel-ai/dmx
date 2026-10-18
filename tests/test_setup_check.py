@@ -328,7 +328,11 @@ class TestBranchPlan:
         assert plan["repo_wide_files"] == ["Makefile"]
         assert plan["loads"] == context["memory_files"]
         assert plan["runs"] == [run.label for run in plan_tests(clean).runs]
-        assert plan["validators"]["validate"] == ["run_tests", "spec_adherence"]
+        assert plan["validators"]["validate"] == [
+            "run_tests",
+            "spec_adherence",
+            "ledger/no_float_money",
+        ]
 
     def test_component_validators_are_listed(self, clean: Path) -> None:
         _write(

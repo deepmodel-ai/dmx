@@ -13,6 +13,21 @@ import pytest
 collect_ignore_glob = ["fixtures/*"]
 
 REFERENCE_MONOREPO = Path(__file__).parent / "fixtures" / "reference-monorepo"
+PAYMENTS_TEAM_SOURCE = Path(__file__).parent / "fixtures" / "payments-team-source"
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _commit_all(root: Path, message: str) -> None:
+    for args in (
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+        ("add", "-A"),
+        ("commit", "-q", "-m", message),
+    ):
+        _git(root, *args)
 
 
 @pytest.fixture(autouse=True)
@@ -110,17 +125,38 @@ def tmp_rules_dir(tmp_path: Path) -> Path:
     return rules
 
 
+@pytest.fixture(scope="session")
+def payments_team_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The payments component's shared source as a git repo, built once per session.
+
+    One path for the whole session, so every reference monorepo locks the same
+    source and the shared-source git mirror is fetched once.
+    """
+    root = tmp_path_factory.mktemp("sources") / "payments-team"
+    shutil.copytree(PAYMENTS_TEAM_SOURCE, root)
+    _git(root, "init", "-q", "-b", "main")
+    _commit_all(root, "payments team source")
+    return root
+
+
 @pytest.fixture()
-def reference_monorepo(tmp_path: Path) -> Path:
-    """The reference monorepo (#81) in a fresh git repo, committed on ``main``."""
+def reference_monorepo(tmp_path: Path, payments_team_source: Path) -> Path:
+    """The reference monorepo (#81) in a fresh git repo, committed on ``main``.
+
+    The payments component's own shared source is declared and locked in its
+    folder, as ``/dmx/update-shared-sources payments`` would leave it.
+    """
+    from dmx.sync_runner import update_shared_sources
+
     root = tmp_path / "mono"
     shutil.copytree(REFERENCE_MONOREPO, root)
-    for args in (
-        ("init", "-q", "-b", "main"),
-        ("config", "user.email", "test@example.com"),
-        ("config", "user.name", "Test"),
-        ("add", "-A"),
-        ("commit", "-q", "-m", "reference monorepo"),
-    ):
-        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    (root / ".dmx" / "components" / "payments" / "shared-sources.yaml").write_text(
+        f"shared_sources:\n  - name: payments-team\n"
+        f"    source: git::{payments_team_source}?ref=main\n",
+        encoding="utf-8",
+    )
+    _git(root, "init", "-q", "-b", "main")
+    report = update_shared_sources(root, component="payments")
+    assert not report.failures, report.failures
+    _commit_all(root, "reference monorepo")
     return root
