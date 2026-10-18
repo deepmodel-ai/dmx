@@ -18,15 +18,28 @@ from dmx.validators import run_tests
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="CI covers macOS and Linux; Windows uses taskkill",
-)
+# Signals and sessions are POSIX; Windows stops the tree with taskkill, which
+# the portable tests below cover.
+_posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals and sessions")
+
+# A grandchild that just waits, the same on every OS.
+_SLEEPER = [sys.executable, "-c", "import time; time.sleep(120)"]
 
 
 def _not_running(pid: int) -> bool:
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
+        if sys.platform == "win32":
+            listed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if str(pid) not in listed.stdout:
+                return True
+            time.sleep(0.05)
+            continue
         result = subprocess.run(
             ["ps", "-p", str(pid), "-o", "state="],
             capture_output=True,
@@ -41,6 +54,9 @@ def _not_running(pid: int) -> bool:
 
 
 def _kill(pid: int) -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
+        return
     subprocess.run(["kill", "-9", str(pid)], capture_output=True, check=False)
 
 
@@ -56,7 +72,7 @@ def test_timeout_stops_a_grandchild(tmp_path: Path) -> None:
         f"""
         import subprocess, time
         from pathlib import Path
-        child = subprocess.Popen(["sleep", "120"])
+        child = subprocess.Popen({_SLEEPER!r})
         Path({str(pidfile)!r}).write_text(str(child.pid))
         time.sleep(120)
         """
@@ -72,6 +88,7 @@ def test_timeout_stops_a_grandchild(tmp_path: Path) -> None:
             _kill(child_pid)
 
 
+@_posix_only
 def test_child_that_ignores_sigterm_is_killed(tmp_path: Path) -> None:
     pidfile = tmp_path / "sleep.pid"
     # $$ in a ( ) subshell is the outer shell. The inner sh -c is a new
@@ -91,6 +108,7 @@ def test_child_that_ignores_sigterm_is_killed(tmp_path: Path) -> None:
             _kill(child_pid)
 
 
+@_posix_only
 def test_detached_child_holding_output_raises_timeout(tmp_path: Path) -> None:
     """A setsid child that keeps the pipe open must not raise PermissionError."""
     pidfile = tmp_path / "detached.pid"
@@ -111,6 +129,7 @@ def test_detached_child_holding_output_raises_timeout(tmp_path: Path) -> None:
             _kill(child_pid)
 
 
+@_posix_only
 def test_sigterm_is_sent_before_sigkill(tmp_path: Path) -> None:
     marker = tmp_path / "marker"
     script = textwrap.dedent(
@@ -138,9 +157,12 @@ def test_run_tests_timeout_stops_the_child(tmp_path: Path, monkeypatch: pytest.M
         run_tests,
         "_detect_test_command",
         lambda _root: [
-            "sh",
+            sys.executable,
             "-c",
-            f"sleep 120 & echo $! > {shlex.quote(str(pidfile))}; sleep 120",
+            "import pathlib, subprocess, time; "
+            f"child = subprocess.Popen({_SLEEPER!r}); "
+            f"pathlib.Path({str(pidfile)!r}).write_text(str(child.pid)); "
+            "time.sleep(120)",
         ],
     )
     child_pid = 0
@@ -168,7 +190,7 @@ def test_runner_timeout_stops_the_validators_child(tmp_path: Path) -> None:
             from pathlib import Path
             contract = json.loads(sys.stdin.read() or "{}")
             root = Path(contract["loop_context"]["workspace_root"])
-            child = subprocess.Popen(["sleep", "120"])
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
             (root / "child.pid").write_text(str(child.pid))
             time.sleep(120)
             """
