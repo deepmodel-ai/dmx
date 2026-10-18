@@ -202,6 +202,8 @@ Determine the type label:
 | `github-issues` | `Feature\|Bug \| #{number} {Summary In Title Case}` |
 | `none` | `Feature\|Bug \| {Summary In Title Case}` |
 
+**The repo's own convention wins.** Before using the format above, look for a PR title convention in `CONTRIBUTING.md`, `AGENTS.md` or `CLAUDE.md` (at the root or under `.github/`), and the PR template. If one exists, such as "plain imperative titles, no prefix" or Conventional Commits, write the title that way instead. Keep the ticket reference only if the convention allows it. Say in the output which convention you followed.
+
 ## Step 11 — Create the pull request
 
 Run `git branch --show-current` for the head branch.

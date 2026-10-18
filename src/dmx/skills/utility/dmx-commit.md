@@ -133,7 +133,11 @@ If still no ticket ref found: omit the `Closes` footer line.
 
 If `{{type}}` was provided, use it.
 
-If not, infer from the branch name prefix:
+If not, look at what is staged first:
+- only `.dmx/` ticket files, memory files or docs (`*.md`, `docs/`) → `docs`
+- only `.dmx/jobs/` loop state (`*.json`) → `chore`
+
+Otherwise infer from the branch name prefix:
 - `feature-` → `feat`
 - `bug-` → `fix`
 - `hotfix-` → `fix`

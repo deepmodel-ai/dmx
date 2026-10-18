@@ -158,7 +158,7 @@ No ticket is created. `ticket_ref` = `none`. `ticket_url` = none.
 ## Step 7 — Construct the branch name
 
 Slugify the summary:
-- Lowercase, hyphens for spaces, remove special characters, collapse consecutive hyphens, truncate to 60 chars
+- Lowercase, hyphens for spaces, remove special characters, collapse consecutive hyphens, then cut to at most 40 characters at a hyphen, so no word is split
 
 | Provider | Format | Example |
 |---|---|---|

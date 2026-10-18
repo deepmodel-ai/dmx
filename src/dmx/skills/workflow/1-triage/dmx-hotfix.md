@@ -75,7 +75,7 @@ Store `ticket_ref` = `none`.
 
 If `{{description}}` was provided, use it.
 
-If not, slugify the `summary` (lowercase, hyphens, truncate to 60 characters).
+If not, slugify the `summary` (lowercase, hyphens for spaces, remove special characters, collapse consecutive hyphens, then cut to at most 40 characters at a hyphen, so no word is split).
 
 ## Step 4 — Construct the branch name
 

@@ -192,6 +192,9 @@ class TestFullPipeline:
                 skill="create-ticket",
             )
             assert "paused" in msg.lower()
+            # GH-121: the reply says where the job's files went.
+            assert "The job folder moved from `.dmx/jobs/_pending-" in msg
+            assert "to `.dmx/jobs/GH-1/`. Edit the ticket files there from now on." in msg
 
             msg = await call("loop_continue")
             assert "chaining automatically to **plan**" in msg.lower()

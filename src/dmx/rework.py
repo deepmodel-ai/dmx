@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from dmx.loop_schema import LoopConfig
 
 __all__ = [
+    "MAX_FINDING",
     "MAX_FINDINGS",
     "MAX_LINE",
     "ReworkCheck",
@@ -35,6 +36,7 @@ __all__ = [
 
 MAX_FINDINGS = 10
 MAX_LINE = 200
+MAX_FINDING = 300
 
 _PHASE_NUMBER_RE = re.compile(r"^##\s+Phase\s+(\d+)\s*:", re.MULTILINE)
 _HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
@@ -68,13 +70,13 @@ def _first_line(text: object) -> str:
     return ""
 
 
-def _one_line(text: object) -> str:
-    """First line of *text*, without a leading bullet or checkbox, cut to ``MAX_LINE``."""
+def _one_line(text: object, limit: int = MAX_LINE) -> str:
+    """First line of *text*, without a leading bullet or checkbox, cut to *limit*."""
     line = _first_line(text)
     line = _CHECKBOX_RE.sub("", line)
     line = _BULLET_RE.sub("", line).strip()
-    if len(line) > MAX_LINE:
-        line = line[: MAX_LINE - 1].rstrip() + "…"
+    if len(line) > limit:
+        line = line[: limit - 1].rstrip() + "…"
     return line
 
 
@@ -118,7 +120,7 @@ def failed_required_checks(
             findings = [
                 line
                 for line in (
-                    _one_line(item)
+                    _one_line(item, MAX_FINDING)
                     for item in (raw_findings if isinstance(raw_findings, list) else [])
                 )
                 if line
@@ -142,13 +144,20 @@ def failed_required_checks(
 
 
 def rework_tasks(checks: list[ReworkCheck]) -> list[str]:
-    """One ``- [ ]`` task per check, with its findings as plain sub-bullets."""
+    """One ``- [ ]`` task per check, with its findings as plain sub-bullets.
+
+    A check with findings gets a short task line, so the findings carry the
+    detail once (GH-121). One without keeps its message on the task line.
+    """
     tasks: list[str] = []
     for check in checks:
-        message = _one_line(check.message) or "failed"
-        lines = [f"- [ ] Fix `{check.name}` ({check.tool}): {message}"]
-        findings = [line for line in map(_one_line, check.findings) if line]
-        lines.extend(f"  - {finding}" for finding in findings[:MAX_FINDINGS])
+        findings = [line for line in (_one_line(f, MAX_FINDING) for f in check.findings) if line]
+        if findings:
+            lines = [f"- [ ] Fix `{check.name}` ({check.tool})"]
+            lines.extend(f"  - {finding}" for finding in findings[:MAX_FINDINGS])
+        else:
+            message = _one_line(check.message) or "failed"
+            lines = [f"- [ ] Fix `{check.name}` ({check.tool}): {message}"]
         tasks.append("\n".join(lines))
     return tasks
 

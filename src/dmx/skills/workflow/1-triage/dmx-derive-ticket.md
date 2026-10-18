@@ -134,7 +134,7 @@ Store `ticket_ref` = `gh-{number}`.
 
 ## Step 8 — Construct the branch name
 
-Slugify the summary (lowercase, hyphens, no special characters, max 60 chars).
+Slugify the summary (lowercase, hyphens for spaces, remove special characters, collapse consecutive hyphens, then cut to at most 40 characters at a hyphen, so no word is split).
 
 | Provider | Format | Example |
 |---|---|---|

@@ -167,3 +167,21 @@ def _no_ide_markers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the IDE running the tests out of IDE detection (GH-119)."""
     for variable in ("CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE"):
         monkeypatch.delenv(variable, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_leftover_loop_notes() -> None:
+    """Start each test without a note a direct helper call left behind.
+
+    Tool calls run in their own context, so a note never outlives its
+    request there; tests that call the helpers directly share one.
+    """
+    from dmx import loop_tools  # noqa: PLC0415
+
+    for name in (
+        "_LEGACY_MOVE_NOTE",
+        "_MISPLACED_FILES_NOTE",
+        "_TICKET_FILES_MOVE_NOTE",
+        "_JOB_PROMOTED_NOTE",
+    ):
+        getattr(loop_tools, name).set(None)

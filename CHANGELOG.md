@@ -20,6 +20,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **(GH-121)** Smaller fixes from the first eval run:
+  - **PR titles.** `create-pr` follows a PR title convention the repo documents (`CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md` or the PR template) instead of dmx's "Feature | …" format, and says so.
+  - **Rework tasks.** A check with findings becomes a short task, ``Fix `check` (tool)``, with the findings under it, each up to 300 characters, so the same text no longer appears twice cut off at 200.
+  - **Job folder moves.** The reply that moves a pending job folder to its real id says where the files went.
+  - **Branch names.** Branch slugs stop at 40 characters at a hyphen.
+  - **Commit types.** `commit` picks `docs` for spec, memory or docs-only changes and `chore` for loop state alone, before falling back to the branch prefix.
 - **(GH-117)** A Python component whose package folder holds no tests, as in a monorepo that keeps every package's tests in a root `tests/` folder, now runs the test folders and files its `paths` map elsewhere, with pytest from the repo root (for example `uv run pytest -q tests/models tests/test_agent.py`). Before, it ran `pytest` inside the package folder, collected nothing and failed. A component with no tests anywhere has no default command and is reported as not configured. pytest's "no tests ran" (exit 5) is reported as "collected no tests" with the `test: {cmd: ..., cwd: ...}` key to set, and isn't reworked. `get_context` lists each component's test command and whether it comes from `test` or the default, `dmx check` and the "not configured" message show the key's shape, and `/dmx/init` and `/dmx/add-component` explain it.
 
 ## [0.7.1] — 2026-10-18

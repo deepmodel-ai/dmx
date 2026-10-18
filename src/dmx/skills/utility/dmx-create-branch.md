@@ -81,7 +81,7 @@ If not provided and ticketing is `jira` or `github-issues`, slugify the `summary
 - Replace spaces/underscores with hyphens
 - Remove non-alphanumeric/hyphen characters
 - Collapse consecutive hyphens, strip leading/trailing
-- Truncate to 60 characters
+- Cut to at most 40 characters at a hyphen, so no word is split
 
 ## Step 5 — Construct the branch name
 

@@ -148,6 +148,10 @@ _LEGACY_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _TICKET_FILES_MOVE_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "dmx_ticket_files_move", default=None
 )
+# Set when a pending job folder is renamed to its real id (GH-121).
+_JOB_PROMOTED_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dmx_job_promoted", default=None
+)
 # Set when a merge had filed this branch's ticket files under another ticket.
 _MISPLACED_FILES_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "dmx_misplaced_ticket_files", default=None
@@ -156,7 +160,12 @@ _MISPLACED_FILES_NOTE: contextvars.ContextVar[str | None] = contextvars.ContextV
 
 def _with_legacy_note(message: str) -> str:
     """Append the job-move and ticket-file lines once, then clear them."""
-    for var in (_LEGACY_MOVE_NOTE, _MISPLACED_FILES_NOTE, _TICKET_FILES_MOVE_NOTE):
+    for var in (
+        _LEGACY_MOVE_NOTE,
+        _MISPLACED_FILES_NOTE,
+        _TICKET_FILES_MOVE_NOTE,
+        _JOB_PROMOTED_NOTE,
+    ):
         note = var.get()
         if not note:
             continue
@@ -857,6 +866,10 @@ def _maybe_promote_pending_job(root: Path, job_id: str) -> str:
         )
     rename_job(root, job_id, real_job_id)
     logger.info("promoted pending job %s -> %s", job_id, real_job_id)
+    _JOB_PROMOTED_NOTE.set(
+        f"The job folder moved from `.dmx/jobs/{job_id}/` to `.dmx/jobs/{real_job_id}/`. "
+        f"Edit the ticket files there from now on."
+    )
     if from_root:
         _move_root_ticket_files(root, real_job_id)
     return real_job_id

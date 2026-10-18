@@ -218,10 +218,9 @@ class TestValidateRework:
         tasks = _tasks(workspace)
         assert "## Phase 2: Rework — validate, round 1" in tasks
         assert (
-            "- [ ] Fix `scope_matches_spec` (spec_adherence): "
-            "Scope item(s) with no evidence in the diff: Refund endpoint"
+            "- [ ] Fix `scope_matches_spec` (spec_adherence)\n"
+            "  - Missing scope item: Refund endpoint\n"
         ) in tasks
-        assert "  - Missing scope item: Refund endpoint" in tasks
         assert tasks.count("- [ ]") == 1
         loop, task_id = _active(workspace)
         state = _state(workspace, loop, task_id)
@@ -372,8 +371,10 @@ class TestValidateRework:
 
         tasks = _tasks(workspace)
         assert tasks.count("- [ ]") == 2
-        assert "- [ ] Fix `tests_pass` (run_tests): Tests failed" in tasks
-        assert "  - FAILED tests/test_refund.py::test_partial - AssertionError" in tasks
+        assert (
+            "- [ ] Fix `tests_pass` (run_tests)\n"
+            "  - FAILED tests/test_refund.py::test_partial - AssertionError\n"
+        ) in tasks
 
 
 class TestNotReworkable:
@@ -845,11 +846,29 @@ class TestPhaseText:
         )
         (task,) = rework_tasks([check])
         lines = task.splitlines()
-        assert lines[0].startswith("- [ ] Fix `a` (probe): sneaky ")
-        assert len(lines[0]) <= len("- [ ] Fix `a` (probe): ") + 200
+        assert lines[0] == "- [ ] Fix `a` (probe)"
         assert len(lines) == 11
         assert all(line.startswith("  - finding") for line in lines[1:])
         assert "second line" not in task
+
+    def test_a_check_without_findings_keeps_its_message_on_the_task(self) -> None:
+        check = ReworkCheck(name="a", tool="probe", message="- [ ] sneaky " + "x" * 300)
+
+        (task,) = rework_tasks([check])
+
+        assert task.startswith("- [ ] Fix `a` (probe): sneaky ")
+        assert len(task) <= len("- [ ] Fix `a` (probe): ") + 200
+        assert task.endswith("…")
+
+    def test_findings_keep_up_to_300_characters(self) -> None:
+        check = ReworkCheck(name="a", tool="probe", message="m", findings=["y" * 280, "z" * 400])
+
+        (task,) = rework_tasks([check])
+
+        first, second = task.splitlines()[1:]
+        assert first == "  - " + "y" * 280
+        assert len(second) == len("  - ") + 300
+        assert second.endswith("…")
 
     def test_phase_numbers_follow_the_highest(self, tmp_path: Path) -> None:
         tasks = tmp_path / "tasks.md"
