@@ -6,12 +6,19 @@ period, the group gets SIGKILL. Windows stops the tree with ``taskkill /T /F``.
 
 A process that starts its own session or process group, which some Docker
 and ``docker compose`` test setups do, is not in this group and keeps running.
+
+On Windows the program is looked up with :func:`shutil.which` first, so a
+command installed as a ``.cmd`` file, such as ``npm``, ``pnpm`` or ``yarn``,
+is found the way a shell would find it. Output is decoded as UTF-8 on every
+platform, with undecodable bytes replaced, so a test tool's output never
+fails to decode.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -53,12 +60,18 @@ def _popen(
 ) -> subprocess.Popen[str]:
     stdin: int | None = subprocess.PIPE if input is not None else subprocess.DEVNULL
     if sys.platform == "win32":
+        # CreateProcess finds only .exe files by bare name; npm, pnpm and
+        # yarn are .cmd files.
+        program = shutil.which(cmd[0])
+        if program is None:
+            raise FileNotFoundError(cmd[0])
         return subprocess.Popen(
-            cmd,
+            [program, *cmd[1:]],
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=cwd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -67,7 +80,8 @@ def _popen(
         stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=cwd,
         start_new_session=True,
     )

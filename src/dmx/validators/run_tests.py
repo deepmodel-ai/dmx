@@ -145,7 +145,10 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
             list(test.argv), timeout=max(1, int(remaining)), cwd=str(root / test.cwd)
         )
     except FileNotFoundError:
-        return {**record, "status": "missing", "line": f"`{test.argv[0]}` not found on PATH"}
+        line = f"`{test.argv[0]}` not found on PATH"
+        if test.argv[0] == "sh" and sys.platform == "win32":
+            line += " (`test` and `test_command` run through `sh`: install Git for Windows)"
+        return {**record, "status": "missing", "line": line}
     except subprocess.TimeoutExpired:
         limit = max(1, int(remaining))
         return {**record, "status": "timeout", "line": f"{test.command} timed out after {limit}s"}
