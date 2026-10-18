@@ -40,6 +40,8 @@ Loops are YAML in your repo. Override any default in `.dmx/loops/`, add your own
 
 ## Quick start
 
+**Before you start:** dmx reaches GitHub through the [GitHub MCP server](https://github.com/github/github-mcp-server) connected in your IDE, or, without it, a signed-in [`gh` CLI](https://cli.github.com/) (`gh auth login`). Jira ticketing also needs the Atlassian MCP server.
+
 **1. Add dmx to your IDE.** There's nothing to install: `uvx` fetches dmx on demand. Every IDE uses the same config:
 
 ```json

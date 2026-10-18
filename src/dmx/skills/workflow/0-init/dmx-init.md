@@ -4,7 +4,7 @@ title: Init — Set Up Project
 description: One-time project setup. Walks the developer through workflow mode and ticketing configuration interactively, auto-detects GitHub settings and tech stack, writes .dmx/config.md, and scaffolds the memory bank. Safe to re-run — updates config without overwriting memory bank files that already have content.
 ---
 
-You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 3 and 4 require the developer's input, and Step 9 does in a workspace repo — ask, then wait for their answer before continuing.
+You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 4 and 5 require the developer's input, and Step 9 does in a workspace repo — ask, then wait for their answer before continuing.
 
 ## Step 1 — Check for existing setup
 
@@ -70,7 +70,39 @@ Scan the project root for tech stack signals:
 - `go.mod` → Go
 - `README.md` → read first 20 lines for project description
 
-## Step 3 — Ask: workflow mode
+## Step 3 — Check GitHub access
+
+Check this before asking anything, so a developer who has to set it up doesn't answer the questions twice.
+
+dmx reaches GitHub through the GitHub MCP server (`user-github`) or, without it, the `gh` CLI.
+
+1. Try the server. List pull requests for the detected `owner`/`repo`:
+   ```
+   list_pull_requests owner:{owner} repo:{repo} state:open
+   ```
+   If it answers, even with an API-level error (no PRs, rate limit, auth), record `github_access` = `mcp` and continue.
+2. If the server isn't connected (MCP-level error: server not found, tool unavailable), try the CLI:
+   ```
+   gh auth status
+   gh repo view {owner}/{repo} --json name
+   ```
+   If both succeed, record `github_access` = `gh`, tell the developer "No GitHub MCP server is connected, so dmx will use the `gh` CLI for branches, PRs and issues.", and continue.
+3. If neither works, stop and output:
+```
+dmx needs GitHub access, through the GitHub MCP server or the gh CLI. Neither is set up.
+
+Either sign in to the gh CLI:
+  gh auth login
+
+Or add the GitHub MCP server (https://github.com/github/github-mcp-server) as user-github:
+  Claude Code:  claude mcp add --transport http user-github https://api.githubcopilot.com/mcp/
+  Cursor:       Settings → MCP → add a server named user-github
+  VS Code:      add a user-github server to .vscode/mcp.json, or Copilot's mcp-config.json
+
+Then re-run /dmx/init. No files were written.
+```
+
+## Step 4 — Ask: workflow mode
 
 Output exactly:
 
@@ -91,7 +123,7 @@ Wait for the developer's answer. Accept `1`, `2`, `freestyle`, or `sdlc`. If any
 
 Set `workflow` = `freestyle` for 1, `sdlc` for 2.
 
-## Step 4 — Ask: ticketing system
+## Step 5 — Ask: ticketing system
 
 Output exactly:
 
@@ -135,72 +167,20 @@ Wait. Record as `cloud_id`.
 ```
 Wait. Record as `project_key`.
 
-## Step 5 — Verify MCP server availability
-
-Check that the required MCP servers are active before writing any config.
-
-**GitHub access (always required)**
-
-dmx reaches GitHub through the GitHub MCP server (`user-github`) or, without it, the `gh` CLI.
-
-1. Try the server. List pull requests for the detected `owner`/`repo`:
-   ```
-   list_pull_requests owner:{owner} repo:{repo} state:open
-   ```
-   If it answers, even with an API-level error (no PRs, rate limit, auth), record `github_access` = `mcp` and continue.
-2. If the server isn't connected (MCP-level error: server not found, tool unavailable), try the CLI:
-   ```
-   gh auth status
-   gh repo view {owner}/{repo} --json name
-   ```
-   If both succeed, record `github_access` = `gh`, tell the developer "No GitHub MCP server is connected, so dmx will use the `gh` CLI for branches, PRs and issues.", and continue.
-3. If neither works, stop and output:
-```
-dmx needs GitHub access, through the GitHub MCP server or the gh CLI. Neither is set up.
-
-Either sign in to the gh CLI:
-  gh auth login
-
-Or add the GitHub MCP server (https://github.com/github/github-mcp-server) as user-github:
-  Claude Code:  claude mcp add --transport http user-github https://api.githubcopilot.com/mcp/
-  Cursor:       Settings → MCP → add a server named user-github
-  VS Code:      add a user-github server to .vscode/mcp.json, or Copilot's mcp-config.json
-
-Then re-run /dmx/init. No files were written.
-```
-
----
-
-**`user-atlassian` (required when ticketing is `jira`)**
-
-Only check if `ticketing` is `jira`.
-
-Attempt:
+Then check the Atlassian MCP server (`user-atlassian`) right away:
 ```
 atlassianUserInfo
 ```
-
-If the call fails with an MCP-level error:
-
-Stop and output:
+If it answers, even with an API-level error, continue. If the server isn't connected (MCP-level error), stop and output:
 ```
-The user-atlassian MCP server is not active.
+Jira needs the Atlassian MCP server (https://github.com/atlassian/mcp-atlassian) as user-atlassian.
 
-This server is required for Jira integration.
+  Claude Code:  claude mcp add user-atlassian …  (the command or URL from the server's setup guide)
+  Cursor:       Settings → MCP → add a server named user-atlassian
+  VS Code:      add a user-atlassian server to .vscode/mcp.json, or Copilot's mcp-config.json
 
-To add it in Cursor:
-  1. Open Settings → MCP
-  2. Add a new server named user-atlassian
-  3. Use the Atlassian MCP server: https://github.com/atlassian/mcp-atlassian
-  4. Authenticate with your Atlassian account
-  5. Re-run /dmx/init once active
-
-No files were written.
+Sign in with your Atlassian account, then re-run /dmx/init. No files were written.
 ```
-
-If the call succeeds or fails with an API-level error — proceed.
-
----
 
 ## Step 6 — Set up IDE rules
 
@@ -219,6 +199,8 @@ After writing, tell the developer: "IDE rules written. Open a new chat for the r
 If `notes` lists files that could not be read or have no end to their dmx block, tell the developer which files were not changed and that they need to be fixed by hand before re-running `/dmx/upgrade`.
 
 If `setup_ide_rules` returns an empty `files` list (e.g. unsupported IDE), note it in the output and continue — the memory bank setup in the next step is still valuable.
+
+**Ignored rule files.** Run `git check-ignore -v` on every file you wrote. If one is ignored (for example `.claude/*` in `.gitignore`), it won't be committed, so teammates won't get the dmx rule. Show the matching `.gitignore` line and offer to add a negation after it, such as `!.claude/rules/` (when a whole folder is ignored, as with `.claude/`, replace that line with `.claude/*` and add the negation after it). After adding it, run `git check-ignore` again to confirm the file is no longer ignored. If the developer declines, tell them each teammate has to run `/dmx/init` or `/dmx/upgrade` themselves to get the rule.
 
 ## Step 7 — Write .dmx/config.md
 
@@ -392,10 +374,22 @@ Setup complete.
 
 Then, depending on workflow:
 
+**Commit the setup.** The setup is still uncommitted, and `/dmx/run-loop spec` starts from `{branch_base}`, so the setup must be on `{branch_base}` first. Ask:
+```
+The dmx setup isn't committed yet. Loops start from {branch_base}, so it needs to land there first.
+
+  1. Commit it on {branch_base} and push (if you can push to {branch_base} directly)
+  2. Commit it on a branch named chore-dmx-setup and open a PR; merge the PR before starting a loop
+  3. Leave it uncommitted for now
+
+Enter 1, 2 or 3:
+```
+Wait for the answer and do it. For 2, open the PR with the GitHub access from Step 3.
+
 **If `workflow` is `sdlc`:**
 ```
 Next steps:
-  - Run /dmx/run-loop spec <description> to start a new piece of work.
+  - Run /dmx/run-loop spec <description> to start a new piece of work (once the setup is on {branch_base}).
   - Run /dmx/derive-ticket if you already have uncommitted changes to formalise.
   - Review .dmx/ — confirm the memory bank was populated correctly.
 ```

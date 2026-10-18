@@ -24,6 +24,13 @@ _CLIENT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# Claude Code sets these for every process it starts, MCP servers included.
+_ENV_MARKERS: tuple[tuple[str, str], ...] = (
+    ("CLAUDE_CODE_ENTRYPOINT", "claude"),
+    ("CLAUDECODE", "claude"),
+)
+
+
 def resolve_ide_targets(
     explicit_ides: list[str] | None,
     client_name: str | None,
@@ -36,7 +43,9 @@ def resolve_ide_targets(
     2. ``X-Dmx-IDE`` HTTP header value.
     3. Explicit *explicit_ides* argument from the tool call.
     4. MCP ``clientInfo.name`` pattern matching.
-    5. Fallback: empty tuple with source ``"unknown"``.
+    5. An environment variable the IDE sets for its MCP servers, such as
+       ``CLAUDE_CODE_ENTRYPOINT`` for Claude Code (source ``"env_marker"``).
+    6. Fallback: empty tuple with source ``"unknown"``.
 
     Args:
         explicit_ides: IDE names passed explicitly by the caller (e.g. from
@@ -81,6 +90,12 @@ def resolve_ide_targets(
             if pattern.search(client_name):
                 logger.debug("IDE resolved from clientInfo as %s: %s", ide, client_name)
                 return (ide,), "client_info"
+
+    # 5. Variables the IDE sets for the MCP servers it starts (GH-119).
+    for variable, ide in _ENV_MARKERS:
+        if os.environ.get(variable):
+            logger.debug("IDE resolved from %s as %s", variable, ide)
+            return (ide,), "env_marker"
 
     logger.debug("IDE could not be determined; client_name=%r", client_name)
     return (), "unknown"

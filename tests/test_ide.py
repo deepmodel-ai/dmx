@@ -18,6 +18,19 @@ from dmx.ide.emitters import (
 
 
 class TestResolveIdeTargets:
+    @pytest.mark.parametrize("variable", ["CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE"])
+    def test_claude_code_is_found_from_its_environment(
+        self, monkeypatch: pytest.MonkeyPatch, variable: str
+    ) -> None:
+        monkeypatch.setenv(variable, "cli")
+
+        assert resolve_ide_targets(None, None, None) == (("claude",), "env_marker")
+
+    def test_client_info_wins_over_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+
+        assert resolve_ide_targets(None, "Cursor/1.0", None) == (("cursor",), "client_info")
+
     def test_cursor_detected_from_client_name(self) -> None:
         ides, source = resolve_ide_targets(None, "Cursor/1.0", None)
         assert "cursor" in ides

@@ -160,3 +160,10 @@ def reference_monorepo(tmp_path: Path, payments_team_source: Path) -> Path:
     assert not report.failures, report.failures
     _commit_all(root, "reference monorepo")
     return root
+
+
+@pytest.fixture(autouse=True)
+def _no_ide_markers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the IDE running the tests out of IDE detection (GH-119)."""
+    for variable in ("CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE"):
+        monkeypatch.delenv(variable, raising=False)
