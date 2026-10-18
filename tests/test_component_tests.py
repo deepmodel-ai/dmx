@@ -484,7 +484,10 @@ class TestOtherDefaultForms:
             {
                 "package.json": '{"private": true, "workspaces": ["apps/*"]}',
                 "yarn.lock": "",
-                "apps/web/package.json": '{"name": "web", "scripts": {"test": "node --test"}}',
+                # Yarn 1 ignores a workspace package without a version.
+                "apps/web/package.json": (
+                    '{"name": "web", "version": "0.1.0", "scripts": {"test": "node --test"}}'
+                ),
                 "apps/web/test/ok.test.js": _NODE_TEST,
             },
         )
