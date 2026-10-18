@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-18
+
 ### Fixed
 
 - **(GH-112)** dmx works on Windows, and CI now runs the full suite on Windows as well as macOS and Linux, for Python 3.11–3.13, with every toolchain required. `run_tests` finds commands installed as `.cmd` files, such as `npm`, `pnpm`, and `yarn`, which it reported as "not found on PATH" before, including for the root `npm test` it has used since 0.1. An MCP root such as `file:///C:/Users/me/repo` resolves to that folder; it pointed at the wrong path before, so dmx couldn't find the repo. Shared-source mirror and cache folders get a short name for a long address (a readable tail plus a hash) so they stay under Windows' 260-character path limit; short addresses keep their names. Skill files are read as UTF-8 rather than the locale's code page, test and validator output is decoded as UTF-8 with undecodable bytes replaced, loop-state writes retry briefly when Windows refuses to replace a file another thread is using, and cached trees and git mirrors with read-only files can be deleted. Skill root paths and paths in notes use `/` on every OS. `test:` overrides and `test_command` run through `sh`, so on Windows they need Git for Windows; a missing `sh` says so.
@@ -241,7 +243,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/deepmodel-ai/dmx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/deepmodel-ai/dmx/compare/v0.5.0...v0.5.1
