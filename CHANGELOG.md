@@ -9,6 +9,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-18
+
+**Upgrading from 0.6.** Nothing moves, and components are opt-in: a repo without `.dmx/components/` behaves as in 0.6.
+
+1. Run `/dmx/upgrade` once on a branch and commit the refreshed rule files. The rule changed, so loops remind you until you do.
+2. To split a monorepo into components, re-run `/dmx/init` (it finds pnpm, npm, yarn, `go.work`, `uv` and Cargo workspaces) or run `/dmx/add-component <path>` for each service. Then fill in `depends_on`, add `test_command` to `.dmx/config.md`, and add the suggested `CODEOWNERS` lines.
+3. Run `dmx check` and fix what it reports. It exits 1 on an error, so it can run in CI too.
+4. With components, `run_tests` runs each touched component's tests with its own toolchain. CI that runs the validate loop needs those toolchains (Go, Node with pnpm or yarn, uv, Cargo) installed.
+
 ### Added
 
 - **(GH-92)** Tickets can go to more than one Jira project or GitHub repo. `config.md` may list `jira_projects: [LEDG, PAY, BILL]` or `github_issue_repos: [acme/mono, acme/ledger-issues]` (one line, read as YAML; `project_key` and `owner/repo` stay the defaults), and a component may set its own default in `component.yaml`: `ticket: {jira_project: PAY}`, or `ticket: {github_repo: acme/ledger-issues, github_labels: [area/ledger]}`. A new `ticket_destination` tool, which `create-ticket` and `derive-ticket` call, picks what the developer named, else the ticket's components' default, else the repo default, and asks first whenever dmx made the choice, such as "Create the ticket in LEDG (default for ledger)?"; when components disagree it lists each option and asks which. An issue in a repo other than the default is written `acme/ledger-issues#7` in references and closing keywords and `ledger-issues-7` in branch names, job ids and the spec's `ticket`, with `issue_repo` in the spec frontmatter, so no `/` or `#` reaches a path; `create-pr`, `draft-pr-description`, `commit`, `plan` and `close-ticket` use it, and `create-branch` and `/dmx/hotfix` accept a ticket in another repo and keep its reference. Release notes match keys from every allowed project and repo, and `/dmx/status` lists tickets from all of them. `dmx check` warns about a component default outside the allowed list. A repo with one destination, or no ticketing, behaves as before.
@@ -228,7 +237,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/deepmodel-ai/dmx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/deepmodel-ai/dmx/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/deepmodel-ai/dmx/compare/v0.4.2...v0.5.0
