@@ -18,6 +18,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **(GH-120)** dmx works with the `gh` CLI when no GitHub MCP server is connected. `/dmx/init` tries the server first. Without it, a signed-in `gh` that can see the repo is enough, and init records `github_access: gh` (or `mcp`) in `config.md`. The rule maps each GitHub tool the skills call (branches, PRs, issues, comments) to its `gh` command, and each skill that calls GitHub points to that table. `dmx check` reports which access is set and, for `gh`, whether it's installed and signed in. Before, init stopped without the MCP server even when `gh` was signed in.
 - **(GH-119)** `/dmx/init` checks GitHub access before asking anything, and checks the Atlassian server right after the Jira answers. A developer who has to set one up no longer answers every question twice. Its stop messages give the setup for Claude Code, Cursor and VS Code, not only Cursor. When `.gitignore` hides a rule file it wrote, such as `.claude/*`, it offers a negation like `!.claude/rules/` and confirms it with `git check-ignore`, so teammates get the rule. At the end it offers to commit the setup on the base branch or open a setup PR, because loops start from the base branch. `detect_invoking_ide` also recognises Claude Code from the environment it gives its MCP servers. The README's quick start now says dmx needs the GitHub MCP server or a signed-in `gh`.
 
+### Changed
+
+- **(GH-122)** Loop state is committed when a chain stops, not at every step. A loop that chains to the next, or rework returning to the failed loop, no longer makes its own `chore: sync loop state` commit; the next commit (`commit`, `create-pr`) picks the state up. A loop with no next loop, or a chain the branch guard blocks, still commits its final state (GH-23). In the first eval run, these commits were 6 of the branch's 12.
+
 ### Fixed
 
 - **(GH-121)** Smaller fixes from the first eval run:

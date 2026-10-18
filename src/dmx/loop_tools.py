@@ -1592,11 +1592,12 @@ _COMMIT_DMX_STATE_TIMEOUT_SECONDS = 15
 def _commit_dmx_state(root: Path, message: str) -> str | None:
     """Best-effort commit of any uncommitted ``.dmx/`` changes.
 
-    Called once a loop run has genuinely finished (a terminal outcome —
-    not ``paused``/``iterating``, which will write state again on the next
-    call) so its final state — the job's state JSON and the session-note
-    breadcrumb ``_finish_loop`` just wrote to ``activeContext.md`` — isn't
-    left as an uncommitted, local-only change. This matters most for a
+    Called once a chain of loop runs has genuinely finished (a terminal
+    outcome with no next loop, or a blocked chain — not ``paused``/
+    ``iterating``, and not a step that chains on, GH-122) so its final
+    state — the job's state JSON and the session-note breadcrumb
+    ``_finish_loop`` just wrote to ``activeContext.md`` — isn't left as an
+    uncommitted, local-only change. This matters most for a
     loop with no ``on_complete`` chain target (e.g. the bundled ``release``
     loop): nothing downstream runs to commit on its behalf, and
     ``close-ticket`` explicitly makes no ``.dmx/`` changes before
@@ -2212,11 +2213,8 @@ def _return_to_parent(
         f"{rework.get('max_rounds')}): it runs again from its first skill, then its "
         f"validators.\n\n{instruction}"
     )
-    commit_warning = _commit_dmx_state(
-        root, f"chore: sync loop state for {parent_loop} rework (job {job_id})"
-    )
-    if commit_warning:
-        message = f"{commit_warning}\n\n{message}"
+    # Like chaining, returning to the parent leaves the state for the next
+    # commit (GH-122).
     if finished is not None:
         _publish_finish_message(
             root,
@@ -2608,16 +2606,13 @@ def _apply_loop_outcome(
             f"{loop_name} loop completed (outcome: {outcome}) — "
             f"chained to {next_loop} (job `{job_id}`).",
         )
-        commit_warning = _commit_dmx_state(
-            root, f"chore: sync loop state for {loop_name} (job {job_id})"
-        )
+        # No commit here: the next loop's commit or create-pr picks this
+        # state up, and the chain's last loop commits it (GH-122, GH-23).
         started = _start_loop(root, next_loop, pending_finish=True)
         chain_header = (
             f"**{loop_name} loop — complete** (outcome: `{outcome}`)\n\n"
             f"Chaining automatically to **{next_loop}** loop.\n\n"
         )
-        if commit_warning:
-            chain_header += f"{commit_warning}\n\n"
         message = _with_why(chain_header + started.message, why)
         _publish_finish_message(root, job_id, loop_name, task_id, message, chained=started.chained)
         return message

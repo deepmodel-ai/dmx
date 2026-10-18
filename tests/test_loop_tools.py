@@ -914,6 +914,34 @@ class TestCommitDmxState:
         assert _dmx_dirty(tmp_path) == ""
         assert _commit_count(tmp_path) == before + 1
 
+    def test_a_chaining_loop_leaves_its_state_for_the_next_commit(self, tmp_path: Path) -> None:
+        """GH-122: chaining makes no commit of its own; the chain's end does."""
+        _init_real_git_repo(tmp_path)
+        loops = tmp_path / ".dmx" / "loops"
+        loops.mkdir(parents=True)
+        (loops / "second.yaml").write_text(
+            "name: second\nskills: [finish]\n"
+            "validators:\n  - tool: v\n    checks:\n      - name: check_a\n",
+            encoding="utf-8",
+        )
+        first = LoopConfig.model_validate(
+            {
+                "name": "first",
+                "skills": ["work"],
+                "validators": [{"tool": "v", "checks": [{"name": "check_a", "required": True}]}],
+                "on_complete": {"on_success": {"trigger_loop": "second"}},
+            }
+        )
+        _write_validator(tmp_path, "v", PASSING_VALIDATOR)
+        _setup(tmp_path, first, job_id="GH-1", task_id="T")
+        before = _commit_count(tmp_path)
+
+        message = _finish_loop(tmp_path, "GH-1", "first", "T", first, {})
+
+        assert "chaining automatically to **second**" in message.lower()
+        assert _commit_count(tmp_path) == before
+        assert _dmx_dirty(tmp_path) != ""
+
     def test_release_style_loop_surfaces_a_warning_when_the_commit_attempt_fails(
         self, tmp_path: Path
     ) -> None:
