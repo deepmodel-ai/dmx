@@ -13,16 +13,21 @@ A component's command is its ``test`` entry, run through ``sh -c`` from
 ``cwd`` (the repo root when absent), else the default for what its folder
 holds (:func:`dmx.workspaces.default_test_command`). A component with
 neither is unconfigured, which fails the tests rather than skipping them.
+
+A component's ``test`` entry can list ``known_failures`` (GH-118), and
+``config.md``'s ``test_known_failures`` does the same for ``test_command``.
+A run whose only failures are listed passes; ``run_tests`` decides that.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dmx.components import ComponentSet, load_components
 from dmx.ticket_components import changed_files
+from dmx.ticket_routing import read_config_list
 from dmx.workspaces import TestCommand, default_test_command
 
 if TYPE_CHECKING:
@@ -30,9 +35,19 @@ if TYPE_CHECKING:
 
     from dmx.components import Component
 
-__all__ = ["REPO_WIDE", "TestPlan", "TestRun", "component_test", "dependents", "plan_tests"]
+__all__ = [
+    "KNOWN_FAILURES_KEY",
+    "REPO_WIDE",
+    "TestPlan",
+    "TestRun",
+    "component_test",
+    "dependents",
+    "plan_tests",
+]
 
 REPO_WIDE = "repo-wide"
+# ``config.md`` key for the repo-wide command's known failures (GH-118).
+KNOWN_FAILURES_KEY = "test_known_failures"
 REASON_CHANGED = "changed files"
 REASON_REPO_WIDE = "repo-wide change"
 
@@ -48,6 +63,8 @@ class TestRun:
     argv: tuple[str, ...]
     cwd: str
     command: str
+    # Failures the gate accepts for this run (GH-118).
+    known_failures: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -93,7 +110,7 @@ def _command(root: Path, component: Component) -> tuple[tuple[str, ...], str, st
     return found.argv, found.cwd, " ".join(found.argv)
 
 
-def component_test(root: Path, component: Component) -> dict[str, str] | None:
+def component_test(root: Path, component: Component) -> dict[str, Any] | None:
     """*component*'s test command, its folder and where it came from, for ``get_context`` (GH-117).
 
     ``source`` is ``test`` for a ``test`` entry in ``component.yaml`` and
@@ -103,11 +120,14 @@ def component_test(root: Path, component: Component) -> dict[str, str] | None:
     if command is None:
         return None
     _argv, cwd, shown = command
-    return {
+    found: dict[str, Any] = {
         "command": shown,
         "cwd": cwd,
         "source": "test" if component.test is not None else "default",
     }
+    if component.known_failures:
+        found["known_failures"] = list(component.known_failures)
+    return found
 
 
 def _test_command(root: Path) -> str | None:
@@ -141,7 +161,7 @@ def plan_tests(root: Path) -> TestPlan:
     for component_id, via in dependents(components, set(reasons)).items():
         reasons[component_id] = f"depends on {via}"
 
-    grouped: dict[tuple[tuple[str, ...], str], tuple[list[str], str]] = {}
+    grouped: dict[tuple[tuple[str, ...], str], tuple[list[str], str, list[str]]] = {}
     unconfigured: list[str] = []
     for component_id in sorted(reasons):
         found = components.get(component_id)
@@ -152,14 +172,30 @@ def plan_tests(root: Path) -> TestPlan:
             unconfigured.append(component_id)
             continue
         argv, cwd, shown = command
-        grouped.setdefault((argv, cwd), ([], shown))[0].append(component_id)
+        ids, _shown, known = grouped.setdefault((argv, cwd), ([], shown, []))
+        ids.append(component_id)
+        known.extend(k for k in found.known_failures if k not in known)
     runs = [
-        TestRun(components=tuple(ids), argv=argv, cwd=cwd, command=shown)
-        for (argv, cwd), (ids, shown) in grouped.items()
+        TestRun(
+            components=tuple(ids),
+            argv=argv,
+            cwd=cwd,
+            command=shown,
+            known_failures=tuple(known),
+        )
+        for (argv, cwd), (ids, shown, known) in grouped.items()
     ]
     if repo_wide_command is not None:
         argv, cwd, shown = _shell(repo_wide_command, None)
-        runs.append(TestRun(components=(REPO_WIDE,), argv=argv, cwd=cwd, command=shown))
+        runs.append(
+            TestRun(
+                components=(REPO_WIDE,),
+                argv=argv,
+                cwd=cwd,
+                command=shown,
+                known_failures=tuple(read_config_list(root, KNOWN_FAILURES_KEY) or ()),
+            )
+        )
     return TestPlan(
         runs=tuple(runs),
         unconfigured=tuple(unconfigured),

@@ -676,3 +676,122 @@ class TestTestsOutsideThePackage:
 
         assert result["pass"] is True, result["message"]
         assert "✓ pkg-a — pytest -q tests/models tests/test_top.py (exit 0)" in result["message"]
+
+
+def _failing(*lines: str, code: int = 1) -> str:
+    """A ``test:`` entry whose command prints *lines* and exits *code*."""
+    echoes = "; ".join(f"echo '{line}'" for line in lines)
+    return f'test:\n  cmd: "{echoes}; exit {code}"\n'
+
+
+class TestKnownFailures:
+    """GH-118: listed failures don't block the gate; anything else still does."""
+
+    def test_a_run_whose_only_failures_are_listed_passes(self, tmp_path: Path) -> None:
+        entry = _failing(
+            "FAILED tests/test_display.py::test_banner - OSError",
+            "1 failed, 40 passed",
+        )
+        entry += "  known_failures: [tests/test_display.py::test_banner]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is True, result["message"]
+        assert "✓ a — " in result["message"]
+        assert "known failures only" in result["message"]
+        assert "Known failures: tests/test_display.py::test_banner" in result["message"]
+
+    def test_an_unlisted_failure_still_fails(self, tmp_path: Path) -> None:
+        entry = _failing(
+            "FAILED tests/test_display.py::test_banner - OSError",
+            "FAILED tests/test_refund.py::test_partial - AssertionError",
+        )
+        entry += "  known_failures: [tests/test_display.py::test_banner]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is False
+        [check] = result["checks"]
+        assert check["findings"][-1] == "FAILED tests/test_refund.py::test_partial - AssertionError"
+        assert "FAILED tests/test_display.py::test_banner - OSError" not in check["findings"]
+        assert "can be listed under `known_failures`" in result["message"]
+
+    def test_a_failure_with_no_test_lines_still_fails(self, tmp_path: Path) -> None:
+        entry = _failing("ImportError: no module named x") + "  known_failures: [anything]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        assert run(root)["pass"] is False
+
+    def test_a_listed_test_that_did_not_fail_is_noted(self, tmp_path: Path) -> None:
+        entry = "test:\n  cmd: 'echo 3 passed'\n  known_failures: [tests/test_x.py::test_gone]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is True
+        assert (
+            "Listed known failures that didn't fail: tests/test_x.py::test_gone "
+            "(remove them from known_failures if they pass now)"
+        ) in result["message"]
+
+    @pytest.mark.parametrize(
+        ("line", "known"),
+        [
+            ("--- FAIL: TestCharge (0.00s)", "TestCharge"),
+            ("FAIL src/fees.test.ts", "src/fees.test.ts"),
+            ("ERROR tests/test_setup.py - ImportError", "tests/test_setup.py"),
+        ],
+    )
+    def test_go_jest_and_pytest_errors_match(self, tmp_path: Path, line: str, known: str) -> None:
+        entry = _failing(line) + f"  known_failures: ['{known}']\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        assert run(root)["pass"] is True
+
+    def test_the_repo_wide_command_reads_config(self, tmp_path: Path) -> None:
+        root = _stub_repo(
+            tmp_path,
+            {"a": "test: {cmd: 'true'}\n"},
+            config=(
+                "test_command: echo 'FAILED tests/test_lock.py::test_x'; exit 1\n"
+                "test_known_failures: [tests/test_lock.py::test_x]\n"
+            ),
+        )
+        _write(root, "uv.lock", "changed\n")
+
+        result = run(root)
+
+        assert result["pass"] is True, result["message"]
+        assert "Known failures: tests/test_lock.py::test_x" in result["message"]
+        from dmx.setup_check import check_setup  # noqa: PLC0415
+
+        texts = [(f.level, f.text) for f in check_setup(root)]
+        assert ("info", "test_command: 1 known failure (tests/test_lock.py::test_x)") in texts
+
+    def test_known_failures_must_be_a_list_of_strings(self, tmp_path: Path) -> None:
+        root = _stub_repo(tmp_path, {"a": "test:\n  cmd: 'true'\n  known_failures: x\n"})
+
+        components = load_components(root)
+
+        assert components.get("a") is None
+        assert "known_failures" in components.skipped[0].reason
+
+    def test_dmx_check_and_get_context_show_them(self, tmp_path: Path) -> None:
+        from dmx.component_tests import component_test  # noqa: PLC0415
+        from dmx.setup_check import check_setup  # noqa: PLC0415
+
+        entry = "test:\n  cmd: 'true'\n  known_failures: [t1, t2]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+        component = load_components(root).get("a")
+        assert component is not None
+
+        assert component_test(root, component) == {
+            "command": "true",
+            "cwd": ".",
+            "source": "test",
+            "known_failures": ["t1", "t2"],
+        }
+        texts = [(f.level, f.text) for f in check_setup(root)]
+        assert ("info", "a: 2 known failures in its tests (t1, t2)") in texts

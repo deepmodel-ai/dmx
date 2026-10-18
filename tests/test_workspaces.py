@@ -338,4 +338,5 @@ class TestInitSkill:
         assert "Show the move as a diff" in step
         assert "**Tests outside the packages.**" in step
         assert "`test: {cmd:" in step
+        assert "`known_failures: [test id, ...]`" in step
         assert "## Step 10 — Output the result" in skill

@@ -8,7 +8,10 @@ monorepo::
     depends_on: [ledger]                         # optional
     test: {cmd: make test, cwd: services/payments}   # optional (#89): run
                                                  # with ``sh -c`` from cwd,
-                                                 # the repo root by default
+                                                 # the repo root by default;
+                                                 # ``known_failures: [ids]``
+                                                 # lists failures the gate
+                                                 # accepts (#118)
     validators: {validate: [no_float_money]}     # optional (#90): extra checks
                                                  # per loop, see component_config
     ticket: {jira_project: PAY}                  # optional (#92)
@@ -65,6 +68,8 @@ class Component:
     paths: tuple[str, ...]
     depends_on: tuple[str, ...] = ()
     test: dict[str, str] | None = None
+    # Failures the test gate accepts (GH-118): test ids as the runner prints them.
+    known_failures: tuple[str, ...] = ()
     validators: dict[str, Any] | None = None
     ticket: dict[str, Any] | None = None
 
@@ -183,6 +188,7 @@ def _parse(component_id: str, text: str) -> Component:
         paths=_paths(data),
         depends_on=_string_list(data, "depends_on", "a list of component ids"),
         test=_test(data),
+        known_failures=_known_failures(data),
         validators=_mapping(data, "validators", "a mapping of loop names to validators"),
         ticket=_mapping(data, "ticket", "a mapping"),
     )
@@ -232,6 +238,13 @@ def _test(data: dict[str, Any]) -> dict[str, str] | None:
             raise _Invalid("`test.cwd` must be a folder in the repo")
         test["cwd"] = cwd.strip()
     return test
+
+
+def _known_failures(data: dict[str, Any]) -> tuple[str, ...]:
+    test = data.get("test")
+    if not isinstance(test, dict):
+        return ()
+    return _string_list(test, "known_failures", "a list of test ids")
 
 
 # ---------------------------------------------------------------------------

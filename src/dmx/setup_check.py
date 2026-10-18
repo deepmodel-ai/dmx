@@ -27,7 +27,7 @@ from fastmcp import (
 )
 
 from dmx.component_config import component_validators
-from dmx.component_tests import _test_command, plan_tests  # noqa: PLC2701
+from dmx.component_tests import KNOWN_FAILURES_KEY, _test_command, plan_tests  # noqa: PLC2701
 from dmx.components import (
     COMPONENT_FILE,
     COMPONENTS_DIR,
@@ -42,6 +42,7 @@ from dmx.learnings import waiting_counts, waiting_learnings
 from dmx.loop_state import current_branch
 from dmx.shared_sources import SharedSourceError, read_lock, read_shared_sources
 from dmx.ticket_components import current_job, ticket_components
+from dmx.ticket_routing import read_config_list
 from dmx.workspace import resolve_workspace_root
 from dmx.workspaces import _SKIP_DIRS, default_test_command, detect_components  # noqa: PLC2701
 
@@ -152,6 +153,13 @@ def _paths(root: Path, components: ComponentSet) -> list[Finding]:
 def _tests(root: Path, components: ComponentSet) -> list[Finding]:
     findings: list[Finding] = []
     for component in components.components:
+        known = component.known_failures
+        if known:
+            # Listed so the accepted failures stay visible (GH-118).
+            count = f"{len(known)} known failure{'' if len(known) == 1 else 's'}"
+            findings.append(
+                Finding("info", f"{component.id}: {count} in its tests ({', '.join(known)})")
+            )
         if component.test is not None:
             continue
         command = default_test_command(root, component)
@@ -181,6 +189,10 @@ def _tests(root: Path, components: ComponentSet) -> list[Finding]:
                 "set test_command in .dmx/config.md",
             )
         )
+    repo_known = read_config_list(root, KNOWN_FAILURES_KEY) or []
+    if repo_known:
+        count = f"{len(repo_known)} known failure{'' if len(repo_known) == 1 else 's'}"
+        findings.append(Finding("info", f"test_command: {count} ({', '.join(repo_known)})"))
     return findings
 
 

@@ -60,9 +60,10 @@ from pathlib import Path
 from typing import Any
 
 # Bundled validators run under dmx's interpreter and may import dmx. See #12.
-from dmx.component_tests import TestRun, plan_tests
+from dmx.component_tests import KNOWN_FAILURES_KEY, TestRun, plan_tests
 from dmx.components import COMPONENT_FILE, COMPONENTS_DIR, has_components
 from dmx.group_timeout import run_with_group_timeout
+from dmx.ticket_routing import read_config_list
 from dmx.validator_runner import _where_to_set_timeout
 
 TEST_TIMEOUT_SECONDS = 600
@@ -144,6 +145,15 @@ def _failing_tests(output: str) -> list[str]:
     return [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
 
 
+_KNOWN_FAILURES_HINT = (
+    "A test that fails on the base branch too, or only on some machines, can be listed under "
+    "`known_failures` in the component's `test` entry (or `test_known_failures` in "
+    "`.dmx/config.md`). Only list failures this change didn't cause; `dmx check` shows them."
+)
+
+# A run that passed, or failed only on listed known failures (GH-118).
+_PASSING = frozenset({"passed", "known failures"})
+
 # pytest exits 5 when it collected nothing (GH-117).
 _NO_TESTS_EXIT = 5
 
@@ -156,6 +166,37 @@ def _set_test(component_id: str) -> str:
 
 def _nothing_collected(proc: subprocess.CompletedProcess[str]) -> bool:
     return proc.returncode == _NO_TESTS_EXIT and "no tests ran" in (proc.stdout + proc.stderr)
+
+
+def _judge(
+    proc: subprocess.CompletedProcess[str], known: tuple[str, ...]
+) -> tuple[str, list[str], list[str], list[str]]:
+    """``(status, unlisted failing lines, known ids that failed, known ids that didn't)``.
+
+    A failed run whose failing-test lines all name a known failure passes as
+    ``known failures`` (GH-118). One with no recognisable lines still fails.
+    """
+    failing = _failing_tests(proc.stdout + proc.stderr) if proc.returncode != 0 else []
+    unlisted = [line for line in failing if not any(k in line for k in known)]
+    seen = [k for k in known if any(k in line for line in failing)]
+    unseen = [k for k in known if k not in seen]
+    if proc.returncode == 0:
+        return "passed", [], [], unseen
+    if failing and not unlisted:
+        return "known failures", [], seen, unseen
+    return "failed", unlisted, seen, unseen
+
+
+def _known_notes(seen: list[str], unseen: list[str]) -> list[str]:
+    notes: list[str] = []
+    if seen:
+        notes.append(f"Known failures: {', '.join(seen)}")
+    if unseen:
+        notes.append(
+            f"Listed known failures that didn't fail: {', '.join(unseen)} "
+            "(remove them from known_failures if they pass now)"
+        )
+    return notes
 
 
 def _tail(proc: subprocess.CompletedProcess[str]) -> str:
@@ -189,13 +230,17 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
             "exit": proc.returncode,
             "line": f"{test.command}{where} collected no tests (exit 5)",
         }
-    status = "passed" if proc.returncode == 0 else "failed"
+    status, failing, seen, unseen = _judge(proc, test.known_failures)
+    only = ", known failures only" if status == "known failures" else ""
     return {
         **record,
         "status": status,
         "exit": proc.returncode,
-        "line": f"{test.command}{where} (exit {proc.returncode})",
-        "output": "" if status == "passed" else _tail(proc),
+        "line": f"{test.command}{where} (exit {proc.returncode}{only})",
+        "output": "" if status != "failed" else _tail(proc),
+        "failing": failing,
+        "known": seen,
+        "unseen": unseen if status != "failed" else [],
     }
 
 
@@ -225,14 +270,17 @@ def run_components(
 
     lines: list[str] = []
     failures: list[str] = []
+    notes: list[str] = []
     for record in runs:
-        mark = "✓" if record["status"] == "passed" else "✗"
+        notes.extend(_known_notes(record.get("known") or [], record.get("unseen") or []))
+    for record in runs:
+        mark = "✓" if record["status"] in _PASSING else "✗"
         label = ", ".join(record["components"])
         lines.append(f"{mark} {label} — {record['line']}")
         if record["status"] == "no tests":
             fixes = "; ".join(_set_test(cid) for cid in record["components"])
             failures.append(f"{label} — {record['line']}: {fixes}")
-        elif record["status"] != "passed":
+        elif record["status"] not in _PASSING:
             detail = f"{label} — {record['line']}"
             output = record.get("output")
             failures.append(f"{detail}:\n{output}" if output else detail)
@@ -245,14 +293,14 @@ def run_components(
     for record in runs:
         if record["status"] == "failed":
             findings.append(f"{', '.join(record['components'])} — {record['line']}")
-            findings.extend(_failing_tests(record.get("output") or ""))
+            findings.extend(record.get("failing") or [])
     # A missing toolchain, an unconfigured component or a timeout isn't a
     # code task, so rework leaves the whole check alone (GH-115).
     reworkable = not plan.unconfigured and all(
-        record["status"] in {"passed", "failed"} for record in runs
+        record["status"] in {*_PASSING, "failed"} for record in runs
     )
 
-    failed = sum(1 for record in runs if record["status"] != "passed") + len(plan.unconfigured)
+    failed = sum(1 for record in runs if record["status"] not in _PASSING) + len(plan.unconfigured)
     total = len(runs) + len(plan.unconfigured)
     passed = failed == 0 and total > 0
     if passed:
@@ -263,6 +311,8 @@ def run_components(
         header = f"Tests failed — {failed} of {total} run{'' if total == 1 else 's'} failed"
     if any(record["status"] == "timeout" for record in runs):
         lines.append(_where_to_set_timeout(loop_name))
+    if any(record.get("failing") for record in runs):
+        lines.append(_KNOWN_FAILURES_HINT)
     check: dict[str, Any] = {"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}
     if not passed:
         if reworkable and findings:
@@ -271,7 +321,7 @@ def run_components(
             check["reworkable"] = False
     return {
         "pass": passed,
-        "message": "\n".join([header, *lines]),
+        "message": "\n".join([header, *lines, *notes]),
         "checks": [check],
         "runs": runs,
     }
@@ -320,22 +370,26 @@ def run(
             "message": f"Tests failed — `{cmd_str}` collected no tests (exit 5)",
             "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
         }
-    passed = proc.returncode == 0
+    known = tuple(read_config_list(workspace_root, KNOWN_FAILURES_KEY) or ())
+    status, failing, seen, unseen = _judge(proc, known)
+    passed = status in _PASSING
+    only = ", known failures only" if status == "known failures" else ""
     tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
+    notes = _known_notes(seen, unseen if passed else [])
 
     result: dict[str, Any] = {
         "pass": passed,
-        "message": (
-            f"{'Tests passed' if passed else 'Tests failed'} — ran `{cmd_str}` "
-            f"(exit {proc.returncode})"
+        "message": "\n".join(
+            [
+                f"{'Tests passed' if passed else 'Tests failed'} — ran `{cmd_str}` "
+                f"(exit {proc.returncode}{only})",
+                *notes,
+            ]
         ),
         "checks": [{"name": "tests_pass", "pass": passed, "message": tail}],
     }
     if not passed:
-        result["checks"][0]["findings"] = [
-            f"`{cmd_str}` (exit {proc.returncode})",
-            *_failing_tests(tail),
-        ]
+        result["checks"][0]["findings"] = [f"`{cmd_str}` (exit {proc.returncode})", *failing]
     return result
 
 
