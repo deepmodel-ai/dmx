@@ -462,7 +462,7 @@ class TestOtherDefaultForms:
         [run_] = plan_tests(root).runs
         assert run_.command == command
         result = run(root, timeout_seconds=600)
-        assert result["pass"] is True, result["message"]
+        assert result["pass"] is True, (result["message"], result["checks"][0]["message"])
 
     def test_npm_workspace(self, tmp_path: Path) -> None:
         _need("npm")
@@ -488,6 +488,8 @@ class TestOtherDefaultForms:
                 "apps/web/test/ok.test.js": _NODE_TEST,
             },
         )
+        # A real checkout has been installed; yarn won't run workspace scripts before.
+        subprocess.run(["yarn", "install"], cwd=root, check=True, capture_output=True)
 
         self._passes(root, "yarn workspace web test")
 
