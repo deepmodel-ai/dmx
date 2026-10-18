@@ -139,32 +139,35 @@ Wait. Record as `project_key`.
 
 Check that the required MCP servers are active before writing any config.
 
-**`user-github` (always required)**
+**GitHub access (always required)**
 
-Attempt a lightweight call — try listing pull requests for the detected `owner`/`repo`:
+dmx reaches GitHub through the GitHub MCP server (`user-github`) or, without it, the `gh` CLI.
+
+1. Try the server. List pull requests for the detected `owner`/`repo`:
+   ```
+   list_pull_requests owner:{owner} repo:{repo} state:open
+   ```
+   If it answers, even with an API-level error (no PRs, rate limit, auth), record `github_access` = `mcp` and continue.
+2. If the server isn't connected (MCP-level error: server not found, tool unavailable), try the CLI:
+   ```
+   gh auth status
+   gh repo view {owner}/{repo} --json name
+   ```
+   If both succeed, record `github_access` = `gh`, tell the developer "No GitHub MCP server is connected, so dmx will use the `gh` CLI for branches, PRs and issues.", and continue.
+3. If neither works, stop and output:
 ```
-list_pull_requests owner:{owner} repo:{repo} state:open
+dmx needs GitHub access, through the GitHub MCP server or the gh CLI. Neither is set up.
+
+Either sign in to the gh CLI:
+  gh auth login
+
+Or add the GitHub MCP server (https://github.com/github/github-mcp-server) as user-github:
+  Claude Code:  claude mcp add --transport http user-github https://api.githubcopilot.com/mcp/
+  Cursor:       Settings → MCP → add a server named user-github
+  VS Code:      add a user-github server to .vscode/mcp.json, or Copilot's mcp-config.json
+
+Then re-run /dmx/init. No files were written.
 ```
-
-If the call fails with an MCP-level error (server not found, tool unavailable) rather than an API-level error (no PRs, auth error):
-
-Stop and output:
-```
-The user-github MCP server is not active.
-
-This server is required for all branch, PR, and GitHub operations.
-
-To add it in Cursor:
-  1. Open Settings → MCP
-  2. Add a new server named user-github
-  3. Use the GitHub MCP server: https://github.com/github/github-mcp-server
-  4. Authenticate with your GitHub account
-  5. Re-run /dmx/init once active
-
-No files were written.
-```
-
-If the call fails with an API-level error (rate limit, auth, no results) — the server is active. Proceed. API errors are not a blocker.
 
 ---
 
@@ -247,8 +250,9 @@ production_branch:   {production_branch}   # production — releases, hotfixes, 
 
 ## GitHub
 
-owner:  {owner}
-repo:   {repo}
+owner:          {owner}
+repo:           {repo}
+github_access:  {github_access}   # mcp (GitHub MCP server) or gh (gh CLI)
 ```
 
 Append only the relevant provider section:

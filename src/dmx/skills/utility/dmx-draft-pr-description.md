@@ -8,6 +8,8 @@ arguments:
     required: false
 ---
 
+GitHub calls in this skill go to `user-github`. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, run the `gh` equivalent from the dmx rule's **GitHub access** table instead.
+
 You are drafting a pull request description. Output only the final markdown — no preamble or explanation.
 
 Follow the steps below to gather information, then fill in the output template determined in Step 1.

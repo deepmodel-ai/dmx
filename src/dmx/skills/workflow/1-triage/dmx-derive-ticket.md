@@ -8,6 +8,8 @@ arguments:
     required: false
 ---
 
+GitHub calls in this skill go to `user-github`. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, run the `gh` equivalent from the dmx rule's **GitHub access** table instead.
+
 You are formalising work that has already been started. The developer has uncommitted changes and needs a ticket, branch, and spec created from what they have built. Follow every step in order.
 
 ## Step 1 — Load project configuration

@@ -11,6 +11,8 @@ arguments:
     required: false
 ---
 
+GitHub calls in this skill go to `user-github`. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, run the `gh` equivalent from the dmx rule's **GitHub access** table instead.
+
 You are starting a hotfix for a production incident. Hotfix branches are always created from `{config.production_branch}`, not `{config.branch_base}`. Follow every step in order.
 
 ## Step 1 — Load project configuration

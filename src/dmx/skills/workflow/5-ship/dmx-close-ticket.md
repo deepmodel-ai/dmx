@@ -11,6 +11,8 @@ arguments:
     required: false
 ---
 
+GitHub calls in this skill go to `user-github`. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, run the `gh` equivalent from the dmx rule's **GitHub access** table instead.
+
 You are closing out a merged ticket. Follow every step in order.
 
 **Issue in another repo.** When the ticket's `spec.md` frontmatter has `issue_repo` (GH-92), the GitHub issue lives in that repo, not `{config.owner}/{config.repo}`: its number is the end of `ticket` (`ledger-issues-7` → `7`), GitHub calls for the issue use that `owner/repo`, and references and closing keywords use the full form, such as `Closes acme/ledger-issues#7`. Without `issue_repo`, everything below applies unchanged.

@@ -8,6 +8,8 @@ arguments:
     required: true
 ---
 
+GitHub calls in this skill go to `user-github`. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, run the `gh` equivalent from the dmx rule's **GitHub access** table instead.
+
 You are creating the `{config.branch_base}` → `{config.production_branch}` release merge PR. Follow every step in order. This PR is a gate for human review — you are not merging it yourself.
 
 ## Step 1 — Load project configuration

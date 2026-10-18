@@ -339,11 +339,54 @@ def _old_paths(root: Path) -> list[Finding]:
     return findings
 
 
+_GH_TIMEOUT_SECONDS = 15
+
+
+def _github_access(root: Path) -> list[Finding]:
+    """Whether the GitHub access ``/dmx/init`` recorded works (GH-120)."""
+    access = (read_config_list(root, "github_access") or [""])[0]
+    if access == "mcp":
+        return [Finding("ok", "GitHub access: the GitHub MCP server (user-github)")]
+    if access != "gh":
+        return []
+    if shutil.which("gh") is None:
+        return [
+            Finding(
+                "error",
+                "GitHub access is the gh CLI, but `gh` isn't on PATH",
+                "install the GitHub CLI, or set github_access: mcp",
+            )
+        ]
+    try:
+        status = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        status = None
+    if status is None or status.returncode != 0:
+        return [
+            Finding(
+                "error", "GitHub access is the gh CLI, but it isn't signed in", "run gh auth login"
+            )
+        ]
+    return [Finding("ok", "GitHub access: the gh CLI")]
+
+
 def check_setup(root: Path) -> list[Finding]:
     """Every Setup finding for the repo at *root*, problems after the summary line."""
     if not has_components(root):
         findings = [Finding("ok", "no components (.dmx/components/ not set up)")]
-        return findings + _locks(root, None) + _stray_dmx(root) + _old_paths(root)
+        return (
+            findings
+            + _github_access(root)
+            + _locks(root, None)
+            + _stray_dmx(root)
+            + _old_paths(root)
+        )
     components = load_components(root)
     count = len(components.components)
     findings = [Finding("ok", f"{count} component{'' if count == 1 else 's'}")]
@@ -351,6 +394,7 @@ def check_setup(root: Path) -> list[Finding]:
         Finding("error", f"{skipped.path}: {skipped.reason}", f"fix {skipped.path}")
         for skipped in components.skipped
     ]
+    findings += _github_access(root)
     findings += _dependencies(components)
     findings += _paths(root, components)
     findings += _tests(root, components)

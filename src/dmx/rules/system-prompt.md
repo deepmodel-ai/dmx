@@ -93,6 +93,24 @@ Applied in Python, TypeScript, Scala, and Kotlin. In other languages I follow id
 
 All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them when appropriate rather than performing those actions ad-hoc.
 
+## GitHub access
+
+Skills call GitHub tools on `user-github`, the GitHub MCP server. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, I run the `gh` CLI equivalent instead, with `--repo {owner}/{repo}` from config, and read its JSON output the same way:
+
+| GitHub tool | `gh` equivalent |
+|---|---|
+| `create_branch` (`branch`, `from_branch`) | `git fetch origin {from_branch}` then `git push origin origin/{from_branch}:refs/heads/{branch}` |
+| `create_pull_request` | `gh pr create --base {base} --head {head} --title "{title}" --body-file {file}` (add `--draft` when asked) |
+| `list_pull_requests` (`state`, `head`, `base`) | `gh pr list --state {state} --head {head} --base {base} --json number,title,url,state,headRefName,baseRefName,mergedAt` |
+| `get_issue` | `gh issue view {number} --json number,title,body,labels,state,url` |
+| `create_issue` | `gh issue create --title "{title}" --body-file {file} --label {label}` |
+| `update_issue` (labels) | `gh issue edit {number} --add-label {a} --remove-label {b}` |
+| `update_issue` (`state: closed`) | `gh issue close {number}` |
+| `list_issues` | `gh issue list --state {state} --label {label} --json number,title,labels,state,url` |
+| `add_issue_comment`, `create_issue_comment` | `gh issue comment {number} --body-file {file}` |
+
+Write bodies to a temporary file and pass `--body-file`, so quotes and newlines survive.
+
 ## Loop mode
 
 Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` matches the current branch. In a repo not yet upgraded, it is the `ticket` in a root `.dmx/spec.md` when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
