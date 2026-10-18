@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -20,7 +19,13 @@ from dmx.shared_sources import (
     vendor_dir,
     write_lock,
 )
-from dmx.source_cache import SharedSourceFetchError, cache_home, cached_tree, tree_hash
+from dmx.source_cache import (
+    SharedSourceFetchError,
+    cache_home,
+    cached_tree,
+    remove_tree,
+    tree_hash,
+)
 from dmx.sync_runner import (
     compare_link,
     fetch_shared_sources,
@@ -176,7 +181,7 @@ class TestUpdateWritesTheLock:
         before = read_lock(workspace)["acme"]
         moved = tmp_path / "moved-away"
         repo.rename(moved)
-        shutil.rmtree(cache_home() / "git")
+        remove_tree(cache_home() / "git")
 
         report = update_shared_sources(workspace, update_all=True)
 
@@ -193,8 +198,8 @@ class TestTheCache:
         workspace = tmp_path / "app"
         _declare(workspace, {"acme": f"git::{repo}?ref=main"})
         update_shared_sources(workspace)
-        shutil.rmtree(workspace / ".dmx" / ".cache")
-        shutil.rmtree(cache_home() / "git")
+        remove_tree(workspace / ".dmx" / ".cache")
+        remove_tree(cache_home() / "git")
 
         root = source_root(workspace, _source(workspace, "acme"))
 
@@ -333,7 +338,7 @@ class TestFetchSharedSources:
         workspace = tmp_path / "app"
         _declare(workspace, {"acme": f"git::{repo}?ref=main"})
         update_shared_sources(workspace)
-        shutil.rmtree(workspace / ".dmx" / ".cache")
+        remove_tree(workspace / ".dmx" / ".cache")
         lock_before = (workspace / ".dmx" / "shared-sources.lock").read_text(encoding="utf-8")
 
         lines, ok = fetch_shared_sources(workspace)
@@ -494,5 +499,21 @@ class TestRepoSlug:
 
         # Short enough for the mirror and cache folders to fit Windows' path limit.
         assert len(first) <= 48
-        assert first.endswith(first[-10:]) and first != second
+        assert first != second
         assert "source" in first
+
+
+def test_remove_tree_removes_read_only_files(tmp_path: Path) -> None:
+    import stat as stat_module
+
+    from dmx.source_cache import remove_tree
+
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    locked = folder / "ab"
+    locked.write_text("x", encoding="utf-8")
+    locked.chmod(stat_module.S_IREAD)
+
+    remove_tree(folder)
+
+    assert not folder.exists()

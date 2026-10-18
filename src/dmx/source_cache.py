@@ -27,10 +27,12 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dmx.shared_sources import SharedSourceError
 
@@ -85,6 +87,23 @@ def repo_slug(url: str) -> str:
         digest = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:10]
         slug = f"{slug[-(_MAX_SLUG - 11) :].strip('-.')}-{digest}"
     return slug
+
+
+def remove_tree(path: Path) -> None:
+    """``shutil.rmtree`` that also removes read-only files.
+
+    Windows refuses to delete a read-only file, and git marks its object
+    files read-only, as a source tree's own files may be.
+    """
+
+    def clear_and_retry(function: Any, failed: str, _info: Any) -> None:
+        os.chmod(failed, stat.S_IWRITE)
+        function(failed)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_and_retry)
+    else:
+        shutil.rmtree(path, onerror=clear_and_retry)
 
 
 def cached_tree(workspace_root: Path, url: str, commit: str) -> Path:
@@ -190,7 +209,7 @@ def extract_commit(
     if target.is_dir():
         if not fresh:
             return target
-        shutil.rmtree(target)
+        remove_tree(target)
     mirror = _ensure_commit(source, commit)
     _ensure_cache_root(workspace_root)
     partial = target.with_name(f"{target.name}.tmp-{os.getpid()}")
@@ -280,12 +299,12 @@ def ensure_fetched(workspace_root: Path, source: SharedSource, entry: LockEntry)
         _record(tree, entry.hash)
         return tree
     if tree.is_dir():
-        shutil.rmtree(tree)
+        remove_tree(tree)
     tree = extract_commit(workspace_root, source, entry.commit)
     actual = tree_hash(tree)
     if actual != entry.hash:
         with contextlib.suppress(OSError):
-            shutil.rmtree(tree)
+            remove_tree(tree)
         raise SharedSourceFetchError(
             f"Shared source `{source.name}` at {entry.commit[:12]} does not match "
             f"`.dmx/shared-sources.lock` (expected {entry.hash}, got {actual}). "

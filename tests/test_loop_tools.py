@@ -1250,7 +1250,7 @@ class TestResolveSkillSharedSources:
         assert resolved is not None
         assert resolved.raw == "# bundled folder-shaped\n"
         # skill_dir is outside workspace_root — falls back to an absolute path.
-        assert resolved.root_path == str(skill_dir)
+        assert resolved.root_path == skill_dir.as_posix()
 
     def test_folder_shaped_bundled_skill_not_shadowed_by_app_repo_or_shared_source(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

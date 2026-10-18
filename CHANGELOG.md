@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-112)** dmx works on Windows, and CI now runs the full suite on Windows as well as macOS and Linux, for Python 3.11–3.13, with every toolchain required. `run_tests` finds commands installed as `.cmd` files, such as `npm`, `pnpm`, and `yarn`, which it reported as "not found on PATH" before, including for the root `npm test` it has used since 0.1. An MCP root such as `file:///C:/Users/me/repo` resolves to that folder; it pointed at the wrong path before, so dmx couldn't find the repo. Shared-source mirror and cache folders get a short name for a long address (a readable tail plus a hash) so they stay under Windows' 260-character path limit; short addresses keep their names. Skill files are read as UTF-8 rather than the locale's code page, test and validator output is decoded as UTF-8 with undecodable bytes replaced, loop-state writes retry briefly when Windows refuses to replace a file another thread is using, and cached trees and git mirrors with read-only files can be deleted. Skill root paths and paths in notes use `/` on every OS. `test:` overrides and `test_command` run through `sh`, so on Windows they need Git for Windows; a missing `sh` says so.
+
 ## [0.7.0] — 2026-10-18
 
 **Upgrading from 0.6.** Nothing moves, and components are opt-in: a repo without `.dmx/components/` behaves as in 0.6.
