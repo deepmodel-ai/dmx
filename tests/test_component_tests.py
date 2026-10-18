@@ -341,13 +341,10 @@ class TestValidator:
     def test_a_missing_toolchain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _stub_repo(tmp_path, {"crate": ""})
         _write(root, "crate/Cargo.toml", '[package]\nname = "crate"\n')
-        tools = tmp_path / "bin"
-        tools.mkdir()
-        for tool in ("git", "sh"):
-            found = shutil.which(tool)
-            assert found is not None
-            (tools / tool).symlink_to(found)
-        monkeypatch.setenv("PATH", str(tools))
+        # Only git's own folder: git still works, cargo isn't there on any OS.
+        git = shutil.which("git")
+        assert git is not None
+        monkeypatch.setenv("PATH", os.path.dirname(git))
 
         result = run(root)
 

@@ -117,6 +117,8 @@ def _group_empties(proc: subprocess.Popen[str], grace_seconds: float) -> bool:
 
 
 def _group_alive(pgid: int) -> bool:
+    if sys.platform == "win32":  # POSIX only; also tells mypy on Windows.
+        return False
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
@@ -148,6 +150,8 @@ def _taskkill(pid: int) -> None:
 
 
 def _signal_group(pid: int, sig: int) -> None:
+    if sys.platform == "win32":  # POSIX only; also tells mypy on Windows.
+        return
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pid, sig)
 

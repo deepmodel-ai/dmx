@@ -1,0 +1,4 @@
+# Keep LF on every OS, so the reference monorepo's shell scripts and the
+# files dmx's tests compare read the same on a Windows checkout.
+tests/fixtures/** text=auto eol=lf
+*.sh text eol=lf
