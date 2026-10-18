@@ -106,6 +106,12 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=clear_and_retry)
 
 
+def _discard(path: Path) -> None:
+    """Remove a half-written mirror or tree, if there is one."""
+    with contextlib.suppress(OSError):
+        remove_tree(path)
+
+
 def cached_tree(workspace_root: Path, url: str, commit: str) -> Path:
     """``.dmx/.cache/<repo>@<commit>/`` for one source at one commit."""
     return workspace_root / ".dmx" / ".cache" / f"{repo_slug(url)}@{commit}"
@@ -142,16 +148,16 @@ def _ensure_mirror(source: SharedSource) -> Path:
         return mirror
     mirror.parent.mkdir(parents=True, exist_ok=True)
     partial = mirror.with_name(f"{mirror.name}.tmp-{os.getpid()}")
-    shutil.rmtree(partial, ignore_errors=True)
+    _discard(partial)
     cloned = _git(["clone", "--mirror", "--quiet", source.url, str(partial)])
     if cloned.returncode != 0:
-        shutil.rmtree(partial, ignore_errors=True)
+        _discard(partial)
         raise _fetch_error(source, "", cloned.stderr or cloned.stdout)
     try:
         partial.rename(mirror)
     except OSError:
         # Another process finished the same mirror first.
-        shutil.rmtree(partial, ignore_errors=True)
+        _discard(partial)
     return mirror
 
 
@@ -213,7 +219,7 @@ def extract_commit(
     mirror = _ensure_commit(source, commit)
     _ensure_cache_root(workspace_root)
     partial = target.with_name(f"{target.name}.tmp-{os.getpid()}")
-    shutil.rmtree(partial, ignore_errors=True)
+    _discard(partial)
     partial.mkdir()
     archive = subprocess.Popen(
         ["git", "archive", "--format=tar", commit],
@@ -230,17 +236,17 @@ def extract_commit(
                 tar.extractall(partial)  # noqa: S202 — git archive output of a locked commit
     except (tarfile.TarError, OSError) as exc:
         archive.kill()
-        shutil.rmtree(partial, ignore_errors=True)
+        _discard(partial)
         raise _fetch_error(source, f"at {commit[:12]}", str(exc)) from exc
     finally:
         _out, err = archive.communicate()
     if archive.returncode != 0:
-        shutil.rmtree(partial, ignore_errors=True)
+        _discard(partial)
         raise _fetch_error(source, f"at {commit[:12]}", err.decode("utf-8", "replace"))
     try:
         partial.rename(target)
     except OSError:
-        shutil.rmtree(partial, ignore_errors=True)
+        _discard(partial)
     return target
 
 
