@@ -336,4 +336,6 @@ class TestInitSkill:
         assert "dmx does not guess dependencies" in step
         assert "`codeowners`" in step
         assert "Show the move as a diff" in step
+        assert "**Tests outside the packages.**" in step
+        assert "`test: {cmd:" in step
         assert "## Step 10 — Output the result" in skill

@@ -144,6 +144,20 @@ def _failing_tests(output: str) -> list[str]:
     return [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
 
 
+# pytest exits 5 when it collected nothing (GH-117).
+_NO_TESTS_EXIT = 5
+
+
+def _set_test(component_id: str) -> str:
+    """How to give *component_id* a test command."""
+    path = f"{COMPONENTS_DIR}/{component_id}/{COMPONENT_FILE}"
+    return "set `test: {cmd: ..., cwd: ...}` in " + path
+
+
+def _nothing_collected(proc: subprocess.CompletedProcess[str]) -> bool:
+    return proc.returncode == _NO_TESTS_EXIT and "no tests ran" in (proc.stdout + proc.stderr)
+
+
 def _tail(proc: subprocess.CompletedProcess[str]) -> str:
     return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
 
@@ -167,8 +181,15 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
     except subprocess.TimeoutExpired:
         limit = max(1, int(remaining))
         return {**record, "status": "timeout", "line": f"{test.command} timed out after {limit}s"}
-    status = "passed" if proc.returncode == 0 else "failed"
     where = f" in {test.cwd}" if test.cwd != "." else ""
+    if _nothing_collected(proc):
+        return {
+            **record,
+            "status": "no tests",
+            "exit": proc.returncode,
+            "line": f"{test.command}{where} collected no tests (exit 5)",
+        }
+    status = "passed" if proc.returncode == 0 else "failed"
     return {
         **record,
         "status": status,
@@ -208,12 +229,15 @@ def run_components(
         mark = "✓" if record["status"] == "passed" else "✗"
         label = ", ".join(record["components"])
         lines.append(f"{mark} {label} — {record['line']}")
-        if record["status"] != "passed":
+        if record["status"] == "no tests":
+            fixes = "; ".join(_set_test(cid) for cid in record["components"])
+            failures.append(f"{label} — {record['line']}: {fixes}")
+        elif record["status"] != "passed":
             detail = f"{label} — {record['line']}"
             output = record.get("output")
             failures.append(f"{detail}:\n{output}" if output else detail)
     for component_id in plan.unconfigured:
-        note = f"not configured: set `test` in {COMPONENTS_DIR}/{component_id}/{COMPONENT_FILE}"
+        note = f"not configured: {_set_test(component_id)}"
         lines.append(f"✗ {component_id} — {note}")
         failures.append(f"{component_id} — {note}")
 
@@ -290,6 +314,12 @@ def run(
     except subprocess.TimeoutExpired:
         return _timeout_result(cmd_str, inner, timeout_seconds, loop_name)
 
+    if _nothing_collected(proc):
+        return {
+            "pass": False,
+            "message": f"Tests failed — `{cmd_str}` collected no tests (exit 5)",
+            "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
+        }
     passed = proc.returncode == 0
     tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
 

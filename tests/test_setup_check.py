@@ -134,8 +134,9 @@ class TestSetup:
         _has(
             clean,
             "error",
-            "lua-lint: no test command",
-            "set test in .dmx/components/lua-lint/component.yaml",
+            "lua-lint: no test command (no default for its language, "
+            "or no tests in its folder or paths)",
+            "set `test: {cmd: ..., cwd: ...}` in .dmx/components/lua-lint/component.yaml",
         )
 
     def test_a_missing_toolchain(self, clean: Path, monkeypatch: pytest.MonkeyPatch) -> None:

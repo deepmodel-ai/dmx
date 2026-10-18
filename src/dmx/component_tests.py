@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from dmx.components import Component
 
-__all__ = ["REPO_WIDE", "TestPlan", "TestRun", "dependents", "plan_tests"]
+__all__ = ["REPO_WIDE", "TestPlan", "TestRun", "component_test", "dependents", "plan_tests"]
 
 REPO_WIDE = "repo-wide"
 REASON_CHANGED = "changed files"
@@ -91,6 +91,23 @@ def _command(root: Path, component: Component) -> tuple[tuple[str, ...], str, st
     if found is None:
         return None
     return found.argv, found.cwd, " ".join(found.argv)
+
+
+def component_test(root: Path, component: Component) -> dict[str, str] | None:
+    """*component*'s test command, its folder and where it came from, for ``get_context`` (GH-117).
+
+    ``source`` is ``test`` for a ``test`` entry in ``component.yaml`` and
+    ``default`` for the one dmx works out. None when it has neither.
+    """
+    command = _command(root, component)
+    if command is None:
+        return None
+    _argv, cwd, shown = command
+    return {
+        "command": shown,
+        "cwd": cwd,
+        "source": "test" if component.test is not None else "default",
+    }
 
 
 def _test_command(root: Path) -> str | None:

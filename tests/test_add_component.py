@@ -220,4 +220,5 @@ class TestSkill:
         assert "`suggested_id`" in skill
         assert "Show the move as a diff" in skill
         assert "`codeowners`" in skill
-        assert "fill in `test`" in skill
+        assert "fill in `test: {cmd: ..., cwd: ...}`" in skill
+        assert "runs the test paths its `paths` name" in skill

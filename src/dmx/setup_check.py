@@ -159,8 +159,9 @@ def _tests(root: Path, components: ComponentSet) -> list[Finding]:
             findings.append(
                 Finding(
                     "error",
-                    f"{component.id}: no test command",
-                    f"set test in {_component_file(component.id)}",
+                    f"{component.id}: no test command (no default for its language, "
+                    "or no tests in its folder or paths)",
+                    f"set `test: {{cmd: ..., cwd: ...}}` in {_component_file(component.id)}",
                 )
             )
         elif shutil.which(command.argv[0]) is None:

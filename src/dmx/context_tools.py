@@ -18,6 +18,7 @@ from fastmcp import (
 )
 
 from dmx.component_config import component_skill_catalog, parse_validator_entry
+from dmx.component_tests import component_test
 from dmx.components import ComponentSet, has_components, load_components
 from dmx.exceptions import WorkspaceRootInvalid
 from dmx.learnings import REPO_WIDE, waiting_counts, waiting_learnings
@@ -215,6 +216,7 @@ def build_context(
                 "folder": entry.component.folder if entry.component else None,
                 "description": entry.component.description if entry.component else None,
                 "depends_on": list(entry.component.depends_on) if entry.component else [],
+                "test": component_test(root, entry.component) if entry.component else None,
             }
             for entry in found.entries
         ],

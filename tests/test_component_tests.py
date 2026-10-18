@@ -114,7 +114,11 @@ class TestDefaultCommands:
                 "apps/web",
             ),
             (
-                {"uv.lock": "", "apps/web/pyproject.toml": '[project]\nname = "web"\n'},
+                {
+                    "uv.lock": "",
+                    "apps/web/pyproject.toml": '[project]\nname = "web"\n',
+                    "apps/web/tests/test_web.py": "",
+                },
                 "uv run pytest -q",
                 "apps/web",
             ),
@@ -338,8 +342,8 @@ class TestValidator:
 
         assert result["pass"] is False
         assert (
-            "✗ lua — not configured: set `test` in .dmx/components/lua/component.yaml"
-            in result["message"]
+            "✗ lua — not configured: set `test: {cmd: ..., cwd: ...}` in "
+            ".dmx/components/lua/component.yaml" in result["message"]
         )
         assert "lua — not configured" in result["checks"][0]["message"]
         assert result["checks"][0]["reworkable"] is False
@@ -546,3 +550,129 @@ class TestOtherDefaultForms:
         )
 
         self._passes(root, "cargo test")
+
+
+def _root_tests_repo(root: Path) -> Path:
+    """A uv workspace shaped like pydantic-ai: members hold no tests, the root ``tests/`` does."""
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    _write(
+        root,
+        "pyproject.toml",
+        "[project]\nname = 'mono'\n[tool.uv.workspace]\nmembers = ['pkg_a', 'pkg_b']\n"
+        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n",
+    )
+    _write(root, "uv.lock", "")
+    _write(root, "pkg_a/pyproject.toml", "[project]\nname = 'pkg-a'\n")
+    _write(root, "pkg_a/pkg_a/__init__.py", "")
+    _write(root, "pkg_a/pkg_a/test.py", "# a module named test, not a test file\n")
+    _write(root, "pkg_b/pyproject.toml", "[project]\nname = 'pkg-b'\n")
+    _write(root, "pkg_b/pkg_b/__init__.py", "")
+    _write(root, "tests/test_top.py", "def test_top():\n    pass\n")
+    _write(root, "tests/conftest.py", "")
+    _write(root, "tests/models/test_model.py", "def test_model():\n    pass\n")
+    _write(root, "tests/cassettes/recording.yaml", "x: 1\n")
+    _write(root, "tests/pkg_b/test_b.py", "def test_b():\n    pass\n")
+    _write(root, ".dmx/config.md", "branch_base: main\n")
+    _component(
+        root,
+        "pkg-a",
+        "description: A\n"
+        "paths: ['pkg_a/**', 'tests/*.py', 'tests/models/**', 'tests/cassettes/**']\n",
+    )
+    _component(root, "pkg-b", "description: B\npaths: ['pkg_b/**', 'tests/pkg_b/**']\n")
+    _component(root, "pkg-c", "description: C\npaths: ['pkg_c/**']\n")
+    _write(root, "pkg_c/pyproject.toml", "[project]\nname = 'pkg-c'\n")
+    _write(root, "pkg_c/pkg_c/__init__.py", "")
+    return root
+
+
+class TestTestsOutsideThePackage:
+    """GH-117: a member without tests runs the root test paths its component maps."""
+
+    def test_a_member_without_tests_runs_its_mapped_root_paths(self, tmp_path: Path) -> None:
+        root = _root_tests_repo(tmp_path)
+        component = load_components(root).get("pkg-a")
+        assert component is not None
+
+        command = default_test_command(root, component)
+
+        assert command is not None
+        assert command.cwd == "."
+        assert command.argv == ("uv", "run", "pytest", "-q", "tests/models", "tests/test_top.py")
+
+    def test_a_folder_of_tests_is_passed_whole(self, tmp_path: Path) -> None:
+        root = _root_tests_repo(tmp_path)
+        component = load_components(root).get("pkg-b")
+        assert component is not None
+
+        command = default_test_command(root, component)
+
+        assert command is not None
+        assert command.argv == ("uv", "run", "pytest", "-q", "tests/pkg_b")
+
+    def test_a_member_with_no_tests_anywhere_has_no_command(self, tmp_path: Path) -> None:
+        root = _root_tests_repo(tmp_path)
+        component = load_components(root).get("pkg-c")
+        assert component is not None
+
+        assert default_test_command(root, component) is None
+
+    def test_a_member_with_its_own_tests_is_unchanged(self, tmp_path: Path) -> None:
+        root = _root_tests_repo(tmp_path)
+        _write(root, "pkg_b/tests/test_inside.py", "def test_inside():\n    pass\n")
+        component = load_components(root).get("pkg-b")
+        assert component is not None
+
+        command = default_test_command(root, component)
+
+        assert command is not None
+        assert command.argv == ("uv", "run", "pytest", "-q")
+        assert command.cwd == "pkg_b"
+
+    def test_the_reference_monorepo_python_library_is_unchanged(
+        self, reference_monorepo: Path
+    ) -> None:
+        component = load_components(reference_monorepo).get("pyutils")
+        assert component is not None
+
+        command = default_test_command(reference_monorepo, component)
+
+        assert command is not None
+        assert (command.argv, command.cwd) == (("pytest", "-q"), "libs/pyutils")
+
+    def test_dmx_check_says_how_to_set_a_test_command(self, tmp_path: Path) -> None:
+        from dmx.setup_check import check_setup  # noqa: PLC0415
+
+        root = _root_tests_repo(tmp_path)
+
+        [finding] = [f for f in check_setup(root) if f.text.startswith("pkg-c:")]
+        assert finding.level == "error"
+        assert "no tests in its folder or paths" in finding.text
+        assert finding.fix is not None
+        assert "test: {cmd: ..., cwd: ...}" in finding.fix
+
+    def test_nothing_collected_is_a_setup_failure(self, tmp_path: Path) -> None:
+        root = _stub_repo(tmp_path, {"a": "test: {cmd: 'echo no tests ran; exit 5'}\n"})
+
+        result = run(root)
+
+        assert result["pass"] is False
+        [check] = result["checks"]
+        assert check["reworkable"] is False
+        assert "collected no tests" in result["message"]
+        assert "test: {cmd: ..., cwd: ...}" in check["message"]
+
+    def test_the_validator_collects_the_root_tests(self, tmp_path: Path) -> None:
+        root = _root_tests_repo(tmp_path)
+        (root / "uv.lock").unlink()  # plain pytest, from this test run's environment
+        _git(root, "add", "-A")
+        _git(root, "commit", "-qm", "init")
+        _git(root, "checkout", "-q", "-b", _BRANCH)
+        _touch(root, "pkg_a/pkg_a/__init__.py")
+
+        result = run(root)
+
+        assert result["pass"] is True, result["message"]
+        assert "✓ pkg-a — pytest -q tests/models tests/test_top.py (exit 0)" in result["message"]

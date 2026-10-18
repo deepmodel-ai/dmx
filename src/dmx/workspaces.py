@@ -807,8 +807,52 @@ _DEFAULT_TESTS: dict[str, Callable[[Path, Path, str | None], TestCommand | None]
 }
 
 
+def _is_python_test(path: Path) -> bool:
+    """pytest's default test file names."""
+    return path.suffix == ".py" and (path.name.startswith("test_") or path.stem.endswith("_test"))
+
+
+def _python_tests_under(folder: Path) -> bool:
+    for path in folder.rglob("*.py"):
+        if _SKIP_DIRS.isdisjoint(path.relative_to(folder).parts) and _is_python_test(path):
+            return True
+    return False
+
+
+def _outside_test_paths(root: Path, component: Component, rel: str) -> list[str]:
+    """The test folders and files *component* maps outside its own folder (GH-117).
+
+    A pattern ending in ``/**`` names a folder, kept when it holds tests. Any
+    other pattern is expanded, and the test files it matches are kept.
+    """
+    found: set[str] = set()
+    for pattern in component.paths:
+        pattern = pattern.strip().strip("/")
+        if pattern == rel or pattern.startswith(f"{rel}/"):
+            continue
+        if pattern.endswith("/**") and not set(pattern[:-3]) & {"*", "?", "["}:
+            folder = root / pattern[:-3]
+            if folder.is_dir() and _python_tests_under(folder):
+                found.add(pattern[:-3])
+            continue
+        for path in root.glob(pattern):
+            if path.is_file() and _is_python_test(path):
+                found.add(path.relative_to(root).as_posix())
+    # A file inside a kept folder is already covered by it.
+    folders = {item for item in found if (root / item).is_dir()}
+    return sorted(
+        item for item in found if not any(item != f and item.startswith(f"{f}/") for f in folders)
+    )
+
+
 def default_test_command(root: Path, component: Component) -> TestCommand | None:
-    """The test command for *component* when it has no ``test`` entry, or None."""
+    """The test command for *component* when it has no ``test`` entry, or None.
+
+    A Python component whose folder holds no tests runs the test paths its
+    ``paths`` map elsewhere, from the repo root, such as a monorepo that keeps
+    every package's tests in a root ``tests/`` (GH-117). One with no tests
+    anywhere has no default.
+    """
     rel = component_folder(component)
     if rel is None:
         return None
@@ -817,4 +861,12 @@ def default_test_command(root: Path, component: Component) -> TestCommand | None
         return None
     language, name, _description = _recognise(root, folder)
     test = _DEFAULT_TESTS.get(language)
-    return test(root, folder, name) if test else None
+    if test is None:
+        return None
+    command = test(root, folder, name)
+    if language != "python" or command is None or _python_tests_under(folder):
+        return command
+    targets = _outside_test_paths(root, component, rel)
+    if not targets:
+        return None
+    return TestCommand((*command.argv, *targets), ".")

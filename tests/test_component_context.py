@@ -142,6 +142,11 @@ class TestGetContext:
                 "folder": ".dmx/components/ledger/",
                 "description": "Ledger service, balances in minor units",
                 "depends_on": [],
+                "test": {
+                    "command": "go test ./services/ledger/...",
+                    "cwd": ".",
+                    "source": "default",
+                },
             },
             {
                 "id": "payments",
@@ -149,6 +154,11 @@ class TestGetContext:
                 "folder": ".dmx/components/payments/",
                 "description": "Payment processing service",
                 "depends_on": ["ledger"],
+                "test": {
+                    "command": "go test ./...",
+                    "cwd": "services/payments",
+                    "source": "default",
+                },
             },
         ]
         assert context["repo_wide_files"] == ["Makefile"]
