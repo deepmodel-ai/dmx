@@ -177,6 +177,7 @@ Rate each finding: `Critical` | `High` | `Medium` | `Low`.
 {NEEDS WORK}
   {summary of what must be addressed before the PR is opened}
   Fix the issues above, then re-run /dmx/validate.
+  In the validate loop, the loop's checks turn these into rework tasks instead.
 ```
 
 ## Step 9 — Write the structured validation report

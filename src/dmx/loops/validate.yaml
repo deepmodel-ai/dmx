@@ -23,6 +23,11 @@ on_complete:
   on_success:
     trigger_loop: release
   on_failure:
-    trigger_loop: null
+    # A failed required check becomes a rework phase in tasks.md. After
+    # approval, dev implements it and validate runs again (GH-115).
+    rework:
+      loop: dev
+      max_rounds: 2
+      approve: true
   on_warning:
     trigger_loop: null

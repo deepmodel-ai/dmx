@@ -46,6 +46,9 @@ Grading policy — ambiguous verdicts warn, only clear-cut evidence blocks:
 - ``edge_cases_addressed`` fails only if an edge case is explicitly flagged
   ``addressed: false``.
 
+A failed check lists its ``findings`` (one line each) for rework (GH-115).
+A check that failed for any other reason is marked ``reworkable: false``.
+
 If the report is missing, malformed, or stale (its recorded ``commit``
 doesn't match the current ``HEAD`` — meaning the diff changed since the
 report was generated), every check fails with a message telling the agent
@@ -174,22 +177,67 @@ def _no_regressions(report: dict[str, Any]) -> tuple[bool, str]:
     return True, "No regressions found in the diff"
 
 
+def _descriptions(items: list[Any], key: str) -> list[str]:
+    return [str(i.get(key, "?")) for i in items if isinstance(i, dict)]
+
+
+def _findings(report: dict[str, Any]) -> dict[str, list[str]]:
+    """One line per finding, for the rework tasks a failed check becomes (GH-115).
+
+    A failed check with no findings (a report with no scope items) is marked
+    not reworkable instead.
+    """
+    scope_items = report.get("scope_items") or []
+    missing = [i for i in scope_items if isinstance(i, dict) and i.get("verdict") == "missing"]
+    edge_cases = report.get("edge_cases") or []
+    unaddressed = [e for e in edge_cases if isinstance(e, dict) and e.get("addressed") is False]
+    return {
+        "scope_matches_spec": [
+            *(f"Missing scope item: {d}" for d in _descriptions(missing, "item")),
+            *(
+                f"Out-of-scope change: {d}"
+                for d in _descriptions(report.get("scope_creep") or [], "description")
+            ),
+        ],
+        "edge_cases_addressed": [
+            f"Unaddressed edge case: {d}" for d in _descriptions(unaddressed, "description")
+        ],
+        "no_regressions": [
+            f"Regression: {d}"
+            for d in _descriptions(report.get("regressions") or [], "description")
+        ],
+    }
+
+
 def run(workspace_root: Path, job_id: str) -> dict[str, Any]:
     report, error = _load_report(workspace_root, job_id)
 
     check_names = ["scope_matches_spec", "edge_cases_addressed", "no_regressions"]
 
     if report is None:
-        checks = [{"name": name, "pass": False, "message": error} for name in check_names]
-        return {"pass": False, "message": error, "checks": checks}
+        # Re-running the skill fixes this, not a code change (GH-115).
+        unread = [
+            {"name": name, "pass": False, "message": error, "reworkable": False}
+            for name in check_names
+        ]
+        return {"pass": False, "message": error, "checks": unread}
 
     checks_raw = [
         ("scope_matches_spec", _scope_matches_spec(report)),
         ("edge_cases_addressed", _edge_cases_addressed(report)),
         ("no_regressions", _no_regressions(report)),
     ]
+    findings = _findings(report)
 
-    checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
+    checks: list[dict[str, Any]] = []
+    for name, (passed, msg) in checks_raw:
+        check: dict[str, Any] = {"name": name, "pass": passed, "message": msg}
+        if not passed:
+            if findings[name]:
+                check["findings"] = findings[name]
+            else:
+                check["reworkable"] = False
+        checks.append(check)
 
     overall = all(c["pass"] for c in checks)
     summary_msg = (

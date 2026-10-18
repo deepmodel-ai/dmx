@@ -12,6 +12,11 @@ as :func:`dmx.component_tests.plan_tests` decides, one after another within
 the same time budget, and reports one line per run. The ``tests_pass``
 check fails when any run fails or a touched component has no test command.
 
+For rework (GH-115), a failed ``tests_pass`` lists ``findings``: each failed
+run and the lines that name a failing test. When nothing failed because of
+the code (no test command, a tool not on PATH, a component with no ``test``,
+a timeout), it is marked ``reworkable: false`` instead.
+
 Contract
 --------
 Called by the orchestrator via subprocess. The input contract is written to
@@ -47,6 +52,7 @@ this validator and declare that check in its own loop YAML.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -125,8 +131,17 @@ def _timeout_result(
     return {
         "pass": False,
         "message": f"{detail} {where}",
-        "checks": [{"name": "tests_pass", "pass": False}],
+        "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
     }
+
+
+# Lines that name a failing test: pytest, jest/vitest and go test (GH-115).
+_FAILING_TEST_RE = re.compile(r"^(?:FAILED\b|ERROR\b|FAIL\b|--- FAIL:)")
+
+
+def _failing_tests(output: str) -> list[str]:
+    """The lines of *output* that name a failing test."""
+    return [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
 
 
 def _tail(proc: subprocess.CompletedProcess[str]) -> str:
@@ -202,6 +217,17 @@ def run_components(
         lines.append(f"✗ {component_id} — {note}")
         failures.append(f"{component_id} — {note}")
 
+    findings: list[str] = []
+    for record in runs:
+        if record["status"] == "failed":
+            findings.append(f"{', '.join(record['components'])} — {record['line']}")
+            findings.extend(_failing_tests(record.get("output") or ""))
+    # A missing toolchain, an unconfigured component or a timeout isn't a
+    # code task, so rework leaves the whole check alone (GH-115).
+    reworkable = not plan.unconfigured and all(
+        record["status"] in {"passed", "failed"} for record in runs
+    )
+
     failed = sum(1 for record in runs if record["status"] != "passed") + len(plan.unconfigured)
     total = len(runs) + len(plan.unconfigured)
     passed = failed == 0 and total > 0
@@ -213,10 +239,16 @@ def run_components(
         header = f"Tests failed — {failed} of {total} run{'' if total == 1 else 's'} failed"
     if any(record["status"] == "timeout" for record in runs):
         lines.append(_where_to_set_timeout(loop_name))
+    check: dict[str, Any] = {"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}
+    if not passed:
+        if reworkable and findings:
+            check["findings"] = findings
+        else:
+            check["reworkable"] = False
     return {
         "pass": passed,
         "message": "\n".join([header, *lines]),
-        "checks": [{"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}],
+        "checks": [check],
         "runs": runs,
     }
 
@@ -238,7 +270,7 @@ def run(
                 "No recognized test command found "
                 "(pyproject.toml, package.json test script, Makefile test target, or go.mod)"
             ),
-            "checks": [{"name": "tests_pass", "pass": False}],
+            "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
         }
 
     cmd_str = " ".join(cmd)
@@ -253,7 +285,7 @@ def run(
         return {
             "pass": False,
             "message": f"Test command `{cmd_str}` not found on PATH",
-            "checks": [{"name": "tests_pass", "pass": False}],
+            "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
         }
     except subprocess.TimeoutExpired:
         return _timeout_result(cmd_str, inner, timeout_seconds, loop_name)
@@ -261,7 +293,7 @@ def run(
     passed = proc.returncode == 0
     tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
 
-    return {
+    result: dict[str, Any] = {
         "pass": passed,
         "message": (
             f"{'Tests passed' if passed else 'Tests failed'} — ran `{cmd_str}` "
@@ -269,6 +301,12 @@ def run(
         ),
         "checks": [{"name": "tests_pass", "pass": passed, "message": tail}],
     }
+    if not passed:
+        result["checks"][0]["findings"] = [
+            f"`{cmd_str}` (exit {proc.returncode})",
+            *_failing_tests(tail),
+        ]
+    return result
 
 
 if __name__ == "__main__":

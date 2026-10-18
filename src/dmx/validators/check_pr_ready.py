@@ -191,7 +191,13 @@ def run(workspace_root: Path, loop_context: dict[str, Any]) -> dict[str, Any]:
         ("memory_updated", _memory_updated(workspace_root, loop_context)),
     ]
 
-    checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
+    # A failure here is not a code task, so rework never picks it up (GH-115).
+    checks = [
+        {"name": name, "pass": passed, "message": msg}
+        if passed
+        else {"name": name, "pass": passed, "message": msg, "reworkable": False}
+        for name, (passed, msg) in checks_raw
+    ]
 
     overall = all(c["pass"] for c in checks)
     summary_msg = (

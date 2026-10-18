@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Upgrading from 0.7.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed, so loops remind you until you do. The bundled `validate` loop now proposes rework when a required check fails. To keep the old pause, copy `validate.yaml` into `.dmx/loops/` and remove its `rework` block.
+
+### Added
+
+- **(GH-115)** A loop can fix its own failed checks. With `on_complete.on_failure.rework: {loop: dev, max_rounds: 2, approve: true}`, a run that fails a required check appends a phase to the ticket's `tasks.md`, such as `## Phase 4: Rework — validate, round 1`, with one task per failed check, written from the check's message and findings. It pauses so the developer can edit the tasks; `/loop-continue` then starts the rework loop on that phase (`dev` by default), and when it finishes, the failed loop runs again from its first skill, so `validate` writes a fresh report at the new `HEAD` before it is graded. After `max_rounds` it stops and pauses with every round's findings. `approve: false` starts the rework without the pause, and checking off or deleting the tasks before `/loop-continue` re-runs the loop without a rework run. Failures that aren't code tasks pause as before: a missing test command or toolchain, a component with no `test`, a timeout, a missing or stale validation report, the release checks, a validator error, and any check a validator marks `"reworkable": false`. Optional-check warnings never start rework. Validators can report `"findings": [...]` per check: `run_tests` lists each failed run and the failing-test lines it recognises, and `spec_adherence` lists missing scope items, out-of-scope changes, regressions and unaddressed edge cases. The bundled `validate` loop turns rework on. A new `/rework` command (`rework_loop` tool) runs the same flow on a paused failed run whose loop doesn't set it, or allows more rounds after the limit. While a rework runs, the failed run waits as `reworking`, `loop_status` leads with a line such as "validate — rework round 1 of 2 (dev), then back to validate", and only one run is active at a time. A loop without `rework` behaves as before.
+
 ## [0.7.1] — 2026-10-18
 
 ### Fixed

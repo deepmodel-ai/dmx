@@ -15,6 +15,7 @@ Schema hierarchy::
       failure_handling: FailureHandling
       human_gate: bool
       on_complete: OnCompleteConfig
+        on_failure.rework: ReworkConfig | None   — fix failed checks, then re-run
 """
 
 from __future__ import annotations
@@ -102,8 +103,38 @@ class OnSuccessConfig(BaseModel):
     trigger_loop: str | None = None
 
 
+class ReworkConfig(BaseModel):
+    """Turn failed required checks into a phase of tasks and fix them (GH-115).
+
+    ``loop`` does the fixing, then the failed loop runs again from its first
+    skill. ``max_rounds`` limits how often that happens for one failed run.
+    ``approve`` pauses to show the tasks before the rework starts.
+    """
+
+    loop: str
+    max_rounds: StrictInt = Field(default=2, ge=1)
+    approve: bool = True
+
+    @field_validator("loop")
+    @classmethod
+    def loop_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rework loop name must not be empty")
+        return v
+
+
 class OnFailureConfig(BaseModel):
     trigger_loop: str | None = None
+    rework: ReworkConfig | None = None
+
+    @model_validator(mode="after")
+    def one_failure_path(self) -> OnFailureConfig:
+        if self.trigger_loop and self.rework is not None:
+            raise ValueError(
+                "on_failure sets both trigger_loop and rework; use one. "
+                "rework already starts its loop and comes back."
+            )
+        return self
 
 
 class OnWarningConfig(BaseModel):

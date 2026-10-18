@@ -68,6 +68,8 @@ class LoopStatus(StrEnum):
     paused = "paused"
     iterating = "iterating"
     validating = "validating"
+    # Failed and waiting on the rework run it started (GH-115).
+    reworking = "reworking"
     complete = "complete"
     failed = "failed"
 
@@ -506,6 +508,9 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
             Rather than guess which one is "active", this fails loudly so
             it can be investigated.
 
+    A ``reworking`` run (GH-115) waits on the rework run it started, so it
+    is returned only when no other run is open.
+
     Note:
         The job directory can hold non-state JSON artifacts a skill was
         told to write there (e.g. ``validate`` writing
@@ -519,6 +524,7 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
         return None
 
     candidates: list[tuple[str, str]] = []
+    reworking: list[tuple[str, str]] = []
     for path in sorted(job_dir.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -530,8 +536,16 @@ def find_active_run(workspace_root: Path, job_id: str) -> tuple[str, str] | None
             continue
         if data.get("status") in _TERMINAL_STATUSES:
             continue
-        candidates.append((data.get("loop_name", ""), data.get("task_id", "")))
+        run = (data.get("loop_name", ""), data.get("task_id", ""))
+        if data.get("status") == LoopStatus.reworking.value:
+            reworking.append(run)
+        else:
+            candidates.append(run)
 
+    # A failed run waits while its rework run is open. With nothing else
+    # open, the rework run has finished and the parent is the one to resume.
+    if not candidates:
+        candidates = reworking
     if not candidates:
         return None
     if len(candidates) > 1:

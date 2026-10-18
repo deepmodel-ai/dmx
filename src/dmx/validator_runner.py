@@ -29,6 +29,11 @@ The validator prints its result to stdout as JSON and exits 0 (pass) or 1
 
     {"pass": bool, "message": str, "checks": [{"name": str, "pass": bool}]}
 
+A failed check may also carry ``"findings": [str, ...]`` (one line each) and
+``"reworkable": false``. A loop with ``on_failure.rework`` turns each failed
+required check into a task from its message and findings, unless one is
+marked not reworkable (GH-115).
+
 The orchestrator does not care what happens inside — deterministic tool
 calls, LLM calls, or both. Non-determinism lives inside the validator.
 

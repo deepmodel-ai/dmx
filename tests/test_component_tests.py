@@ -325,6 +325,11 @@ class TestValidator:
         assert check["message"].startswith("b — echo FAIL TestCharge; exit 3 in b (exit 3):\n")
         assert "FAIL TestCharge" in check["message"]
         assert [r["status"] for r in result["runs"]] == ["passed", "failed"]
+        assert check["findings"] == [
+            "b — echo FAIL TestCharge; exit 3 in b (exit 3)",
+            "FAIL TestCharge",
+        ]
+        assert "reworkable" not in check
 
     def test_an_unconfigured_component_fails(self, tmp_path: Path) -> None:
         root = _stub_repo(tmp_path, {"a": "test: {cmd: 'true'}\n", "lua": ""})
@@ -337,6 +342,7 @@ class TestValidator:
             in result["message"]
         )
         assert "lua — not configured" in result["checks"][0]["message"]
+        assert result["checks"][0]["reworkable"] is False
 
     def test_a_missing_toolchain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         root = _stub_repo(tmp_path, {"crate": ""})
@@ -350,6 +356,7 @@ class TestValidator:
 
         assert result["pass"] is False
         assert "✗ crate — `cargo` not found on PATH" in result["message"]
+        assert result["checks"][0]["reworkable"] is False
 
     def test_the_time_budget_is_shared(self, tmp_path: Path) -> None:
         root = _stub_repo(tmp_path, {"a": "test: {cmd: 'sleep 5'}\n", "b": "test: {cmd: 'true'}\n"})
@@ -359,6 +366,7 @@ class TestValidator:
         assert result["pass"] is False
         assert "✗ a — sleep 5 timed out" in result["message"]
         assert "✗ b — true not run: the time budget was used up" in result["message"]
+        assert result["checks"][0]["reworkable"] is False
 
     def test_a_repo_without_components_runs_the_root_command(self, tmp_path: Path) -> None:
         _git(tmp_path, "init", "-q", "-b", "main")

@@ -86,7 +86,13 @@ def run(workspace_root: Path, loop_context: dict[str, Any] | None = None) -> dic
         ("tasks_have_descriptions", _tasks_have_descriptions(content)),
     ]
 
-    checks = [{"name": name, "pass": passed, "message": msg} for name, (passed, msg) in checks_raw]
+    # A failure here is not a code task, so rework never picks it up (GH-115).
+    checks = [
+        {"name": name, "pass": passed, "message": msg}
+        if passed
+        else {"name": name, "pass": passed, "message": msg, "reworkable": False}
+        for name, (passed, msg) in checks_raw
+    ]
 
     overall = all(c["pass"] for c in checks)
     summary_msg = (

@@ -19,7 +19,7 @@ class TestCreateApp:
     def test_registers_all_bundled_skills(self) -> None:
         app = create_app()
         prompts = asyncio.run(app.list_prompts())
-        assert len(prompts) == 31
+        assert len(prompts) == 32
 
     def test_all_prompt_names_are_valid_slugs(self) -> None:
         import re  # noqa: PLC0415
@@ -37,6 +37,13 @@ class TestCreateApp:
         commit = next(p for p in prompts if p.name == "commit")
         assert commit.arguments is not None
         assert len(commit.arguments) >= 1
+
+    def test_rework_prompt_registers(self) -> None:
+        app = create_app()
+        prompts = asyncio.run(app.list_prompts())
+        rework = next((p for p in prompts if p.name == "rework"), None)
+        assert rework is not None
+        assert {a.name for a in rework.arguments or []} == {"loop", "max_rounds"}
 
     def test_zero_arg_prompt_registers(self) -> None:
         app = create_app()
@@ -61,6 +68,7 @@ class TestCreateApp:
         assert "mark_learnings_folded" in names
         assert "check_setup" in names
         assert "ticket_destination" in names
+        assert "rework_loop" in names
 
     def test_custom_skills_and_rules_dir(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / "skills"

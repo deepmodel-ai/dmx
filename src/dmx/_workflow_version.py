@@ -9,4 +9,4 @@ Do NOT bump for: bug fixes, new IDE emitters, CLI changes, dependency updates.
 DO bump for: new or removed skills, system-prompt rewrites, rule restructuring.
 """
 
-WORKFLOW_VERSION = "0.7.0"
+WORKFLOW_VERSION = "0.8.0"

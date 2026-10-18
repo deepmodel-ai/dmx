@@ -229,6 +229,39 @@ class TestSpecAdherence:
         }
         assert all(not c["pass"] for c in result["checks"])
 
+    def test_missing_report_is_not_reworkable(self, tmp_path: Path) -> None:
+        result = spec_adherence.run(tmp_path, "main")
+        assert all(c["reworkable"] is False for c in result["checks"])
+
+    def test_report_without_scope_items_is_not_reworkable(self, tmp_path: Path) -> None:
+        self._write_report(tmp_path, "main", {"scope_items": [], "scope_creep": []})
+        result = spec_adherence.run(tmp_path, "main")
+        scope_check = next(c for c in result["checks"] if c["name"] == "scope_matches_spec")
+        assert scope_check["reworkable"] is False
+
+    def test_failed_checks_list_findings(self, tmp_path: Path) -> None:
+        self._write_report(
+            tmp_path,
+            "main",
+            {
+                "scope_items": [
+                    {"item": "Refund endpoint", "verdict": "missing"},
+                    {"item": "Audit log", "verdict": "covered"},
+                ],
+                "scope_creep": [{"description": "Rewrote the logger"}],
+                "regressions": [{"description": "Retries dropped"}],
+                "edge_cases": [{"description": "Zero amount", "addressed": False}],
+            },
+        )
+        checks = {c["name"]: c for c in spec_adherence.run(tmp_path, "main")["checks"]}
+        assert checks["scope_matches_spec"]["findings"] == [
+            "Missing scope item: Refund endpoint",
+            "Out-of-scope change: Rewrote the logger",
+        ]
+        assert checks["no_regressions"]["findings"] == ["Regression: Retries dropped"]
+        assert checks["edge_cases_addressed"]["findings"] == ["Unaddressed edge case: Zero amount"]
+        assert all("reworkable" not in c for c in checks.values())
+
     def test_malformed_json_fails_every_check(self, tmp_path: Path) -> None:
         job_dir = tmp_path / ".dmx" / "jobs" / "main"
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -437,7 +470,7 @@ class TestRunTests:
     def test_no_recognized_command_fails(self, tmp_path: Path) -> None:
         result = run_tests.run(tmp_path)
         assert result["pass"] is False
-        assert result["checks"] == [{"name": "tests_pass", "pass": False}]
+        assert result["checks"] == [{"name": "tests_pass", "pass": False, "reworkable": False}]
 
     def test_makefile_target_passing(self, tmp_path: Path) -> None:
         (tmp_path / "Makefile").write_text(
@@ -455,6 +488,29 @@ class TestRunTests:
         result = run_tests.run(tmp_path)
         assert result["pass"] is False
         assert result["checks"][0]["pass"] is False
+
+    def test_failing_tests_list_findings(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text(
+            "test:\n\t@echo 'collected 2 items'\n"
+            "\t@echo 'FAILED tests/test_refund.py::test_partial - AssertionError'\n"
+            "\t@echo 'ERROR tests/test_setup.py - ImportError'\n\t@exit 1\n",
+            encoding="utf-8",
+        )
+        result = run_tests.run(tmp_path)
+        [check] = result["checks"]
+        assert check["pass"] is False
+        assert "reworkable" not in check
+        assert check["findings"] == [
+            "`make test` (exit 2)",
+            "FAILED tests/test_refund.py::test_partial - AssertionError",
+            "ERROR tests/test_setup.py - ImportError",
+        ]
+
+    def test_passing_tests_have_no_rework_fields(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\t@true\n", encoding="utf-8")
+        [check] = run_tests.run(tmp_path)["checks"]
+        assert "findings" not in check
+        assert "reworkable" not in check
 
     def test_detects_pyproject_without_uv_lock(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
@@ -507,7 +563,7 @@ class TestRunTests:
 
         assert result["pass"] is False
         assert result["message"] == "Test command `go test ./...` not found on PATH"
-        assert result["checks"] == [{"name": "tests_pass", "pass": False}]
+        assert result["checks"] == [{"name": "tests_pass", "pass": False, "reworkable": False}]
 
     @_NEEDS_GO
     @pytest.mark.usefixtures("isolated_go")
@@ -548,6 +604,7 @@ class TestRunTests:
 
         assert captured["timeout"] == run_tests.TEST_TIMEOUT_SECONDS
         assert "timed out after 600s" in result["message"]
+        assert result["checks"][0]["reworkable"] is False
         assert "`timeout_seconds` (630)" in result["message"]
         assert "your `.dmx/loops/validate.yaml` if you have one" in result["message"]
         assert "shared source that provides the loop" in result["message"]
@@ -597,6 +654,20 @@ class TestRunTests:
 # ---------------------------------------------------------------------------
 # check_pr_ready
 # ---------------------------------------------------------------------------
+
+
+class TestNotReworkableValidators:
+    def test_check_pr_ready_failures_are_not_reworkable(self, tmp_path: Path) -> None:
+        result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
+        failed = [c for c in result["checks"] if not c["pass"]]
+        assert failed
+        assert all(c["reworkable"] is False for c in failed)
+
+    def test_spec_and_plan_failures_are_not_reworkable(self, tmp_path: Path) -> None:
+        for module in (check_spec_complete, check_plan_complete):
+            failed = [c for c in module.run(tmp_path, {})["checks"] if not c["pass"]]
+            assert failed
+            assert all(c["reworkable"] is False for c in failed)
 
 
 class TestCheckPrReady:

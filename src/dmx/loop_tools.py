@@ -55,6 +55,7 @@ Tool contracts
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import importlib.resources as pkg
 import json
@@ -119,6 +120,15 @@ from dmx.loop_state import (
     write_state,
 )
 from dmx.repeat_until import evaluate_repeat_until
+from dmx.rework import (
+    ReworkCheck,
+    append_rework_phase,
+    failed_required_checks,
+    not_reworkable_text,
+    rework_line,
+    rework_tasks,
+    unchecked_in_phase,
+)
 from dmx.shared_sources import SharedSourceError, read_shared_sources, source_root
 from dmx.ticket_components import current_job, with_components_line
 from dmx.validator_runner import evaluate_validator_results, run_validators
@@ -1455,7 +1465,12 @@ def _validating_start_refusal(root: Path) -> str | None:
 
 
 def _start_loop(
-    root: Path, name: str, description: str | None = None, *, pending_finish: bool = False
+    root: Path,
+    name: str,
+    description: str | None = None,
+    *,
+    pending_finish: bool = False,
+    extra: dict[str, Any] | None = None,
 ) -> _StartedLoop:
     """Load a loop config, initialise its state, and return the first-skill instruction.
 
@@ -1467,6 +1482,9 @@ def _start_loop(
     Learnings / Open Decisions) and surfaces it alongside the first-skill instruction —
     the "reads persistent context before running" half of the loop's memory
     property.
+
+    *extra* is written with the first state, such as a rework run's
+    ``rework_parent`` (GH-115).
     """
     if not pending_finish:
         refusal = _validating_start_refusal(root)
@@ -1523,6 +1541,8 @@ def _start_loop(
         # reports a bare skill instruction instead of the chain result.
         updates["validation_started_at"] = _now_iso()
         updates["finish_message"] = None
+    if extra:
+        updates.update(extra)
     write_initial_state(
         workspace_root=root,
         loop_name=name,
@@ -1824,6 +1844,565 @@ def snapshot_loop_for_pr(root: Path) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Rework after a failed run (GH-115)
+# ---------------------------------------------------------------------------
+
+_REWORK_AWAITING = "awaiting_approval"
+_REWORK_RUNNING = "reworking"
+_REWORK_RECHECKING = "rechecking"
+_REWORK_RESOLVED = "resolved"
+_REWORK_EXHAUSTED = "exhausted"
+_REWORK_STOPPED = "stopped"
+
+
+def _rework_of(state: dict[str, Any]) -> dict[str, Any]:
+    rework = state.get("rework")
+    return rework if isinstance(rework, dict) else {}
+
+
+def _rounds(count: int) -> str:
+    return f"{count} rework round{'' if count == 1 else 's'}"
+
+
+def _rework_settings(config: LoopConfig, state: dict[str, Any]) -> dict[str, Any] | None:
+    """Rework state to continue after a failure, or ``None`` to fail as before.
+
+    A rework run never starts its own rework. A run already in rework keeps
+    its round count; one that used up its rounds stops reworking.
+    """
+    if state.get("rework_parent"):
+        return None
+    current = state.get("rework")
+    if isinstance(current, dict):
+        if current.get("stage") == _REWORK_EXHAUSTED:
+            return None
+        return current
+    configured = config.on_complete.on_failure.rework
+    if configured is None:
+        return None
+    return {
+        "loop": configured.loop,
+        "max_rounds": configured.max_rounds,
+        "approve": configured.approve,
+        "round": 0,
+        "history": [],
+    }
+
+
+def _rework_tasks_block(heading: str, tasks: list[str]) -> str:
+    return f"**{heading}**\n\n" + "\n".join(tasks)
+
+
+def _rework_approval_message(
+    loop_name: str,
+    job_id: str,
+    task_id: str,
+    rework: dict[str, Any],
+    checks: list[ReworkCheck],
+    why: str,
+) -> str:
+    short_task = task_id[:8]
+    rework_loop = rework["loop"]
+    tasks = rework_tasks(checks)
+    names = ", ".join(sorted(check.name for check in checks))
+    body = (
+        f"**{loop_name} loop — paused for rework approval** ⚠️\n\n"
+        f"Job: `{job_id}` | Task: `{short_task}` | "
+        f"Rework round {rework['round']} of {rework['max_rounds']} ({rework_loop})\n\n"
+        f"Required checks failed: {names}. dmx added these tasks to "
+        f"`.dmx/jobs/{job_id}/{TASKS_FILE}`:\n\n"
+        f"{_rework_tasks_block(rework['phase'], tasks)}\n\n"
+        f"HUMAN GATE — your turn is done. Output this message to the developer and stop.\n"
+        f"The developer can edit the tasks, then run `/loop-continue` (`loop_continue`) to "
+        f"start the rework: the `{rework_loop}` loop implements this phase, then "
+        f"`{loop_name}` runs again from its first skill. To skip the rework, check off or "
+        f"delete the tasks first; `{loop_name}` then runs again at once."
+    )
+    return _with_why(body, why)
+
+
+def _rework_history_lines(rework: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for entry in rework.get("history") or []:
+        if not isinstance(entry, dict):
+            continue
+        checks = ", ".join(f"`{name}`" for name in entry.get("checks") or [])
+        run = entry.get("rework_task_id")
+        run_text = f" (rework run `{str(run)[:8]}`)" if run else ""
+        lines.append(f"- Round {entry.get('round')}: {entry.get('phase')} — {checks}{run_text}")
+    return lines
+
+
+def _rework_exhausted_message(
+    loop_name: str,
+    job_id: str,
+    task_id: str,
+    rework: dict[str, Any],
+    decision_message: str,
+    why: str,
+) -> str:
+    rounds = int(rework.get("round") or 0)
+    history = "\n".join(_rework_history_lines(rework))
+    body = (
+        f"**{loop_name} loop — paused after {_rounds(rounds)}** ⚠️\n\n"
+        f"Job: `{job_id}` | Task: `{task_id[:8]}`\n\n"
+        f"Required checks still fail after {_rounds(rounds)}, the limit for this run.\n\n"
+        f"{history}\n\n"
+        f"Now: {decision_message}\n\n"
+        f"Fix it by hand, then run `/loop-continue` to re-run the validators, or run "
+        f"`/rework` to allow more rounds."
+    )
+    return _with_why(body, why)
+
+
+def _rework_on_failure(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    validator_results: list[dict[str, Any]],
+    decision: dict[str, str],
+    why: str,
+    settings: dict[str, Any],
+) -> str | None:
+    """Start or stop rework after required checks failed.
+
+    Returns ``None`` when the run should fail as it would without rework.
+    """
+    checks = failed_required_checks(config, validator_results)
+    next_status = decision["next_status"]
+    in_rework = bool(settings.get("history"))
+    if not checks or any(not check.reworkable for check in checks):
+        if in_rework:
+            write_state(
+                root,
+                job_id,
+                loop_name,
+                task_id,
+                {"rework": {**settings, "stage": _REWORK_STOPPED}},
+            )
+        if next_status != LoopStatus.paused.value:
+            return None
+        append_session_note(
+            root,
+            job_id,
+            f"{loop_name} loop paused for validator review (job `{job_id}`, "
+            f"task `{task_id[:8]}`): {decision['message']} Not reworked.",
+        )
+        message = _validator_failure_message(loop_name, job_id, task_id, decision["message"], why)
+        note = not_reworkable_text(checks)
+        return f"{message}\n\n{note}" if note else message
+
+    if int(settings.get("round") or 0) >= int(settings["max_rounds"]):
+        rework = {**settings, "stage": _REWORK_EXHAUSTED}
+        write_state(root, job_id, loop_name, task_id, {"rework": rework})
+        append_session_note(
+            root,
+            job_id,
+            f"{loop_name} loop stopped reworking after {_rounds(int(rework['round']))} "
+            f"(job `{job_id}`, task `{task_id[:8]}`): {decision['message']}",
+        )
+        message = _rework_exhausted_message(
+            loop_name, job_id, task_id, rework, decision["message"], why
+        )
+        if next_status != LoopStatus.paused.value:
+            return _store_outcome(root, job_id, loop_name, task_id, message)
+        return message
+
+    return _begin_rework_round(
+        root, job_id, loop_name, task_id, settings, checks, why, pending_finish=True
+    )
+
+
+def _begin_rework_round(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    settings: dict[str, Any],
+    checks: list[ReworkCheck],
+    why: str,
+    *,
+    pending_finish: bool,
+) -> str:
+    """Write the next rework phase, then wait for approval or start the rework run."""
+    round_number = int(settings.get("round") or 0) + 1
+    tasks = rework_tasks(checks)
+    heading = append_rework_phase(
+        ticket_file(root, job_id, TASKS_FILE), loop_name, round_number, task_id[:8], tasks
+    )
+    history = [
+        *(settings.get("history") or []),
+        {
+            "round": round_number,
+            "phase": heading,
+            "checks": [check.name for check in checks],
+            "rework_task_id": None,
+        },
+    ]
+    rework = {
+        "loop": settings["loop"],
+        "max_rounds": int(settings["max_rounds"]),
+        "approve": bool(settings.get("approve", True)),
+        "round": round_number,
+        "stage": _REWORK_AWAITING,
+        "phase": heading,
+        "rework_task_id": None,
+        "history": history,
+    }
+    write_state(
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        {"status": LoopStatus.paused.value, "rework": rework},
+    )
+    append_session_note(
+        root,
+        job_id,
+        f"{loop_name} loop failed required checks; dmx wrote {heading} "
+        f"(job `{job_id}`, task `{task_id[:8]}`).",
+    )
+    if rework["approve"]:
+        return _rework_approval_message(loop_name, job_id, task_id, rework, checks, why)
+    header = (
+        f"**{loop_name} loop — required checks failed; rework started**\n\n"
+        f"dmx added these tasks to `.dmx/jobs/{job_id}/{TASKS_FILE}`:\n\n"
+        f"{_rework_tasks_block(heading, tasks)}"
+    )
+    return _start_rework_run(
+        root, job_id, loop_name, task_id, rework, _with_why(header, why), pending_finish
+    )
+
+
+def _start_rework_run(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    rework: dict[str, Any],
+    header: str,
+    pending_finish: bool,
+) -> str:
+    """Mark the failed run ``reworking`` and start its rework loop."""
+    write_state(
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        {
+            "status": LoopStatus.reworking.value,
+            "rework": {**rework, "stage": _REWORK_RUNNING},
+        },
+    )
+    parent = {
+        "loop_name": loop_name,
+        "task_id": task_id,
+        "round": rework["round"],
+        "max_rounds": rework["max_rounds"],
+    }
+    started = _start_loop(
+        root, rework["loop"], pending_finish=pending_finish, extra={"rework_parent": parent}
+    )
+    if started.task_id is None:
+        stopped = {**rework, "stage": _REWORK_STOPPED}
+        write_state(
+            root,
+            job_id,
+            loop_name,
+            task_id,
+            {"status": LoopStatus.paused.value, "rework": stopped},
+        )
+        message = (
+            f"{header}\n\nThe `{rework['loop']}` rework loop could not start: "
+            f"{started.message}\n\nThe `{loop_name}` run is paused. Fix the cause and run "
+            "`/rework`, or fix the failures by hand and run `/loop-continue`."
+        )
+        _publish_finish_message(root, job_id, loop_name, task_id, message)
+        return message
+
+    history = [
+        {**entry, "rework_task_id": started.task_id}
+        if isinstance(entry, dict) and entry.get("round") == rework["round"]
+        else entry
+        for entry in rework.get("history") or []
+    ]
+    write_state(
+        root,
+        job_id,
+        loop_name,
+        task_id,
+        {
+            "rework": {
+                **rework,
+                "stage": _REWORK_RUNNING,
+                "rework_task_id": started.task_id,
+                "history": history,
+            }
+        },
+    )
+    append_session_note(
+        root,
+        job_id,
+        f"{loop_name} loop started rework round {rework['round']} of "
+        f"{rework['max_rounds']} with {rework['loop']} (job `{job_id}`).",
+    )
+    line = rework_line(loop_name, rework["round"], rework["max_rounds"], rework["loop"])
+    message = (
+        f"{header}\n\n{line}\n\n{started.message}" if header else f"{line}\n\n{started.message}"
+    )
+    if pending_finish:
+        _publish_finish_message(root, job_id, loop_name, task_id, message, chained=started.chained)
+    return message
+
+
+def _return_to_parent(
+    root: Path,
+    job_id: str,
+    parent: dict[str, Any],
+    header: str,
+    *,
+    finished: tuple[str, str] | None = None,
+) -> str:
+    """Restart the failed run at its first skill after its rework."""
+    parent_loop = str(parent["loop_name"])
+    parent_task = str(parent["task_id"])
+    state = read_state(root, job_id, parent_loop, parent_task)
+    rework = _rework_of(state)
+    skills: list[str] = state["skills"]
+    write_state(
+        root,
+        job_id,
+        parent_loop,
+        parent_task,
+        {
+            "status": LoopStatus.running.value,
+            "current_skill_index": 0,
+            "skills_completed": [],
+            "skill_outputs": {},
+            "finish_message": None,
+            "validation_started_at": _now_iso() if finished else None,
+            "rework": {**rework, "stage": _REWORK_RECHECKING},
+        },
+    )
+    append_session_note(
+        root,
+        job_id,
+        f"{parent_loop} loop runs again after rework round {rework.get('round')} (job `{job_id}`).",
+    )
+    instruction = _skill_instruction(skills[0], parent_loop, 0, len(skills), job_id, parent_task)
+    message = (
+        f"{header}"
+        f"Back to **{parent_loop}** (rework round {rework.get('round')} of "
+        f"{rework.get('max_rounds')}): it runs again from its first skill, then its "
+        f"validators.\n\n{instruction}"
+    )
+    commit_warning = _commit_dmx_state(
+        root, f"chore: sync loop state for {parent_loop} rework (job {job_id})"
+    )
+    if commit_warning:
+        message = f"{commit_warning}\n\n{message}"
+    if finished is not None:
+        _publish_finish_message(
+            root,
+            job_id,
+            finished[0],
+            finished[1],
+            message,
+            chained=(job_id, parent_loop, parent_task),
+        )
+    else:
+        _publish_finish_message(root, job_id, parent_loop, parent_task, message)
+    return message
+
+
+def _finish_rework_run(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    outcome: str,
+    parent: dict[str, Any],
+) -> str:
+    """A rework run finished: go back to its parent, or stop it when the run failed."""
+    if outcome == LoopOutcome.failure.value:
+        return _stop_parent(
+            root,
+            job_id,
+            parent,
+            f"The `{loop_name}` rework run failed.",
+            finished=(loop_name, task_id),
+        )
+    append_session_note(
+        root,
+        job_id,
+        f"{loop_name} rework run completed (outcome: {outcome}) — back to "
+        f"{parent['loop_name']} (job `{job_id}`).",
+    )
+    header = f"**{loop_name} loop — complete** (outcome: `{outcome}`)\n\n"
+    return _return_to_parent(root, job_id, parent, header, finished=(loop_name, task_id))
+
+
+def _stop_parent(
+    root: Path,
+    job_id: str,
+    parent: dict[str, Any],
+    reason: str,
+    *,
+    finished: tuple[str, str] | None = None,
+) -> str:
+    parent_loop = str(parent["loop_name"])
+    parent_task = str(parent["task_id"])
+    state = read_state(root, job_id, parent_loop, parent_task)
+    rework = _rework_of(state)
+    write_state(
+        root,
+        job_id,
+        parent_loop,
+        parent_task,
+        {"status": LoopStatus.paused.value, "rework": {**rework, "stage": _REWORK_STOPPED}},
+    )
+    append_session_note(
+        root, job_id, f"{parent_loop} loop rework stopped: {reason} (job `{job_id}`)."
+    )
+    message = (
+        f"**{parent_loop} loop — rework stopped** ⚠️\n\n"
+        f"Job: `{job_id}` | Task: `{parent_task[:8]}`\n\n"
+        f"{reason} The `{parent_loop}` run is paused. Fix the failures by hand and run "
+        "`/loop-continue` to re-run its validators, or run `/rework` to try again."
+    )
+    if finished is not None:
+        _publish_finish_message(
+            root,
+            job_id,
+            finished[0],
+            finished[1],
+            message,
+            chained=(job_id, parent_loop, parent_task),
+        )
+    else:
+        _publish_finish_message(root, job_id, parent_loop, parent_task, message)
+    return message
+
+
+def _continue_rework(
+    root: Path, job_id: str, loop_name: str, task_id: str, state: dict[str, Any]
+) -> str | None:
+    """``loop_continue`` on a run waiting for rework approval or for its rework run."""
+    rework = state.get("rework")
+    if not isinstance(rework, dict):
+        return None
+    parent = {"loop_name": loop_name, "task_id": task_id}
+    if state.get("status") == LoopStatus.reworking.value:
+        child_id = rework.get("rework_task_id")
+        child: dict[str, Any] = {}
+        if isinstance(child_id, str):
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                child = read_state(root, job_id, str(rework.get("loop")), child_id)
+        if child.get("status") == LoopStatus.complete.value and child.get("outcome") in {
+            LoopOutcome.success.value,
+            LoopOutcome.warning.value,
+        }:
+            return _return_to_parent(root, job_id, parent, "")
+        return _stop_parent(
+            root, job_id, parent, f"The `{rework.get('loop')}` rework run did not finish."
+        )
+    if state.get("status") != LoopStatus.paused.value or rework.get("stage") != _REWORK_AWAITING:
+        return None
+    phase = str(rework.get("phase") or "")
+    if unchecked_in_phase(ticket_file(root, job_id, TASKS_FILE), phase) == 0:
+        header = f"No open tasks under **{phase}**, so no rework run is needed.\n\n"
+        return _return_to_parent(root, job_id, parent, header)
+    return _start_rework_run(root, job_id, loop_name, task_id, rework, "", pending_finish=False)
+
+
+def _rework_status_line(state: dict[str, Any]) -> str:
+    parent = state.get("rework_parent")
+    if not isinstance(parent, dict):
+        return ""
+    return rework_line(
+        str(parent.get("loop_name")),
+        int(parent.get("round") or 0),
+        int(parent.get("max_rounds") or 0),
+        str(state.get("loop_name")),
+    )
+
+
+def _manual_rework(
+    root: Path,
+    rework_loop: str,
+    max_rounds: int,
+    approve: bool,
+) -> str:
+    """``rework_loop``: start the rework flow on the active failed run."""
+    if max_rounds < 1:
+        return "Error: `max_rounds` must be at least 1."
+    try:
+        found = _find_active(root)
+    except AmbiguousActiveRun as exc:
+        return f"Error: {exc}"
+    if not found:
+        return (
+            "No active loop run found. `/rework` works on a run that paused after a "
+            "failed required check."
+        )
+    job_id, loop_name, task_id = found
+    state = read_state(root, job_id, loop_name, task_id)
+    current = _rework_of(state) or None
+    if current and current.get("stage") == _REWORK_AWAITING:
+        return (
+            f"The `{loop_name}` run is already waiting for rework approval "
+            f"({current.get('phase')}). Edit the tasks if needed, then run `/loop-continue`."
+        )
+    if (
+        state.get("status") != LoopStatus.paused.value
+        or state.get("outcome") != LoopOutcome.failure.value
+    ):
+        return (
+            f"The `{loop_name}` run is {state.get('status')}, not paused after a failed "
+            "required check. `/rework` works on a run that is."
+        )
+    if state.get("rework_parent"):
+        return f"The `{loop_name}` run is itself a rework run; it can't start another rework."
+    try:
+        _resolve_loop(rework_loop, root)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error loading the rework loop '{rework_loop}': {exc}"
+    try:
+        config = _resolve_loop(loop_name, root)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error reloading loop config: {exc}"
+    added = component_validators(root, job_id, loop_name)
+    if added:
+        config = config.model_copy(update={"validators": [*config.validators, *added]})
+    results = state.get("validator_results") or []
+    config = expand_reported_checks(config, results)
+    checks = failed_required_checks(config, results)
+    if not checks:
+        return f"The `{loop_name}` run has no failed required checks to rework."
+    if any(not check.reworkable for check in checks):
+        return not_reworkable_text(checks)
+    done = int(current.get("round") or 0) if current else 0
+    settings = {
+        "loop": rework_loop,
+        "max_rounds": done + max_rounds,
+        "approve": approve,
+        "round": done,
+        "history": (current.get("history") if current else None) or [],
+    }
+    decision = evaluate_validator_results(config, results)
+    why = _validation_why(config, results, {**decision, "next_status": LoopStatus.paused.value})
+    message = _begin_rework_round(
+        root, job_id, loop_name, task_id, settings, checks, why, pending_finish=False
+    )
+    after = read_state(root, job_id, loop_name, task_id)
+    if after.get("status") == LoopStatus.paused.value:
+        _publish_finish_message(root, job_id, loop_name, task_id, message)
+    return message
+
+
 def _apply_loop_outcome(
     root: Path,
     job_id: str,
@@ -1867,6 +2446,7 @@ def _apply_loop_outcome(
         "active_context_path": str(ticket_file(root, job_id, ACTIVE_CONTEXT_FILE)),
     }
 
+    started_state = read_state(root, job_id, loop_name, task_id)
     added = component_validators(root, job_id, loop_name)
     if added:
         config = config.model_copy(update={"validators": [*config.validators, *added]})
@@ -1888,6 +2468,26 @@ def _apply_loop_outcome(
             "status": next_status,
         },
     )
+
+    if outcome == LoopOutcome.failure.value:
+        settings = _rework_settings(config, started_state)
+        if settings is not None:
+            paused_why = _validation_why(
+                config, validator_results, {**decision, "next_status": LoopStatus.paused.value}
+            )
+            handled = _rework_on_failure(
+                root,
+                job_id,
+                loop_name,
+                task_id,
+                config,
+                validator_results,
+                decision,
+                paused_why,
+                settings,
+            )
+            if handled is not None:
+                return handled
 
     if next_status == LoopStatus.paused.value:
         logger.info(
@@ -1929,6 +2529,30 @@ def _apply_loop_outcome(
             f"'{config.repeat_until}' not yet met (job `{job_id}`).",
         )
         return _iterating_message(loop_name, job_id, task_id, iteration, config)
+
+    rework_parent = started_state.get("rework_parent")
+    if isinstance(rework_parent, dict):
+        return _finish_rework_run(root, job_id, loop_name, task_id, outcome, rework_parent)
+
+    rework_state = started_state.get("rework")
+    if (
+        isinstance(rework_state, dict)
+        and rework_state.get("stage") == _REWORK_RECHECKING
+        and outcome != LoopOutcome.failure.value
+    ):
+        write_state(
+            root,
+            job_id,
+            loop_name,
+            task_id,
+            {"rework": {**rework_state, "stage": _REWORK_RESOLVED}},
+        )
+        append_session_note(
+            root,
+            job_id,
+            f"{loop_name} loop passed after {_rounds(int(rework_state.get('round') or 0))} "
+            f"(job `{job_id}`).",
+        )
 
     next_loop: str | None = None
     if outcome == LoopOutcome.success.value:
@@ -2251,34 +2875,48 @@ def loop_status_message(root: Path) -> str:
     if found:
         job_id, loop_name, task_id = found
         state = read_state(root, job_id, loop_name, task_id)
-        if state.get("status") == LoopStatus.validating.value and not _validation_worker_alive(
-            task_id
-        ):
-            return _VALIDATION_INTERRUPTED
-        if state.get("status") == LoopStatus.validating.value or (
-            state.get("validation_started_at") and not state.get("finish_message")
-        ):
-            started = state.get("validation_started_at") or "just now"
-            return (
-                f"Validators are running for `{loop_name}` (started {started}). "
-                "Call `loop_status` to see the result."
-            )
-        if state.get("finish_message"):
-            return str(state["finish_message"])
-        if _skills_are_complete(state) and state.get("status") in {
-            LoopStatus.running.value,
-            LoopStatus.iterating.value,
-        }:
-            return _FINISH_PENDING
-        skills = state.get("skills")
-        index = state.get("current_skill_index")
-        if isinstance(skills, list) and isinstance(index, int) and 0 <= index < len(skills):
-            return (
-                f"The {loop_name} loop is {state.get('status')} "
-                f"on skill `{skills[index]}` ({index + 1}/{len(skills)}). "
-                f"Job: `{job_id}`."
-            )
-        return f"The {loop_name} loop is {state.get('status')}. Job: `{job_id}`."
+        message = _active_status_message(root, job_id, loop_name, task_id, state)
+        line = _rework_status_line(state)
+        if line and line not in message:
+            return f"{line}\n\n{message}"
+        return message
+    return _finished_status_message(root)
+
+
+def _active_status_message(
+    root: Path, job_id: str, loop_name: str, task_id: str, state: dict[str, Any]
+) -> str:
+    """``loop_status`` for the active run."""
+    if state.get("status") == LoopStatus.validating.value and not _validation_worker_alive(task_id):
+        return _VALIDATION_INTERRUPTED
+    if state.get("status") == LoopStatus.validating.value or (
+        state.get("validation_started_at") and not state.get("finish_message")
+    ):
+        started = state.get("validation_started_at") or "just now"
+        return (
+            f"Validators are running for `{loop_name}` (started {started}). "
+            "Call `loop_status` to see the result."
+        )
+    if state.get("finish_message"):
+        return str(state["finish_message"])
+    if _skills_are_complete(state) and state.get("status") in {
+        LoopStatus.running.value,
+        LoopStatus.iterating.value,
+    }:
+        return _FINISH_PENDING
+    skills = state.get("skills")
+    index = state.get("current_skill_index")
+    if isinstance(skills, list) and isinstance(index, int) and 0 <= index < len(skills):
+        return (
+            f"The {loop_name} loop is {state.get('status')} "
+            f"on skill `{skills[index]}` ({index + 1}/{len(skills)}). "
+            f"Job: `{job_id}`."
+        )
+    return f"The {loop_name} loop is {state.get('status')}. Job: `{job_id}`."
+
+
+def _finished_status_message(root: Path) -> str:
+    """``loop_status`` when no run is active."""
     latest = _latest_run_state(root)
     if isinstance(latest, dict):
         latest_task = latest.get("task_id")
@@ -2508,6 +3146,11 @@ def register_loop_tools(app: FastMCP) -> None:
             if _validation_worker_alive(task_id):
                 return finish(_VALIDATORS_RUNNING)
             return finish(_VALIDATION_INTERRUPTED)
+        if state.get("status") == LoopStatus.reworking.value:
+            return finish(
+                f"The `{loop_name}` run is waiting on its rework run, which is no longer "
+                "open. Nothing was recorded. Call `loop_continue`."
+            )
         if _skills_are_complete(state) and state.get("status") in {
             LoopStatus.running.value,
             LoopStatus.iterating.value,
@@ -2640,6 +3283,10 @@ def register_loop_tools(app: FastMCP) -> None:
         state = read_state(root, job_id, loop_name, task_id)
         snapshot = is_pr_snapshot(state)
 
+        reworked = _continue_rework(root, job_id, loop_name, task_id, state)
+        if reworked is not None:
+            return finish(reworked)
+
         if state.get("status") == LoopStatus.validating.value:
             if _validation_worker_alive(task_id):
                 return finish(_VALIDATORS_RUNNING)
@@ -2709,6 +3356,45 @@ def register_loop_tools(app: FastMCP) -> None:
 
         next_skill = skills[idx]
         return finish(_skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id))
+
+    @app.tool
+    async def rework_loop(
+        ctx: Context,
+        loop: str = "dev",
+        max_rounds: int = 2,
+        approve: bool = True,
+        workspace_root: str | None = None,
+    ) -> str:
+        """Turn a paused run's failed required checks into rework tasks (GH-115).
+
+        Works on the active run when it paused after a failed required check,
+        whether or not its loop config sets ``on_failure.rework``. Appends a
+        rework phase to the ticket's ``tasks.md``. With ``approve`` (the
+        default) the run waits for ``loop_continue``; otherwise the rework
+        loop starts now. When the rework loop finishes, the failed loop runs
+        again from its first skill. On a run that used up its rounds, this
+        allows ``max_rounds`` more.
+
+        Args:
+            loop: The loop that does the fixing. Defaults to ``dev``.
+            max_rounds: Rework rounds this call allows. At least 1.
+            approve: Pause to show the tasks before the rework starts.
+            workspace_root: Repo root path override.  Auto-detected if omitted.
+
+        Returns:
+            The tasks and what happens next, or why the run can't be reworked.
+        """
+        try:
+            root = await resolve_workspace_root(ctx, workspace_root)
+        except WorkspaceRootInvalid as exc:
+            return f"Could not resolve a valid workspace root: {exc}"
+        _repair_misplaced_ticket_files(root)
+        return with_skipped_dmx_note(
+            root,
+            with_components_line(
+                root, _with_legacy_note(_manual_rework(root, loop, max_rounds, approve))
+            ),
+        )
 
     @app.tool
     async def loop_status(

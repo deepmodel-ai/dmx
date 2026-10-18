@@ -97,9 +97,9 @@ All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them
 
 Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` matches the current branch. In a repo not yet upgraded, it is the `ticket` in a root `.dmx/spec.md` when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
 
-A state file is an active loop when its `status` is `running`, `paused`, `iterating`, or `validating`. A `validating` loop is waiting on validators: call `loop_status` (it waits for them and returns the outcome). If `loop_status` says validation was interrupted, call `loop_continue`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
+A state file is an active loop when its `status` is `running`, `paused`, `iterating`, or `validating`. A `validating` loop is waiting on validators: call `loop_status` (it waits for them and returns the outcome). If `loop_status` says validation was interrupted, call `loop_continue`. A `reworking` file is a loop whose required checks failed and that is waiting on the rework loop it started (its `rework_parent`); that rework run is the active loop. When no other run is open, the `reworking` file is the active loop: call `loop_continue`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
 
-- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and its output, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths.
+- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and its output, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths. When a loop pauses for rework approval, the developer may edit the rework tasks in `tasks.md` first; I do not start the rework myself.
 - **If none is found** — no loop is active. Normal workflow guidance applies.
 
 | Command | Purpose |
@@ -145,4 +145,5 @@ Skills under `.dmx/skills/` and in shared sources are not slash commands. I call
 | Command | Purpose |
 |---|---|
 | `/run-loop` | Start a loop by name — reads `.dmx/loops/{name}.yaml`, initialises state, runs first skill |
-| `/loop-continue` | Resume a paused loop after human review at a gate |
+| `/loop-continue` | Resume a paused loop after human review at a gate, or approve its rework tasks |
+| `/rework` | Turn a paused loop's failed required checks into rework tasks, fix them, re-run the loop |

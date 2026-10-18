@@ -388,6 +388,8 @@ class TestValidators:
                 message = await _call(client, "loop_status", reference_monorepo)
 
         assert "Required checks failed: ledger/int64_amounts" in message
+        assert "paused for rework approval" in message
+        assert "Fix `ledger/int64_amounts` (ledger/no_float_money)" in message
         assert "`ledger/no_float_money`" in message
         assert "`ledger/int64_amounts`:" in message
 

@@ -34,7 +34,7 @@ spec  →  plan  →  dev  →  validate  →  release
 | **validate** | Reviews the change for completeness, code quality, and security | Tests pass, the change matches the spec, no regressions |
 | **release** | Removes finished jobs older than 30 days, syncs the memory bank, and opens the PR | The PR exists and memory is committed |
 
-Each loop pauses after every skill so you can review. Run `/dmx/loop-continue` to move on. Validators run deterministically, outside the model: a required check that fails stops the loop and tells you why. When a loop passes, the next one starts on its own.
+Each loop pauses after every skill so you can review. Run `/dmx/loop-continue` to move on. Validators run deterministically, outside the model: a required check that fails stops the loop and tells you why. When `validate` fails, dmx turns the findings into a rework phase in `tasks.md`; after you approve it, `dev` fixes them and `validate` runs again, for up to two rounds. When a loop passes, the next one starts on its own.
 
 Loops are YAML in your repo. Override any default in `.dmx/loops/`, add your own, and review changes in PRs like any other code. [Loops →](https://dmx.deepmodel.ai/core-concepts/loops)
 

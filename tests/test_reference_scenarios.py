@@ -1,4 +1,4 @@
-"""Every 0.7 work item's scenario, on the reference monorepo (#81).
+"""Every work item's scenario since 0.7, on the reference monorepo (#81).
 
 Each class is one work item, driven through the MCP tools the agent calls
 where it can, so the scenario covers the wiring as well as the parts. What an
@@ -257,11 +257,72 @@ class TestComponentConfig:
             paused = await _loop_call(client, "loop_continue", root)
 
         assert "Required checks failed: ledger/no_floats" in paused
+        assert "paused for rework approval" in paused
+        tasks = (root / ".dmx/jobs/GH-1/tasks.md").read_text(encoding="utf-8")
+        assert "Rework — validate, round 1" in tasks
+        assert "- [ ] Fix `ledger/no_floats` (ledger/no_float_money)" in tasks
         state = json.loads(
             next((root / ".dmx/jobs/GH-1").glob("validate-*.json")).read_text(encoding="utf-8")
         )
         tools = [result["tool"] for result in state["validator_results"]]
         assert tools[-2:] == ["ledger/no_float_money", "payments/idempotent_refunds"]
+
+
+class TestRework:
+    """#115: a component check fails, rework fixes the code, and validate passes."""
+
+    @pytest.mark.asyncio
+    async def test_rework_fixes_a_failed_component_check(self, reference_monorepo: Path) -> None:
+        root = reference_monorepo
+        _install_passing_validators(root)
+        _ticket(root, "GH-1", "feature-gh-1", "[ledger]")
+        tasks = root / ".dmx/jobs/GH-1/tasks.md"
+        _write(root, ".dmx/jobs/GH-1/tasks.md", "# GH-1\n\n## Phase 1: Rounding\n\n- [x] Round\n")
+        _write(root, "services/ledger/rounding.go", "package ledger\n\nvar rate float64\n")
+        _commit(root, "feat: rounding")
+
+        async with Client(create_app()) as client:
+
+            async def call(tool: str, **kwargs: str) -> str:
+                return await _loop_call(client, tool, root, **kwargs)
+
+            await call("run_loop", name="validate")
+            await call("loop_advance", output="report written", skill="validate")
+            proposed = await call("loop_continue")
+            assert "paused for rework approval" in proposed
+            assert "- [ ] Fix `ledger/no_floats` (ledger/no_float_money)" in tasks.read_text(
+                encoding="utf-8"
+            )
+
+            started = await call("loop_continue")
+            assert "validate — rework round 1 of 2 (dev), then back to validate" in started
+            assert "implement-next-phase" in started
+
+            # The agent's part: fix the code and check off the rework task.
+            _write(root, "services/ledger/rounding.go", "package ledger\n\nvar rateBp int64\n")
+            tasks.write_text(
+                tasks.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8"
+            )
+            await call("loop_advance", output="replaced the float", skill="implement-next-phase")
+            await call("loop_continue")
+            _commit(root, "fix: keep the rate in basis points")
+            await call("loop_advance", output="committed", skill="commit")
+            back = await call("loop_continue")
+            assert "Back to **validate**" in back
+
+            await call("loop_advance", output="report rewritten", skill="validate")
+            done = await call("loop_continue")
+
+        assert "chaining automatically to **release**" in done.lower()
+        [validate] = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (root / ".dmx/jobs/GH-1").glob("validate-*.json")
+        ]
+        assert validate["outcome"] == "success"
+        assert validate["rework"]["stage"] == "resolved"
+        assert [entry["checks"] for entry in validate["rework"]["history"]] == [
+            ["ledger/no_floats"]
+        ]
 
 
 class TestCheck:
