@@ -349,7 +349,8 @@ def _github_access(root: Path) -> list[Finding]:
         return [Finding("ok", "GitHub access: the GitHub MCP server (user-github)")]
     if access != "gh":
         return []
-    if shutil.which("gh") is None:
+    gh = shutil.which("gh")
+    if gh is None:
         return [
             Finding(
                 "error",
@@ -359,7 +360,7 @@ def _github_access(root: Path) -> list[Finding]:
         ]
     try:
         status = subprocess.run(
-            ["gh", "auth", "status"],
+            [gh, "auth", "status"],  # the resolved path, so a gh.cmd runs too
             capture_output=True,
             text=True,
             check=False,
