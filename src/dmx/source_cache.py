@@ -54,6 +54,7 @@ _GIT_TIMEOUT_SECONDS = 120
 
 VERIFIED_RECORD = ".dmx-verified"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_MAX_SLUG = 48
 
 
 class SharedSourceFetchError(SharedSourceError):
@@ -76,8 +77,14 @@ def repo_slug(url: str) -> str:
     text = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://", "", text)
     text = re.sub(r"^[^@/]+@", "", text)
     text = text.replace(":", "/").removesuffix("/").removesuffix(".git")
-    slug = _SLUG_RE.sub("-", text.replace("/", "-")).strip("-.")
-    return slug or "source"
+    slug = _SLUG_RE.sub("-", text.replace("/", "-")).strip("-.") or "source"
+    if len(slug) > _MAX_SLUG:
+        # A long address, such as a local path, would push the mirror and
+        # cache folders past Windows' 260-character path limit. Keep the
+        # readable end and add a hash of the whole address so it stays unique.
+        digest = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:10]
+        slug = f"{slug[-(_MAX_SLUG - 11) :].strip('-.')}-{digest}"
+    return slug
 
 
 def cached_tree(workspace_root: Path, url: str, commit: str) -> Path:

@@ -489,7 +489,9 @@ class TestOtherDefaultForms:
             },
         )
         # A real checkout has been installed; yarn won't run workspace scripts before.
-        subprocess.run(["yarn", "install"], cwd=root, check=True, capture_output=True)
+        yarn = shutil.which("yarn")  # yarn.cmd on Windows
+        assert yarn is not None
+        subprocess.run([yarn, "install"], cwd=root, check=True, capture_output=True)
 
         self._passes(root, "yarn workspace web test")
 

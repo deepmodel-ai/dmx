@@ -470,3 +470,29 @@ class TestTheTool:
         assert "**Shared sources updated:**" in str(done.data)
         assert "**Summary for the PR description:**" in str(done.data)
         assert "git add .dmx/shared-sources.lock" in str(done.data)
+
+
+class TestRepoSlug:
+    @pytest.mark.parametrize(
+        ("url", "slug"),
+        [
+            ("https://github.com/acme/skills.git", "github.com-acme-skills"),
+            ("git@github.com:acme/skills", "github.com-acme-skills"),
+        ],
+    )
+    def test_short_addresses_keep_their_readable_name(self, url: str, slug: str) -> None:
+        from dmx.source_cache import repo_slug
+
+        assert repo_slug(url) == slug
+
+    def test_a_long_address_is_capped_and_stays_unique(self) -> None:
+        from dmx.source_cache import repo_slug
+
+        deep = "C:/Users/runneradmin/AppData/Local/Temp/pytest-of-runneradmin/pytest-0/"
+        first = repo_slug(deep + "test_one/source")
+        second = repo_slug(deep + "test_two/source")
+
+        # Short enough for the mirror and cache folders to fit Windows' path limit.
+        assert len(first) <= 48
+        assert first.endswith(first[-10:]) and first != second
+        assert "source" in first

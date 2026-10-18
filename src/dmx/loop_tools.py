@@ -239,11 +239,11 @@ def _find_skill_in_dir(
         if recursive:
             matches = list(skills_dir.rglob(f"{candidate}.md"))
             if matches:
-                return ResolvedSkill(raw=matches[0].read_text())
+                return ResolvedSkill(raw=matches[0].read_text(encoding="utf-8"))
         else:
             path = skills_dir / f"{candidate}.md"
             if path.exists():
-                return ResolvedSkill(raw=path.read_text())
+                return ResolvedSkill(raw=path.read_text(encoding="utf-8"))
 
     for candidate in candidates:
         if recursive:
@@ -258,14 +258,14 @@ def _find_skill_in_dir(
             if not path.exists():
                 continue
         try:
-            root_path = str(skill_dir.relative_to(workspace_root))
+            root_path = skill_dir.relative_to(workspace_root).as_posix()
         except ValueError:
             # Outside workspace_root — only possible for the bundled
             # skills directory (installed with the package, not vendored
             # into the workspace). Fall back to an absolute path so the
             # agent still has something resolvable.
-            root_path = str(skill_dir)
-        return ResolvedSkill(raw=path.read_text(), root_path=root_path)
+            root_path = skill_dir.as_posix()
+        return ResolvedSkill(raw=path.read_text(encoding="utf-8"), root_path=root_path)
 
     return None
 

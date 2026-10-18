@@ -102,6 +102,7 @@ class TestResolveWorkspaceRoot:
     ) -> None:
         # Path.expanduser() reads $HOME directly (not Path.home()).
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what Windows reads
         project = tmp_path / "project"
         project.mkdir()
         (project / ".git").mkdir()
@@ -132,7 +133,7 @@ class TestResolveWorkspaceRootValidation:
     @pytest.mark.asyncio
     async def test_rejects_home_directory_from_roots(self) -> None:
         root = MagicMock()
-        root.uri = f"file://{Path.home()}"
+        root.uri = Path.home().as_uri()
         ctx = MagicMock()
         ctx.list_roots = AsyncMock(return_value=[root])
 

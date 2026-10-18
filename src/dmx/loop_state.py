@@ -44,6 +44,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import time
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -51,6 +53,9 @@ from typing import Any
 from uuid import uuid4
 
 from dmx.exceptions import AmbiguousActiveRun
+
+# How many times to retry a state-file replace that Windows refuses.
+_REPLACE_ATTEMPTS = 20
 
 # ---------------------------------------------------------------------------
 # Status enum
@@ -458,10 +463,26 @@ def _replace_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        os.replace(temporary, path)
+        _replace(temporary, path)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def _replace(source: Path, target: Path) -> None:
+    """``os.replace``, retried briefly on Windows.
+
+    Windows refuses to replace a file another thread is replacing or reading
+    at that instant (``PermissionError``); a moment later it succeeds.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if sys.platform != "win32" or attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(0.01 * (attempt + 1))
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from dmx.exceptions import WorkspaceRootInvalid
 
@@ -67,7 +68,12 @@ def _parse_root_uri(root: object) -> Path:
     uri = getattr(root, "uri", None) or str(root)
     parsed = urlparse(uri)
     if parsed.scheme == "file":
-        return Path(unquote(parsed.path))
+        # url2pathname turns `/C:/Users/x` into `C:\Users\x` on Windows and
+        # decodes `%20`; a host other than localhost is a UNC share.
+        path = parsed.path
+        if parsed.netloc and parsed.netloc != "localhost":
+            path = f"//{parsed.netloc}{path}"
+        return Path(url2pathname(path))
     return Path(unquote(uri))
 
 
@@ -166,7 +172,7 @@ def with_skipped_dmx_note(root: Path, message: str) -> str:
         if folder in _REPORTED_SKIPPED_DMX:
             continue
         _REPORTED_SKIPPED_DMX.add(folder)
-        shown = folder.relative_to(root) if folder.is_relative_to(root) else folder
+        shown = (folder.relative_to(root) if folder.is_relative_to(root) else folder).as_posix()
         lines.append(
             f"Ignored `{shown}/.dmx/`: it has no `config.md`, and this repo's `.dmx/` "
             f"is at `{root}`. Runs started from that folder are not picked up; "

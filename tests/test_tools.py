@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock
 
 import pytest
+
+# Fake absolute paths that are absolute on every OS (a drive is added on Windows).
+_WS = os.path.abspath("/tmp/ws")
+_PROJECT = os.path.abspath("/home/dev/project")
 
 # ---------------------------------------------------------------------------
 # Helpers: _extract_client_name
@@ -238,7 +243,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         paths = {f["path"] for f in result.data["files"]}
         assert any(p.startswith(".cursor/rules/") and p.endswith(".mdc") for p in paths)
@@ -254,7 +259,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "claude", "workspace_root": "/tmp/ws"},
+                {"ides": "claude", "workspace_root": _WS},
             )
         paths = {f["path"] for f in result.data["files"]}
         assert any(p.startswith(".claude/rules/") for p in paths)
@@ -270,7 +275,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "copilot", "workspace_root": "/tmp/ws"},
+                {"ides": "copilot", "workspace_root": _WS},
             )
         paths = {f["path"] for f in result.data["files"]}
         assert paths == {".github/copilot-instructions.md"}
@@ -285,7 +290,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "antigravity", "workspace_root": "/tmp/ws"},
+                {"ides": "antigravity", "workspace_root": _WS},
             )
         paths = {f["path"] for f in result.data["files"]}
         assert all(p.startswith(".agents/rules/") for p in paths)
@@ -301,7 +306,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "agents", "workspace_root": "/tmp/ws"},
+                {"ides": "agents", "workspace_root": _WS},
             )
         paths = {f["path"] for f in result.data["files"]}
         assert paths == {"AGENTS.md"}
@@ -316,7 +321,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         assert result.data["resolved_ides"] == ["cursor"]
 
@@ -330,7 +335,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": ["cursor"], "workspace_root": "/tmp/ws"},
+                {"ides": ["cursor"], "workspace_root": _WS},
             )
         assert result.data["resolved_ides"] == ["cursor"]
 
@@ -344,9 +349,9 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/home/dev/project"},
+                {"ides": "cursor", "workspace_root": _PROJECT},
             )
-        assert result.data["workspace_root"] == "/home/dev/project"
+        assert result.data["workspace_root"] == _PROJECT
 
     @pytest.mark.asyncio
     async def test_files_have_path_content_ide_keys(self) -> None:
@@ -358,7 +363,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         for f in result.data["files"]:
             assert "path" in f
@@ -375,7 +380,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         notes = result.data["notes"]
         assert "deepmodel:dmx:start" in notes
@@ -392,7 +397,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         assert result.data["workflow_version"] == WORKFLOW_VERSION
 
@@ -407,7 +412,7 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         summary = next(f for f in result.data["files"] if f["path"] == ".cursor/AGENTS.md")
         assert WORKFLOW_VERSION in summary["content"]
@@ -424,7 +429,7 @@ class TestSetupIdeRules:
         async with Client(app, client_info=info) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"workspace_root": "/tmp/ws"},
+                {"workspace_root": _WS},
             )
         assert result.data["resolved_ides"] == ["cursor"]
         assert result.data["ides_source"] == "client_info"
@@ -439,6 +444,6 @@ class TestSetupIdeRules:
         async with Client(app) as client:
             result = await client.call_tool(
                 "setup_ide_rules",
-                {"ides": "cursor", "workspace_root": "/tmp/ws"},
+                {"ides": "cursor", "workspace_root": _WS},
             )
         assert result.data["ides_source"] == "explicit"
