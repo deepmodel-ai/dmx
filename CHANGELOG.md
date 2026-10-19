@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-19
+
 **Upgrading from 0.8.0.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed.
 
 ### Added
@@ -290,7 +292,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...v0.7.0
