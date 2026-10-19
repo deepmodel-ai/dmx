@@ -32,7 +32,7 @@ jobs:
 
       # The reference monorepo's pnpm package runs through run_tests (GH-89).
       # Node and Rust come with the runner images.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
 
