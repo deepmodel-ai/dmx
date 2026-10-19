@@ -32,6 +32,7 @@ from dmx.loop_state import (
     write_initial_state,
     write_state,
 )
+from dmx.loop_tools import _VALIDATORS_RUNNING as RUNNING
 from dmx.server import create_app
 
 if TYPE_CHECKING:
@@ -776,8 +777,9 @@ class TestAsyncValidators:
 
     @pytest.mark.asyncio
     async def test_advance_returns_while_a_slow_validator_is_still_running(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr("dmx.loop_tools._FINISH_WAIT_SECONDS", 0)
         _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
         app = create_app()
 
@@ -794,7 +796,7 @@ class TestAsyncValidators:
             )
             elapsed = time.perf_counter() - started
             assert elapsed < 1
-            assert message == "Validators are running. Call `loop_status` to see the result."
+            assert message == RUNNING
 
             status_task = asyncio.create_task(_call(client, "loop_status", tmp_path))
             await asyncio.sleep(0.05)
@@ -822,8 +824,9 @@ class TestAsyncValidators:
 
     @pytest.mark.asyncio
     async def test_continue_returns_while_a_slow_validator_is_still_running(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr("dmx.loop_tools._FINISH_WAIT_SECONDS", 0)
         _write_slow_loop(tmp_path, name="gated", human_gate=True)
         app = create_app()
 
@@ -838,11 +841,33 @@ class TestAsyncValidators:
             assert "Validators are running" in message
 
             again = await _call(client, "loop_continue", tmp_path, wait=False)
-            assert again == "Validators are running. Call `loop_status` to see the result."
+            assert again == RUNNING
 
             outcome = await _call(client, "loop_status", tmp_path)
 
         assert "gated loop — complete" in outcome
+
+    @pytest.mark.asyncio
+    async def test_a_validator_that_finishes_quickly_returns_its_result(
+        self, tmp_path: Path
+    ) -> None:
+        """GH-136: loop_continue waits briefly, so a quick validator needs no loop_status."""
+        _write_slow_loop(tmp_path, name="gated", human_gate=True)
+        app = create_app()
+
+        async with Client(app) as client:
+            await _call(client, "run_loop", tmp_path, name="gated")
+            await _call(client, "loop_advance", tmp_path, output="done", skill="do-thing")
+            message = await _call(client, "loop_continue", tmp_path, wait=False)
+
+        assert "gated loop — complete" in message
+
+    def test_the_running_message_makes_waiting_a_required_step(self) -> None:
+        """GH-136: ending the turn here can stop the validators."""
+        assert RUNNING.startswith("Validators are running.")
+        assert "Call `loop_status` now, and keep calling it until it returns the result" in RUNNING
+        assert "Don't end your turn before then" in RUNNING
+        assert "ending the turn stops the validators" in RUNNING
 
     @pytest.mark.asyncio
     async def test_repeating_loop_advance_does_not_record_the_skill_twice(
@@ -885,6 +910,7 @@ class TestAsyncValidators:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("dmx.loop_tools._STATUS_WAIT_SECONDS", 0.2)
+        monkeypatch.setattr("dmx.loop_tools._FINISH_WAIT_SECONDS", 0)
         _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
         app = create_app()
 
@@ -946,7 +972,7 @@ class TestAsyncValidators:
             assert advance == status
 
             restarted = await _call(client, "loop_continue", tmp_path, wait=False)
-            assert restarted == "Validators are running. Call `loop_status` to see the result."
+            assert restarted.startswith("Validators are running") or "complete" in restarted
             outcome = await _call(client, "loop_status", tmp_path)
 
         assert "gated loop — complete" in outcome
@@ -954,7 +980,10 @@ class TestAsyncValidators:
         assert state["skills_completed"] == ["do-thing"]
 
     @pytest.mark.asyncio
-    async def test_run_loop_refuses_while_a_run_is_validating(self, tmp_path: Path) -> None:
+    async def test_run_loop_refuses_while_a_run_is_validating(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("dmx.loop_tools._FINISH_WAIT_SECONDS", 0)
         _write_slow_loop(tmp_path, name="quickfinish", human_gate=False)
         app = create_app()
 
@@ -1139,3 +1168,15 @@ class TestFinishPending:
             outcome = await _call(client, "loop_continue", tmp_path)
 
         assert "finishme loop — complete" in outcome
+
+
+def test_the_rule_says_to_keep_waiting_for_validators() -> None:
+    """GH-136: the rule makes waiting on loop_status a required step."""
+    from pathlib import Path  # noqa: PLC0415
+
+    rule = (Path(__file__).parent.parent / "src/dmx/rules/system-prompt.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "keep calling it until it returns the result" in rule
+    assert "I don't end my turn while validators are running" in rule

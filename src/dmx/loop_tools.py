@@ -2632,13 +2632,22 @@ def _apply_loop_outcome(
     )
 
 
-_VALIDATORS_RUNNING = "Validators are running. Call `loop_status` to see the result."
+# Waiting is a required step: in a headless session, ending the turn ends the
+# process, which stops the validators (GH-136).
+_KEEP_WAITING = (
+    "Call `loop_status` now, and keep calling it until it returns the result. "
+    "Don't end your turn before then: in some setups, ending the turn stops the validators."
+)
+_VALIDATORS_RUNNING = f"Validators are running. {_KEEP_WAITING}"
 _VALIDATION_INTERRUPTED = "Validation was interrupted; call `loop_continue` to re-run it."
 _FINISH_PENDING = (
     "All skills for this run are complete; the finish step did not complete. "
     "Call `loop_continue` to re-run validators."
 )
 _STATUS_WAIT_SECONDS = 25.0
+# How long loop_advance and loop_continue wait for validators before returning
+# (GH-136). Short, so a long test suite can't time out the client (GH-47).
+_FINISH_WAIT_SECONDS = 10.0
 _VALIDATION_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
@@ -2781,8 +2790,8 @@ def _schedule_finish_loop(
     return _VALIDATORS_RUNNING
 
 
-async def _wait_for_validation(task_id: str) -> None:
-    """Wait for the live worker, up to ``_STATUS_WAIT_SECONDS``.
+async def _wait_for_validation(task_id: str, timeout: float | None = None) -> None:
+    """Wait for the live worker, up to *timeout* (``_STATUS_WAIT_SECONDS`` by default).
 
     Returns as soon as the worker finishes. On timeout the worker keeps
     running; the caller reports that validation is still in progress.
@@ -2796,9 +2805,29 @@ async def _wait_for_validation(task_id: str) -> None:
             return
         task = pending[0]
     try:
-        await asyncio.wait_for(asyncio.shield(task), timeout=_STATUS_WAIT_SECONDS)
+        await asyncio.wait_for(
+            asyncio.shield(task), timeout=_STATUS_WAIT_SECONDS if timeout is None else timeout
+        )
     except TimeoutError:
         return
+
+
+async def _schedule_and_wait(
+    root: Path,
+    job_id: str,
+    loop_name: str,
+    task_id: str,
+    config: LoopConfig,
+    skill_outputs: dict[str, str],
+) -> str:
+    """Start the validators, and return their result if they finish quickly (GH-136)."""
+    message = _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+    if _FINISH_WAIT_SECONDS <= 0:
+        return message
+    await _wait_for_validation(task_id, timeout=_FINISH_WAIT_SECONDS)
+    if _validation_worker_alive(task_id):
+        return message
+    return loop_status_message(root)
 
 
 def _skills_are_complete(state: dict[str, object]) -> bool:
@@ -2904,10 +2933,7 @@ def _active_status_message(
         state.get("validation_started_at") and not state.get("finish_message")
     ):
         started = state.get("validation_started_at") or "just now"
-        return (
-            f"Validators are running for `{loop_name}` (started {started}). "
-            "Call `loop_status` to see the result."
-        )
+        return f"Validators are running for `{loop_name}` (started {started}). {_KEEP_WAITING}"
     if state.get("finish_message"):
         return str(state["finish_message"])
     if _skills_are_complete(state) and state.get("status") in {
@@ -2942,8 +2968,7 @@ def _finished_status_message(root: Path) -> str:
             latest_loop = latest.get("loop_name") or "loop"
             started = latest.get("validation_started_at") or "just now"
             return (
-                f"Validators are running for `{latest_loop}` (started {started}). "
-                "Call `loop_status` to see the result."
+                f"Validators are running for `{latest_loop}` (started {started}). {_KEEP_WAITING}"
             )
         if latest.get("finish_message"):
             return str(latest["finish_message"])
@@ -3244,7 +3269,7 @@ def register_loop_tools(app: FastMCP) -> None:
         else:
             # All skills complete — validators run off this request.
             return finish(
-                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+                await _schedule_and_wait(root, job_id, loop_name, task_id, config, skill_outputs)
             )
 
     @app.tool
@@ -3307,7 +3332,7 @@ def register_loop_tools(app: FastMCP) -> None:
                 return finish(f"Error reloading loop config: {exc}")
             skill_outputs: dict[str, str] = state.get("skill_outputs", {})
             return finish(
-                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+                await _schedule_and_wait(root, job_id, loop_name, task_id, config, skill_outputs)
             )
 
         # Skills were recorded and the process stopped before ``validating``.
@@ -3344,7 +3369,7 @@ def register_loop_tools(app: FastMCP) -> None:
 
             skill_outputs = state.get("skill_outputs", {})
             return finish(
-                _schedule_finish_loop(root, job_id, loop_name, task_id, config, skill_outputs)
+                await _schedule_and_wait(root, job_id, loop_name, task_id, config, skill_outputs)
             )
 
         # A PR snapshot stays complete until validators fill in the outcome.

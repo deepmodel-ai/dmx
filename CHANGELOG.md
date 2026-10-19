@@ -9,8 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Upgrading from 0.8.0.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed.
+
 ### Fixed
 
+- **(GH-136)** Waiting for validators is now an explicit step, so a headless session doesn't stop them half-way. "Validators are running" now says to call `loop_status` and keep calling it until it returns the result, and not to end the turn first, because in some setups ending the turn stops the validators. The rule says the same. `loop_advance` and `loop_continue` also wait up to 10 seconds, so validators that finish quickly return their result in the same call. In eval run 3, the agent ended its turn three times right after the running message; in the headless CLI that ended dmx's server and cut the checks off.
 - **(GH-137)** A pause message that's too long keeps every test run's `✓`/`✗` line. dmx now trims the checks' output first, before any line of a validator's summary, and a run line shows a long test command with its middle left out (the full command is in `component.yaml` and `dmx check`). In eval run 3, six long CI-style commands and two failures' output pushed the run lines out, so the agent couldn't tell which second run had failed.
 
 ## [0.8.0] — 2026-10-18
