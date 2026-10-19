@@ -9,7 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-**Upgrading from 0.7.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed, so loops remind you until you do. The bundled `validate` loop now proposes rework when a required check fails. To keep the old pause, copy `validate.yaml` into `.dmx/loops/` and remove its `rework` block.
+## [0.8.0] — 2026-10-18
+
+**Upgrading from 0.7.**
+
+1. Run `/dmx/upgrade` once on a branch and commit the refreshed rule files. The rule changed, so loops remind you until you do.
+2. The bundled `validate` loop now proposes rework when a required check fails. To keep the old pause, copy `validate.yaml` into `.dmx/loops/` and remove its `rework` block.
+3. In a repo with components, run `dmx check`. A Python component whose folder holds no tests now runs the test paths its `paths` map elsewhere, or is reported as not configured. Before, it ran `pytest` in an empty folder and failed.
+4. Optional:
+   - Add `github_access: gh` under `## GitHub` in `.dmx/config.md` to use the `gh` CLI without a GitHub MCP server.
+   - List tests that fail on the base branch too under `known_failures` in a component's `test` entry.
 
 ### Added
 
@@ -268,7 +277,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/deepmodel-ai/dmx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/deepmodel-ai/dmx/compare/v0.5.1...v0.6.0
