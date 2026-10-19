@@ -266,6 +266,20 @@ def _known_notes(seen: list[str], unseen: list[str]) -> list[str]:
     return notes
 
 
+# A summary line shows at most this much of a command (GH-137). The full
+# command is in component.yaml, and in dmx check.
+_SHOWN_COMMAND = 100
+
+
+def _shown(command: str) -> str:
+    """*command*, with the middle of a long one left out."""
+    if len(command) <= _SHOWN_COMMAND:
+        return command
+    head = _SHOWN_COMMAND * 2 // 3
+    tail = _SHOWN_COMMAND - head - 3
+    return f"{command[:head]} … {command[-tail:]}"
+
+
 def _tail(proc: subprocess.CompletedProcess[str]) -> str:
     return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
 
@@ -288,14 +302,18 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
         return {**record, "status": "missing", "line": line}
     except subprocess.TimeoutExpired:
         limit = max(1, int(remaining))
-        return {**record, "status": "timeout", "line": f"{test.command} timed out after {limit}s"}
+        return {
+            **record,
+            "status": "timeout",
+            "line": f"{_shown(test.command)} timed out after {limit}s",
+        }
     where = f" in {test.cwd}" if test.cwd != "." else ""
     if _nothing_collected(proc):
         return {
             **record,
             "status": "no tests",
             "exit": proc.returncode,
-            "line": f"{test.command}{where} collected no tests (exit 5)",
+            "line": f"{_shown(test.command)}{where} collected no tests (exit 5)",
         }
     status, failing, seen, unseen = _judge(proc, test.known_failures)
     only = ", known failures only" if status == "known failures" else ""
@@ -303,7 +321,7 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
         **record,
         "status": status,
         "exit": proc.returncode,
-        "line": f"{test.command}{where} (exit {proc.returncode}{only})",
+        "line": f"{_shown(test.command)}{where} (exit {proc.returncode}{only})",
         "output": "" if status != "failed" else _tail(proc),
         "failing": failing,
         "known": seen,
@@ -331,7 +349,7 @@ def run_components(
                     "command": test.command,
                     "cwd": test.cwd,
                     "status": "not run",
-                    "line": f"{test.command} not run: the time budget was used up",
+                    "line": f"{_shown(test.command)} not run: the time budget was used up",
                 }
             )
             continue

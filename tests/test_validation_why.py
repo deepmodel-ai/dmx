@@ -339,3 +339,61 @@ class TestValidationWhy:
         assert "FINAL" in why
         assert "`tests_pass`" in why
         assert "…" in why
+
+
+class TestRunSummaryIsKept:
+    """GH-137: trimming takes check output first and keeps the validator's run summary."""
+
+    def test_every_run_line_survives_long_failure_output(self) -> None:
+        from dmx.loop_tools import _WHY_LIMIT, _validation_why  # noqa: PLC0415
+        from dmx.validators.run_tests import _KNOWN_FAILURES_HINT  # noqa: PLC0415
+
+        components = [
+            "clai",
+            "pydantic-ai-examples",
+            "pydantic-ai-harness",
+            "pydantic-ai-slim",
+            "pydantic-clai2",
+            "pydantic-evals",
+        ]
+        failing = {"pydantic-ai-harness", "pydantic-ai-slim"}
+        cmd = (
+            "CI=true COLUMNS=150 uv run --all-packages --all-extras --no-extra mcp-tasks "
+            "pytest -n logical --dist=loadgroup --ignore=tests/durable_exec -m 'not temporal'"
+        )
+        summary = ["Tests failed — 2 of 6 runs failed"] + [
+            f"{'✗' if c in failing else '✓'} {c} — {cmd} tests/{c} "
+            f"(exit {1 if c in failing else 0})"
+            for c in components
+        ]
+        summary_message = "\n".join([*summary, _KNOWN_FAILURES_HINT])
+        output = "\n".join(
+            f"FAILED tests/x.py::test_{i} - AssertionError: " + "x" * 80 for i in range(20)
+        )
+        failures = "\n\n".join(
+            f"{c} — uv run pytest tests/{c} (exit 1):\n{output}" for c in sorted(failing)
+        )
+        config = LoopConfig.model_validate(
+            {
+                "name": "dev",
+                "skills": ["implement-next-phase"],
+                "validators": [{"tool": "run_tests", "checks": [{"name": "tests_pass"}]}],
+            }
+        )
+        results = [
+            {
+                "tool": "run_tests",
+                "pass": False,
+                "message": summary_message,
+                "checks": [{"name": "tests_pass", "pass": False, "message": failures}],
+            }
+        ]
+
+        why = _validation_why(
+            config, results, {"outcome": "failure", "next_status": "paused", "message": "x"}
+        )
+
+        assert len(why) <= _WHY_LIMIT
+        for line in summary[1:]:
+            assert line in why, line
+        assert why.rstrip().endswith("x" * 80)

@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-137)** A pause message that's too long keeps every test run's `✓`/`✗` line. dmx now trims the checks' output first, before any line of a validator's summary, and a run line shows a long test command with its middle left out (the full command is in `component.yaml` and `dmx check`). In eval run 3, six long CI-style commands and two failures' output pushed the run lines out, so the agent couldn't tell which second run had failed.
+
 ## [0.8.0] — 2026-10-18
 
 **Upgrading from 0.7.**

@@ -1329,7 +1329,10 @@ def _bounded_why(groups: list[tuple[str, str, list[tuple[str, bool, str]]]]) -> 
             bodies[f"c:{tool}:{name}"] = message.splitlines() or [message]
     rendered = _assemble_why(groups, bodies)
     while len(rendered) > _WHY_LIMIT:
-        key = _largest_droppable(bodies, keep_first)
+        # A check's message (test output) goes before a validator's, which
+        # is its summary, such as which test runs failed (GH-137).
+        check_bodies = {key: lines for key, lines in bodies.items() if key.startswith("c:")}
+        key = _largest_droppable(check_bodies, keep_first) or _largest_droppable(bodies, keep_first)
         if key is not None:
             updated = _drop_one(bodies[key], keep_first=key in keep_first)
             if updated is None:

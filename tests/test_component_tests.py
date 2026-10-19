@@ -877,3 +877,37 @@ class TestKnownFailureHints:
         assert result["pass"] is False
         assert "No failing-test lines were recognised" in result["message"]
         assert "known_failures couldn't match" in result["message"]
+
+
+class TestLongCommands:
+    """GH-137: a summary line shows a long command with its middle left out."""
+
+    def test_a_long_command_keeps_its_start_and_end(self) -> None:
+        from dmx.validators.run_tests import _shown  # noqa: PLC0415
+
+        command = (
+            "CI=true uv run --all-extras pytest -n logical "
+            + "--ignore=tests/x " * 10
+            + "tests/ledger"
+        )
+        shown = _shown(command)
+
+        assert len(shown) <= 100
+        assert shown.startswith("CI=true uv run --all-extras pytest")
+        assert shown.endswith("tests/ledger")
+        assert " … " in shown
+
+    def test_a_short_command_is_unchanged(self) -> None:
+        from dmx.validators.run_tests import _shown  # noqa: PLC0415
+
+        assert _shown("go test ./...") == "go test ./..."
+
+    def test_the_summary_line_uses_it(self, tmp_path: Path) -> None:
+        long_cmd = "true " + "&& true " * 20
+        root = _stub_repo(tmp_path, {"a": f"test: {{cmd: '{long_cmd}'}}\n"})
+
+        line = run(root)["message"].splitlines()[1]
+
+        assert line.startswith("✓ a — true && true")
+        assert " … " in line
+        assert len(line) < 130
