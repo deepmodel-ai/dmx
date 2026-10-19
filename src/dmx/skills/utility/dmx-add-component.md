@@ -55,6 +55,7 @@ Added component `{id}`: .dmx/components/{id}/component.yaml (paths: {path}/**)
 Next:
   {if has_default_test is false:} - dmx has no default test command for this folder's language: fill in `test: {cmd: ..., cwd: ...}` in .dmx/components/{id}/component.yaml (`cwd` is relative to the repo root and defaults to it).
   {if the folder's tests live elsewhere, such as a root tests/ folder:} - Add those test paths to `paths`, or set `test: {cmd: ..., cwd: ...}` to run them. A Python component with no tests in its own folder runs the test paths its `paths` name, from the repo root.
+  {if you suggest a `test` command:} - Copy the environment variables and flags of the CI job that runs these tests (from `.github/workflows/`) into it, and say which came from CI.
   - Add `depends_on` there if `{id}` uses another component, so its tests run when that one changes.
   - Add this line to .github/CODEOWNERS with the owning team:
       {codeowners}

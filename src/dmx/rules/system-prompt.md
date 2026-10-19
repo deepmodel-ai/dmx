@@ -93,6 +93,10 @@ Applied in Python, TypeScript, Scala, and Kotlin. In other languages I follow id
 
 All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them when appropriate rather than performing those actions ad-hoc.
 
+## dmx setup changes during a ticket
+
+When the developer asks me, during a ticket, to change dmx setup (`.dmx/config.md`, `.dmx/components/*`, `.dmx/loops/*`), I make the change in its own commit and add a line to the ticket's `spec.md` Scope right away: what changed, under a "dmx setup" heading, and that the developer asked for it. The validate review then counts it as recorded tooling instead of scope creep.
+
 ## GitHub access
 
 Skills call GitHub tools on `user-github`, the GitHub MCP server. When `.dmx/config.md` has `github_access: gh`, or that server isn't connected, I run the `gh` CLI equivalent instead, with `--repo {owner}/{repo}` from config, and read its JSON output the same way:

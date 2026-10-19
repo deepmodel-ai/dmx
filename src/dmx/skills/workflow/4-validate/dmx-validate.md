@@ -67,6 +67,8 @@ If no `## Acceptance Criteria` section exists, fall back to evaluating the `## S
 **Scope:**
 Check whether the diff stays within the `## Scope` defined in spec.md. Flag anything in the diff that falls outside declared scope.
 
+**dmx setup changes** (GH-130). A change to `.dmx/config.md`, `.dmx/components/` or `.dmx/loops/` is tooling, not product code. When the spec's Scope records it as a dmx setup change the developer asked for, list it as a covered scope item, not scope creep. When the spec doesn't record it, it is scope creep, like any other unrecorded change. The ticket's own files under `.dmx/jobs/` and memory files are never scope creep.
+
 For every scope item (or acceptance criterion), find the specific file(s)/line(s) or diff hunk that satisfy it. If you cannot find any evidence in the diff for an item, mark it `missing` — not `partial` — only when you are certain there is genuinely nothing there; use `partial` for anything ambiguous or incomplete. You'll record these verdicts in Step 9.
 
 **Regressions:**
