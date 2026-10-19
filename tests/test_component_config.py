@@ -223,6 +223,109 @@ class TestLoops:
 
         assert "Next skill: `implement-next-phase`" in started
 
+    def test_a_component_loop_uses_the_components_own_validator(
+        self, reference_monorepo: Path
+    ) -> None:
+        """GH-135: no `owner:` needed; checks are named after the component."""
+        from dmx.loop_tools import _resolve_loop  # noqa: PLC0415
+
+        _ledger_config(reference_monorepo)
+        _write(
+            reference_monorepo,
+            ".dmx/components/ledger/loops/review.yaml",
+            "name: review\nskills:\n  - ledger/reconcile\nvalidators:\n"
+            "  - tool: balance_check\n    checks:\n      - name: balanced\n"
+            "  - tool: run_tests\n    checks:\n      - name: tests_pass\n",
+        )
+        _validator(
+            reference_monorepo,
+            ".dmx/components/ledger/validators/balance_check.py",
+            [("balanced", True)],
+            passed=True,
+        )
+
+        config = _resolve_loop("ledger/review", reference_monorepo)
+
+        own, repo_wide = config.validators
+        assert (own.tool, own.owner) == ("ledger/balance_check", "ledger")
+        assert [c.name for c in own.checks] == ["ledger/balanced"]
+        assert (repo_wide.tool, repo_wide.owner) == ("run_tests", None)
+        assert [c.name for c in repo_wide.checks] == ["tests_pass"]
+
+    def test_the_components_id_in_the_name_works_too(self, reference_monorepo: Path) -> None:
+        from dmx.loop_tools import _resolve_loop  # noqa: PLC0415
+
+        _ledger_config(reference_monorepo)
+        _write(
+            reference_monorepo,
+            ".dmx/components/ledger/loops/review.yaml",
+            "name: review\nskills:\n  - ledger/reconcile\nvalidators:\n"
+            "  - tool: ledger/balance_check\n    checks:\n      - name: ledger/balanced\n",
+        )
+        _validator(
+            reference_monorepo,
+            ".dmx/components/ledger/validators/balance_check.py",
+            [("balanced", True)],
+            passed=True,
+        )
+
+        [own] = _resolve_loop("ledger/review", reference_monorepo).validators
+
+        assert (own.tool, own.owner) == ("ledger/balance_check", "ledger")
+        assert [c.name for c in own.checks] == ["ledger/balanced"]
+
+    def test_an_explicit_owner_still_works(self, reference_monorepo: Path) -> None:
+        from dmx.loop_tools import _resolve_loop  # noqa: PLC0415
+
+        _ledger_config(reference_monorepo)
+        _write(
+            reference_monorepo,
+            ".dmx/components/ledger/loops/review.yaml",
+            "name: review\nskills:\n  - ledger/reconcile\nvalidators:\n"
+            "  - tool: ledger/balance_check\n    owner: ledger\n"
+            "    checks:\n      - name: ledger/balanced\n",
+        )
+
+        [own] = _resolve_loop("ledger/review", reference_monorepo).validators
+
+        assert (own.tool, own.owner) == ("ledger/balance_check", "ledger")
+        assert [c.name for c in own.checks] == ["ledger/balanced"]
+
+    @pytest.mark.asyncio
+    async def test_the_component_loop_runs_its_own_validator(
+        self, reference_monorepo: Path
+    ) -> None:
+        _ledger_config(reference_monorepo)
+        _write(
+            reference_monorepo,
+            ".dmx/components/ledger/loops/review.yaml",
+            "name: review\nskills:\n  - ledger/reconcile\nhuman_gate: true\nvalidators:\n"
+            "  - tool: balance_check\n    checks:\n      - name: balanced\n",
+        )
+        _validator(
+            reference_monorepo,
+            ".dmx/components/ledger/validators/balance_check.py",
+            [("balanced", False)],
+            passed=False,
+        )
+        _ticket(reference_monorepo, "[ledger]")
+
+        async with Client(create_app()) as client:
+            await _call(client, "run_loop", reference_monorepo, name="ledger/review")
+            await _call(
+                client, "loop_advance", reference_monorepo, skill="ledger/reconcile", output="ok"
+            )
+            message = await _call(client, "loop_continue", reference_monorepo)
+            for _ in range(100):
+                if "Validators are running" not in message:
+                    break
+                message = await _call(client, "loop_status", reference_monorepo)
+
+        assert "Required checks failed: ledger/balanced" in message
+        [state_file] = (reference_monorepo / ".dmx/jobs/GH-7").glob("ledger--review-*.json")
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        assert state["validator_results"][0]["tool"] == "ledger/balance_check"
+
     def test_state_paths_never_make_a_folder(self, tmp_path: Path) -> None:
         path = state_path(tmp_path, "GH-7", "ledger/backfill", "T")
 

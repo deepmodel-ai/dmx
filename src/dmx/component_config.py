@@ -43,6 +43,7 @@ __all__ = [
     "component_dirs",
     "component_validators",
     "expand_reported_checks",
+    "own_component_validators",
     "parse_validator_entry",
     "scope_refusal",
     "split_component_name",
@@ -81,6 +82,50 @@ def component_dirs(root: Path, component_id: str, kind: str) -> list[Path]:
         except SharedSourceError as exc:
             logger.warning("component %s: %s", component_id, exc)
     return dirs
+
+
+def own_component_validators(root: Path, component_id: str, config: LoopConfig) -> LoopConfig:
+    """*config*, a component's loop, with each validator the component has made its own.
+
+    A validator named plainly (``balance_check``) or with the component's id
+    (``ledger/balance_check``) runs the component's copy when the component
+    has one in its ``validators/`` folder, and its checks are named after the
+    component (``ledger/balanced``), as a ``component.yaml`` validator's are.
+    Other validators resolve repo-wide, as in any loop. An explicit
+    ``owner`` is left alone (GH-135).
+    """
+    validators: list[ValidatorConfig] = []
+    for validator in config.validators:
+        validators.append(_owned_by(root, component_id, validator))
+    return config.model_copy(update={"validators": validators})
+
+
+def _owned_by(root: Path, component_id: str, validator: ValidatorConfig) -> ValidatorConfig:
+    if validator.owner is not None:
+        return validator
+    split = split_component_name(validator.tool)
+    if split is not None:
+        if split[0] != component_id:
+            return validator
+        name = split[1]
+    elif "/" in validator.tool:
+        return validator
+    else:
+        name = validator.tool
+    if not any(
+        (d / f"{name}.py").is_file() for d in component_dirs(root, component_id, "validators")
+    ):
+        return validator
+    prefix = f"{component_id}/"
+    checks = [
+        check
+        if check.name.startswith(prefix)
+        else check.model_copy(update={"name": f"{prefix}{check.name}"})
+        for check in validator.checks
+    ]
+    return validator.model_copy(
+        update={"tool": f"{prefix}{name}", "owner": component_id, "checks": checks}
+    )
 
 
 def ticket_component_ids(root: Path, job_id: str | None) -> list[str]:

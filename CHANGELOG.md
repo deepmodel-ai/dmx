@@ -11,6 +11,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **Upgrading from 0.8.0.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed.
 
+### Added
+
+- **(GH-135)** Authoring a component's own loop no longer needs dmx's source.
+  - **Component validators.** A component's loop that names a validator, plainly (`balance_check`) or with the component's id (`ledger/balance_check`), runs the component's own copy from its `validators/` folder when there is one. Its checks are reported with the component's id (`ledger/balanced`), as `component.yaml` validators' are, and the loop's check names can be written either way. A validator the component doesn't have still runs from the repo, and an explicit `owner:` still works. Before, a component's loop needed the undocumented `owner:` field to reach the component's validators.
+  - **`/dmx/extend`.** A new skill for adding a skill, loop or validator to the repo, a shared source or a component. It covers where each file goes, the skill format, every loop field including `rework`, the validator contract (input, output, exit codes, `findings` and `reworkable`, and that validators run on dmx's own Python), adding checks to a standard loop for one component, and how to check the result. The rule tells the agent to follow it instead of reading dmx's source. In eval run 3, the agent read `loop_schema.py`, `component_config.py` and `validator_runner.py` to write a component's review loop.
+
 ### Fixed
 
 - **(GH-136)** Waiting for validators is now an explicit step, so a headless session doesn't stop them half-way. "Validators are running" now says to call `loop_status` and keep calling it until it returns the result, and not to end the turn first, because in some setups ending the turn stops the validators. The rule says the same. `loop_advance` and `loop_continue` also wait up to 10 seconds, so validators that finish quickly return their result in the same call. In eval run 3, the agent ended its turn three times right after the running message; in the headless CLI that ended dmx's server and cut the checks off.

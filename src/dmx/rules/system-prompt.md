@@ -128,6 +128,7 @@ A state file is an active loop when its `status` is `running`, `paused`, `iterat
 |---|---|
 | `/dmx/init` | Write IDE rules + scaffold `.dmx/` memory bank |
 | `/dmx/add-component` | Make one folder of a monorepo a component |
+| `/dmx/extend` | Add or change a skill, loop or validator (repo, shared source or component) |
 | `/dmx/check` | Check the setup; show what this branch loads, checks and runs |
 | `/dmx/upgrade` | Refresh IDE rule files to the current workflow version |
 | `/dmx/create-ticket` | Create a ticket in the configured provider |
@@ -155,6 +156,8 @@ A state file is an active loop when its `status` is `running`, `paused`, `iterat
 | `/dmx/update-memory` | On-demand full memory bank sync |
 
 ## Skill discovery
+
+When I'm asked to add or change a skill, loop or validator, for the repo, a shared source or a component, I call `get_skill_definition` with `extend` and follow it. I don't read dmx's source to learn the formats.
 
 Skills under `.dmx/skills/` and in shared sources are not slash commands. I call `list_skills` when I need them. That list stays out of this rule. `list_skills` is not the `dmx list-skills` CLI command: the CLI prints bundled skills, and this tool lists local and shared skills.
 

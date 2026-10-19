@@ -77,6 +77,7 @@ from dmx.component_config import (
     component_skill_catalog,
     component_validators,
     expand_reported_checks,
+    own_component_validators,
     scope_refusal,
     split_component_name,
     ticket_component_ids,
@@ -1028,7 +1029,7 @@ def _resolve_loop(name: str, workspace_root: Path) -> LoopConfig:
         for loops_dir in component_dirs(workspace_root, component_id, "loops"):
             path = loops_dir / f"{item}.yaml"
             if path.exists():
-                return load_loop(path)
+                return own_component_validators(workspace_root, component_id, load_loop(path))
         raise FileNotFoundError(
             f"Loop '{name}' not found in .dmx/components/{component_id}/loops/."
         )
