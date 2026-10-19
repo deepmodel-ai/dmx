@@ -24,6 +24,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **(GH-129)** `known_failures` work with pytest-pretty, which replaces pytest's `FAILED` lines with a "Summary of Failures" table (adding `-rfE` doesn't bring them back). When there are no `FAILED` lines and the table is there, `run_tests` reads the failing tests from pytest's own section headers, setup errors included, and takes file paths from untruncated table rows. Rework findings use the same lines. A failed run whose known failures couldn't match, because no failing-test line was recognised, now says so. The hint and `/dmx/init` explain that an entry matches every failing test whose line contains it, so a file, a class or a test name covers what's in it.
 - **(GH-121)** Smaller fixes from the first eval run:
   - **PR titles.** `create-pr` follows a PR title convention the repo documents (`CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md` or the PR template) instead of dmx's "Feature | …" format, and says so.
   - **Rework tasks.** A check with findings becomes a short task, ``Fix `check` (tool)``, with the findings under it, each up to 300 characters, so the same text no longer appears twice cut off at 200.

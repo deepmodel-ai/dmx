@@ -506,6 +506,18 @@ class TestRunTests:
             "ERROR tests/test_setup.py - ImportError",
         ]
 
+    def test_a_single_command_with_unrecognised_output_says_why(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\t@echo broken\n\t@exit 1\n", encoding="utf-8")
+        (tmp_path / ".dmx").mkdir()
+        (tmp_path / ".dmx" / "config.md").write_text(
+            "test_known_failures: [test_x]\n", encoding="utf-8"
+        )
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is False
+        assert "No failing-test lines were recognised in `make test`'s output" in result["message"]
+
     def test_passing_tests_have_no_rework_fields(self, tmp_path: Path) -> None:
         (tmp_path / "Makefile").write_text("test:\n\t@true\n", encoding="utf-8")
         [check] = run_tests.run(tmp_path)["checks"]

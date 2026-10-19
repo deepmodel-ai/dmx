@@ -140,15 +140,82 @@ def _timeout_result(
 _FAILING_TEST_RE = re.compile(r"^(?:FAILED\b|ERROR\b|FAIL\b|--- FAIL:)")
 
 
+# pytest's own section headers, such as ``____ TestA.test_b ____`` (GH-129).
+_SECTION_RE = re.compile(r"^_{3,} (.+?) _{3,}$")
+_ERROR_SECTION_RE = re.compile(r"^ERROR (?:at (?:setup|teardown) of |collecting )(.+)$")
+_PRETTY_TABLE = "Summary of Failures"
+_TRUNCATED = "…"
+
+
 def _failing_tests(output: str) -> list[str]:
-    """The lines of *output* that name a failing test."""
-    return [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
+    """The lines of *output* that name a failing test.
+
+    pytest-pretty replaces pytest's ``FAILED`` lines with a table, so when
+    there are none and that table is there, the failing tests come from
+    pytest's section headers instead, with the table's file paths (GH-129).
+    """
+    lines = [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
+    if lines or _PRETTY_TABLE not in output:
+        return lines
+    return _pretty_failures(output)
+
+
+def _pretty_rows(output: str) -> list[tuple[str | None, str]]:
+    """``(file, function)`` for each row of pytest-pretty's table; a cut-off file is None."""
+    rows: list[tuple[str | None, str]] = []
+    for line in output.splitlines():
+        if not line.lstrip().startswith("│"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("│").split("│")]
+        if len(cells) < 2 or not cells[1]:
+            continue
+        file = cells[0] if cells[0] and not cells[0].endswith(_TRUNCATED) else None
+        rows.append((file, cells[1]))
+    return rows
+
+
+def _test_id(name: str) -> str:
+    """``TestA.test_b[x.y]`` → ``TestA::test_b[x.y]``: dots in parameters stay."""
+    head, bracket, params = name.partition("[")
+    return head.replace(".", "::") + bracket + params
+
+
+def _pretty_failures(output: str) -> list[str]:
+    rows = _pretty_rows(output)
+    found: list[str] = []
+    for line in output.splitlines():
+        match = _SECTION_RE.match(line.strip())
+        if not match:
+            continue
+        name = match.group(1)
+        error = _ERROR_SECTION_RE.match(name)
+        if error:
+            found.append(f"ERROR {_test_id(error.group(1))}")
+            continue
+        file = None
+        for index, (row_file, function) in enumerate(rows):
+            if function == name or (
+                function.endswith(_TRUNCATED) and name.startswith(function[: -len(_TRUNCATED)])
+            ):
+                file = row_file
+                del rows[index]
+                break
+        test = _test_id(name)
+        found.append(f"FAILED {file}::{test}" if file else f"FAILED {test}")
+    return found
 
 
 _KNOWN_FAILURES_HINT = (
     "A test that fails on the base branch too, or only on some machines, can be listed under "
     "`known_failures` in the component's `test` entry (or `test_known_failures` in "
-    "`.dmx/config.md`). Only list failures this change didn't cause; `dmx check` shows them."
+    "`.dmx/config.md`). An entry matches every failing test whose line contains it, so a file, "
+    "a class or a test name covers all the tests in it. Only list failures this change didn't "
+    "cause; `dmx check` shows them."
+)
+_NOTHING_RECOGNISED = (
+    "No failing-test lines were recognised in {label}'s output, so its known_failures couldn't "
+    "match. dmx reads pytest's `FAILED`/`ERROR` lines (and pytest-pretty's table), Jest's "
+    "`FAIL` and Go's `--- FAIL:`; check whether a plugin or flag changes that output."
 )
 
 # A run that passed, or failed only on listed known failures (GH-118).
@@ -241,6 +308,8 @@ def _run_one(root: Path, test: TestRun, remaining: float) -> dict[str, Any]:
         "failing": failing,
         "known": seen,
         "unseen": unseen if status != "failed" else [],
+        "listed": bool(test.known_failures),
+        "recognised": bool(failing or seen),
     }
 
 
@@ -313,6 +382,9 @@ def run_components(
         lines.append(_where_to_set_timeout(loop_name))
     if any(record.get("failing") for record in runs):
         lines.append(_KNOWN_FAILURES_HINT)
+    for record in runs:
+        if record["status"] == "failed" and record.get("listed") and not record.get("recognised"):
+            lines.append(_NOTHING_RECOGNISED.format(label=", ".join(record["components"])))
     check: dict[str, Any] = {"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}
     if not passed:
         if reworkable and findings:
@@ -376,6 +448,8 @@ def run(
     only = ", known failures only" if status == "known failures" else ""
     tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
     notes = _known_notes(seen, unseen if passed else [])
+    if not passed and known and not failing and not seen:
+        notes.append(_NOTHING_RECOGNISED.format(label=f"`{cmd_str}`"))
 
     result: dict[str, Any] = {
         "pass": passed,

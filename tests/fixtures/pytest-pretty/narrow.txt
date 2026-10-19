@@ -1,0 +1,52 @@
+.F                                                                       [ 33%]tests/models/test_model_function.py:5 test_stream_source_closed_when_cancelled_before_the_first_item_arrivesF [ 50%]
+                                                                         [ 50%]tests/models/test_model_function.py:9 TestSentenceTransformers.test_embed. [ 66%]
+F                                                                        [ 83%]tests/models/test_model_function.py:12 test_param[2] - assert 2 == 1…E [100%]tests/models/test_model_function.py:16 test_error_fixture [100%]
+==================================== ERRORS ====================================
+_____________________ ERROR at setup of test_error_fixture _____________________
+file tests/models/test_model_function.py, line 17
+  def test_error_fixture(missing_fixture):
+E       fixture 'missing_fixture' not found
+>       available fixtures: _examples_to_update, anyio_backend, anyio_backend_name, anyio_backend_options, benchmark, capfd, capfdbinary, capfire, caplog, capsys, capsysbinary, capteesys, cassette, class_mocker, codspeed_benchmark, doctest_namespace, eval_example, free_tcp_port, free_tcp_port_factory, free_udp_port, free_udp_port_factory, insert_assert, insert_assert_add_to_builtins, insert_assert_maybe_fail, insert_assert_session, logfire_pytest, mocker, module_mocker, monkeypatch, package_mocker, pytestconfig, pytester_pretty, record_property, record_testsuite_property, record_xml_attribute, recwarn, session_mocker, snapshot_check, subtests, testrun_uid, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory, vcr, vcr_cassette_dir, vcr_config, worker_id
+>       use 'pytest --fixtures [testpath]' for help on them.
+
+tests/models/test_model_function.py:17
+=================================== FAILURES ===================================
+____ test_stream_source_closed_when_cancelled_before_the_first_item_arrives ____
+
+    def test_stream_source_closed_when_cancelled_before_the_first_item_arrives():
+>       assert 1 == 2
+E       assert 1 == 2
+
+tests/models/test_model_function.py:7: AssertionError
+_____________________ TestSentenceTransformers.test_embed ______________________
+
+self = <test_model_function.TestSentenceTransformers object at 0x10c1fed80>
+
+    def test_embed(self):
+>       raise RuntimeError("boom")
+E       RuntimeError: boom
+
+tests/models/test_model_function.py:11: RuntimeError
+________________________________ test_param[2] _________________________________
+
+n = 2
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param(n):
+>       assert n == 1
+E       assert 2 == 1
+
+tests/models/test_model_function.py:15: AssertionError
+                              Summary of Failures                               
+┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃               ┃               ┃  Function     ┃              ┃               ┃
+┃  File         ┃  Function     ┃  Line         ┃  Error Line  ┃  Error        ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│  tests/mode…  │  test_strea…  │  6            │  7           │  AssertionE…  │
+│  tests/mode…  │  TestSenten…  │  10           │  11          │  RuntimeErr…  │
+│  tests/mode…  │  test_param…  │  13           │  15          │  AssertionE…  │
+└───────────────┴───────────────┴───────────────┴──────────────┴───────────────┘
+Results (0.05s):
+         3 failed
+         2 passed
+         1 error

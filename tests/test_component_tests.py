@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
@@ -13,9 +13,6 @@ from dmx.component_tests import plan_tests
 from dmx.components import load_components
 from dmx.validators.run_tests import run
 from dmx.workspaces import default_test_command
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _BRANCH = "feature-gh-9"
 # CI sets this so a missing toolchain fails instead of skipping (#81).
@@ -795,3 +792,88 @@ class TestKnownFailures:
         }
         texts = [(f.level, f.text) for f in check_setup(root)]
         assert ("info", "a: 2 known failures in its tests (t1, t2)") in texts
+
+
+_PRETTY = Path(__file__).parent / "fixtures" / "pytest-pretty"
+_LONG = "test_stream_source_closed_when_cancelled_before_the_first_item_arrives"
+
+
+class TestPytestPretty:
+    """GH-129: pytest-pretty replaces the FAILED lines with a table."""
+
+    def test_the_wide_table_gives_full_ids(self) -> None:
+        from dmx.validators.run_tests import _failing_tests  # noqa: PLC0415
+
+        lines = _failing_tests((_PRETTY / "wide.txt").read_text(encoding="utf-8"))
+
+        assert lines == [
+            "ERROR test_error_fixture",
+            f"FAILED tests/models/test_model_function.py::{_LONG}",
+            "FAILED tests/models/test_model_function.py::TestSentenceTransformers::test_embed",
+            "FAILED tests/models/test_model_function.py::test_param[2]",
+        ]
+
+    def test_a_narrow_table_still_names_every_test(self) -> None:
+        from dmx.validators.run_tests import _failing_tests  # noqa: PLC0415
+
+        lines = _failing_tests((_PRETTY / "narrow.txt").read_text(encoding="utf-8"))
+
+        assert lines == [
+            "ERROR test_error_fixture",
+            f"FAILED {_LONG}",
+            "FAILED TestSentenceTransformers::test_embed",
+            "FAILED test_param[2]",
+        ]
+
+    def test_known_failures_match_pretty_output(self, tmp_path: Path) -> None:
+        fixture = (_PRETTY / "wide.txt").as_posix()
+        entry = (
+            f"test:\n  cmd: \"cat '{fixture}'; exit 1\"\n"
+            "  known_failures:\n"
+            "    - tests/models/test_model_function.py::TestSentenceTransformers\n"
+            "    - test_param\n"
+            f"    - {_LONG}\n"
+            "    - test_error_fixture\n"
+        )
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is True, result["message"]
+        assert "known failures only" in result["message"]
+
+    def test_an_unlisted_pretty_failure_still_fails(self, tmp_path: Path) -> None:
+        fixture = (_PRETTY / "wide.txt").as_posix()
+        entry = f"test:\n  cmd: \"cat '{fixture}'; exit 1\"\n  known_failures: [test_param]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is False
+        assert (
+            "FAILED tests/models/test_model_function.py::test_param[2]"
+            not in (result["checks"][0]["findings"])
+        )
+        assert "ERROR test_error_fixture" in result["checks"][0]["findings"]
+
+
+class TestKnownFailureHints:
+    """GH-129: say how entries match, and why a list couldn't match."""
+
+    def test_the_hint_explains_substring_matching(self, tmp_path: Path) -> None:
+        root = _stub_repo(tmp_path, {"a": _failing("FAILED tests/test_x.py::TestA::test_b")})
+
+        message = run(root)["message"]
+
+        assert "matches every failing test whose line contains it" in message
+        assert "a file, a class or a test name" in message
+
+    def test_no_recognisable_lines_with_a_list_says_why(self, tmp_path: Path) -> None:
+        entry = _failing("something broke, no test names here") + "  known_failures: [test_x]\n"
+        root = _stub_repo(tmp_path, {"a": entry})
+
+        result = run(root)
+
+        assert result["pass"] is False
+        assert "No failing-test lines were recognised" in result["message"]
+        assert "known_failures couldn't match" in result["message"]

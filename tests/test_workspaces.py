@@ -339,4 +339,5 @@ class TestInitSkill:
         assert "**Tests outside the packages.**" in step
         assert "`test: {cmd:" in step
         assert "`known_failures: [test id, ...]`" in step
+        assert "An entry matches every failing test whose line contains it" in step
         assert "## Step 10 — Output the result" in skill
