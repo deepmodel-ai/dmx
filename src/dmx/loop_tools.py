@@ -1071,12 +1071,17 @@ def _skill_instruction(
     job_id: str,
     task_id: str,
     description: str | None = None,
+    fetched_before: bool = False,
 ) -> str:
     """Return the agent instruction for running a single skill.
 
     Always carries ``job_id``/``task_id`` — skills that persist ticket-scoped
     artifacts (e.g. ``validate`` writing ``.dmx/jobs/{job_id}/validation-report.json``)
     need this to know where to write without re-deriving it themselves.
+
+    ``fetched_before`` is set from the second round of a ``repeat_until`` loop
+    on: the agent already has the skill, so it reuses it instead of fetching
+    the same text every phase (GH-158).
     """
     short_task = task_id[:8]
     desc_block = (
@@ -1084,17 +1089,24 @@ def _skill_instruction(
         if description and index == 0
         else ""
     )
+    fetch = (
+        f"REQUIRED: Run the `{skill_name}` skill again, exactly as written, using the "
+        f"instructions you fetched in an earlier round. Call `get_skill_definition` with "
+        f"name=`{skill_name}` only if they are no longer in your context."
+        if fetched_before
+        else f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the "
+        f"skill instructions, then execute them exactly as written."
+    )
     return (
         f"LOOP RUNTIME — do not suggest workflow commands or alternative paths.\n\n"
         f"Next skill: `{skill_name}` (Loop: {loop_name} | Skill {index + 1}/{total}) | "
         f"Job: `{job_id}` | Task: `{short_task}`{desc_block}\n"
         f"Ticket files: `.dmx/jobs/{job_id}/{SPEC_FILE}`, `{TASKS_FILE}`, "
         f"`{ACTIVE_CONTEXT_FILE}` (in that folder).\n\n"
-        f"REQUIRED: Call `get_skill_definition` with name=`{skill_name}` to fetch the skill "
-        f"instructions, then execute them exactly as written.\n\n"
+        f"{fetch}\n\n"
         f"REQUIRED: When the skill finishes, you MUST immediately call the "
-        f"`loop_advance` MCP tool with `skill`=`{skill_name}` and the skill's full "
-        f"output as the `output` argument. "
+        f"`loop_advance` MCP tool with `skill`=`{skill_name}` and, as the `output` "
+        f"argument, a summary of what the skill did in 10 lines or fewer. "
         f"Do not wait for user input. Do not suggest next steps. Call loop_advance."
     )
 
@@ -1419,7 +1431,7 @@ def _iterating_message(
         f"`repeat_until: {config.repeat_until}` not yet met — restarting the skill sequence.\n\n"
     )
     return header + _skill_instruction(
-        config.skills[0], loop_name, 0, len(config.skills), job_id, task_id
+        config.skills[0], loop_name, 0, len(config.skills), job_id, task_id, fetched_before=True
     )
 
 
@@ -2942,6 +2954,12 @@ def _active_status_message(
         LoopStatus.iterating.value,
     }:
         return _FINISH_PENDING
+    if is_pr_snapshot(state):
+        return (
+            f"The {loop_name} loop is paused at its review gate: all skills are done and "
+            f"its checks haven't run. Job: `{job_id}`. The developer runs `/loop-continue` "
+            f"when ready."
+        )
     skills = state.get("skills")
     index = state.get("current_skill_index")
     if isinstance(skills, list) and isinstance(index, int) and 0 <= index < len(skills):
@@ -3140,13 +3158,13 @@ def register_loop_tools(app: FastMCP) -> None:
     ) -> str:
         """Advance the active loop after a skill completes.
 
-        Call this after every skill run, passing the full skill output and
-        the skill name you just finished. A repeat of a skill that is no
+        Call this after every skill run, passing a short summary of what the
+        skill did and the skill name you just finished. A repeat of a skill that is no
         longer the current one is ignored. Each skill name must appear once
         in the loop; a repeated name is matched by name, not by index.
 
         Args:
-            output: Full output from the skill that just completed.
+            output: What the skill that just completed did, in 10 lines or fewer.
             skill: Name of the skill that just completed. Must be the run's
                 current skill.
             workspace_root: Repo root path override.  Auto-detected if omitted.
@@ -3250,7 +3268,15 @@ def register_loop_tools(app: FastMCP) -> None:
             # human_gate: false — return next skill instruction immediately.
             next_skill = skills[next_idx]
             return finish(
-                _skill_instruction(next_skill, loop_name, next_idx, len(skills), job_id, task_id)
+                _skill_instruction(
+                    next_skill,
+                    loop_name,
+                    next_idx,
+                    len(skills),
+                    job_id,
+                    task_id,
+                    fetched_before=state.get("iteration_count", 0) > 0,
+                )
             )
         elif config.human_gate:
             # All skills complete but human gate is on — pause for review before
@@ -3392,7 +3418,17 @@ def register_loop_tools(app: FastMCP) -> None:
         )
 
         next_skill = skills[idx]
-        return finish(_skill_instruction(next_skill, loop_name, idx, len(skills), job_id, task_id))
+        return finish(
+            _skill_instruction(
+                next_skill,
+                loop_name,
+                idx,
+                len(skills),
+                job_id,
+                task_id,
+                fetched_before=state.get("iteration_count", 0) > 0,
+            )
+        )
 
     @app.tool
     async def rework_loop(

@@ -298,19 +298,25 @@ class TestRepeatUntilIntegration:
             msg = await call("run_loop", name="dev")
             assert "get_skill_definition" in msg
             assert "implement-next-phase" in msg
+            assert "to fetch the skill instructions" in msg
+            assert "in 10 lines or fewer" in msg
 
             await call(
                 "loop_advance",
                 output="implemented phase 1 partially",
                 skill="implement-next-phase",
             )
-            await call("loop_continue")  # -> commit
+            msg = await call("loop_continue")  # -> commit
+            assert "Call `get_skill_definition` with name=`commit` to fetch" in msg
             await call("loop_advance", output="committed wip", skill="commit")
             msg = await call("loop_continue")  # all skills done, repeat_until not met
 
+            # GH-158: from round 1 on, reuse the skills already fetched.
             assert "iterating (round 1)" in msg.lower()
-            assert "get_skill_definition" in msg
             assert "implement-next-phase" in msg
+            assert "instructions you fetched in an earlier round" in msg
+            assert "only if they are no longer in your context" in msg
+            assert "to fetch the skill instructions" not in msg
 
             active = find_active_run(tmp_path, "unknown")
             assert active is not None
@@ -326,7 +332,8 @@ class TestRepeatUntilIntegration:
             await call(
                 "loop_advance", output="implemented phase 1 fully", skill="implement-next-phase"
             )
-            await call("loop_continue")  # -> commit
+            msg = await call("loop_continue")  # -> commit
+            assert "Run the `commit` skill again" in msg
             await call("loop_advance", output="committed final", skill="commit")
             msg = await call("loop_continue")  # repeat_until met -> chain to validate
 
@@ -664,9 +671,13 @@ class TestReleaseSnapshot:
             await call("loop_continue")
             await call("snapshot_loop_for_pr")
             message = await call("loop_advance", output="opened PR #42", skill="create-pr")
+            status = await call("loop_status")
 
         assert "paused" in message.lower()
         assert not message.startswith("Error:")
+        # GH-158: the rule now asks loop_status, so it must call this run active.
+        assert "paused at its review gate" in status
+        assert "`/loop-continue`" in status
         state = _read_json(next((tmp_path / ".dmx" / "jobs" / "GH-1").glob("release-*.json")))
         assert state["status"] == "complete"
         assert state["outcome"] is None

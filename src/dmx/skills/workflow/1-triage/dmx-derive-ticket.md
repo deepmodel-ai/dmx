@@ -14,7 +14,7 @@ You are formalising work that has already been started. The developer has uncomm
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `branch_base` → integration branch
 - `production_branch` → production branch (when set in config)
@@ -22,7 +22,7 @@ The project configuration is injected into your context as a rule. Extract:
 - `atlassian_domain` → Jira domain (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init first."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init first."
 
 ## Step 2 — Resolve defaults
 

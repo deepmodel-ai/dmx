@@ -17,14 +17,14 @@ You are starting a hotfix for a production incident. Hotfix branches are always 
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `branch_base` → integration branch (back-merge target after hotfix is merged)
 - `production_branch` → production branch (hotfix source and PR target)
 - `cloud_id` → Jira cloud ID (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 If `production_branch` is set in config, use it.
 

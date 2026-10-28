@@ -1400,12 +1400,12 @@ class TestPrSnapshot:
 
     def test_loop_mode_rule_searches_the_current_job_only(self) -> None:
         rule = (pkg.files("dmx") / "rules/system-prompt.md").read_text(encoding="utf-8")
+        # GH-158: loop_status finds the current job's run (pending spec runs
+        # and PR snapshots included), so the rule no longer globs state files.
         assert ".dmx/jobs/**" not in rule
-        assert ".dmx/jobs/{job_id}/*.json" in rule
-        assert ".dmx/jobs/_pending-*/*.json" in rule
-        assert '"outcome": null' in rule
-        assert "not `none`, `unknown`, or empty" in rule
-        assert "`validating`" in rule
+        assert "*.json" not in rule
+        assert "I call `loop_status`" in rule
+        assert "It finds the current ticket's loop" in rule
         assert "skill name" in rule
 
     def test_snapshot_does_nothing_unless_the_current_skill_is_create_pr(

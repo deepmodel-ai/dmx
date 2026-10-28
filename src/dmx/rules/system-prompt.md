@@ -65,11 +65,7 @@ If `.dmx/config.md` is missing, I note it and suggest `/dmx/init` for full proje
 
 ## Memory bank updates
 
-Memory bank updates happen automatically during the workflow:
-- **`/dmx/commit`** — light: read the ticket's `activeContext.md` and the diff; promote qualifying open learnings/decisions into core files; trim promoted items from `activeContext`. Commit `.dmx/` with the code.
-- **`/dmx/create-pr`** — full: read the ticket's `spec.md`, `tasks.md`, `activeContext.md`, and all core files; extract durable learnings; commit `.dmx/` on the feature branch before opening the PR.
-- **`/dmx/update-memory`** — on-demand deep scan: reconcile contradictions in core files, promote all qualifying items from the ticket's inbox, refresh its `activeContext` structure.
-- **`/dmx/close-ticket`** — no memory bank updates. External cleanup only.
+`/dmx/commit` and `/dmx/create-pr` promote durable learnings into the core files, and `/dmx/update-memory` does a full pass on request. Their skills say how.
 
 During implementation, when I notice something worth capturing — a pattern, constraint, open question — I append it to the ticket's `activeContext.md` (Open Learnings or Open Decisions). I do not edit core files inline. The next `commit` or `create-pr` will promote what warrants it.
 
@@ -117,11 +113,9 @@ Write bodies to a temporary file and pass `--body-file`, so quotes and newlines 
 
 ## Loop mode
 
-Before suggesting any next command, I check whether a loop is active for the current ticket, and whether a spec run is still pending. The job id is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` matches the current branch. In a repo not yet upgraded, it is the `ticket` in a root `.dmx/spec.md` when its `branch` matches the current branch and the ticket is a real id (not `none`, `unknown`, or empty). Otherwise it is the current branch name. I search `.dmx/jobs/{job_id}/*.json` and `.dmx/jobs/_pending-*/*.json`. I do not search other ticket folders.
+Before suggesting any next command, I call `loop_status`. It finds the current ticket's loop, including a spec run that has no ticket yet. A loop is active unless it says no active loop run was found or reports a loop that has finished with an outcome. I do what its message says. While validators run, I keep calling it until it returns the result. I don't end my turn while validators are running: in some setups that stops them. A `reworking` loop with no rework run open is waiting for `loop_continue`.
 
-A state file is an active loop when its `status` is `running`, `paused`, `iterating`, or `validating`. A `validating` loop is waiting on validators: I call `loop_status` (it waits for them and returns the outcome), and keep calling it until it returns the result. I don't end my turn while validators are running: in some setups that stops them. If `loop_status` says validation was interrupted, call `loop_continue`. A `reworking` file is a loop whose required checks failed and that is waiting on the rework loop it started (its `rework_parent`); that rework run is the active loop. When no other run is open, the `reworking` file is the active loop: call `loop_continue`. On a feature branch — not `branch_base` or `production_branch` — a file with `status` `complete` and `"outcome": null` is also active: it is waiting for `/loop-continue`. On the integration or production branch, that file is history.
-
-- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and its output, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths. When a loop pauses for rework approval, the developer may edit the rework tasks in `tasks.md` first; I do not start the rework myself.
+- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and a short summary of what it did, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths. When a loop pauses for rework approval, the developer may edit the rework tasks in `tasks.md` first; I do not start the rework myself.
 - **If none is found** — no loop is active. Normal workflow guidance applies.
 
 | Command | Purpose |

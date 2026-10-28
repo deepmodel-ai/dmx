@@ -15,12 +15,12 @@ You are creating the official GitHub release. Follow every step in order. This a
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `branch_base` → integration branch
 - `production_branch` → production branch (tag and release target)
 - `owner`, `repo` → GitHub coordinates
 
-If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 If `production_branch` is set in config, use it.
 

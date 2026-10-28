@@ -14,12 +14,12 @@ You are creating the `{config.branch_base}` → `{config.production_branch}` rel
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `owner`, `repo` → GitHub coordinates
 - `branch_base` → integration branch (feature PRs merge here)
 - `production_branch` → production branch (releases, hotfixes, tags)
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 If `production_branch` is set in config, use it.
 

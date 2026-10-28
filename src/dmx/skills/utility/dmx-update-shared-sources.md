@@ -18,7 +18,7 @@ You are updating this repo's declared shared sources (loops/skills/validators an
 
 ## Step 1 — Load configuration and protected branch check
 
-The project configuration is injected into your context as a rule. Extract `branch_base`. If not available in context, fall back to reading `.dmx/config.md`.
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract `branch_base`.
 
 Run:
 ```

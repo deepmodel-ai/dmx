@@ -14,7 +14,7 @@ You are drafting a pull request description. Output only the final markdown — 
 
 Follow the steps below to gather information, then fill in the output template determined in Step 1.
 
-**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+**Ticket files.** `spec.md`, `tasks.md` and `activeContext.md` below are in this ticket's job folder: the `Ticket files:` path in the loop instruction. Run directly, it is the `.dmx/jobs/` folder whose `spec.md` has the current `branch`, else `.dmx/jobs/{current branch}/`, or the `.dmx/` root in a repo not yet upgraded. Don't read other tickets' folders.
 
 **Issue in another repo.** When `spec.md`'s frontmatter has `issue_repo` (GH-92), the GitHub issue lives in that repo, not `{config.owner}/{config.repo}`: its number is the end of `ticket` (`ledger-issues-7` → `7`), GitHub calls for the issue use that `owner/repo`, and references and closing keywords use the full form, such as `Closes acme/ledger-issues#7`. Without `issue_repo`, everything below applies unchanged.
 
@@ -66,13 +66,13 @@ Check for a PR template in the workspace root (try each path, use the first that
 
 ## Step 2 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `branch_base` → integration branch (default diff base)
 - `atlassian_domain`, `cloud_id` → Jira coordinates (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 ## Step 3 — Resolve defaults
 
