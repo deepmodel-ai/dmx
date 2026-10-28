@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-10-28
+
+**Upgrading from 0.8.3.** Nothing to run: the rules didn't change. Bump the version you pin. A Go repo that listed a parent test only to cover its failing subtests can drop the parent.
+
 ### Fixed
 
 - **(GH-151)** Known failures work for Go. When a test in a package fails, `go test` prints a bare `FAIL` and `FAIL\t<package>\t<time>`, plus one more `FAIL` at the end of the run. dmx counted these as failing tests that no known failure covered, so a Go run never passed as known failures only. They're now covered by the package's `--- FAIL:` lines. A package that failed without one (a panic, a build or setup failure, `TestMain`) still fails the gate. A parent test's `--- FAIL:` line is covered by its failing subtests, so listing `TestSchemaEvents/user-defined-function` is enough. When a run does fail on unlisted lines, the message names them ("Not in known_failures: …"). Found in eval run 4, on gocql's unit and integration tests.
@@ -321,7 +325,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/deepmodel-ai/dmx/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/deepmodel-ai/dmx/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/deepmodel-ai/dmx/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...v0.8.1
