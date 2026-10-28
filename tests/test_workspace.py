@@ -51,6 +51,33 @@ class TestResolveWorkspaceRoot:
         assert result == tmp_path
 
     @pytest.mark.asyncio
+    async def test_uses_a_real_mcp_root(self, tmp_path: Path) -> None:
+        """A real ``Root``'s ``uri`` is a ``FileUrl``, not a ``str``."""
+        import mcp.types  # noqa: PLC0415
+
+        (tmp_path / ".git").mkdir()
+        ctx = MagicMock()
+        ctx.list_roots = AsyncMock(return_value=[mcp.types.Root(uri=tmp_path.as_uri())])
+
+        result = await resolve_workspace_root(ctx, None)
+        assert result == tmp_path
+
+    @pytest.mark.asyncio
+    async def test_reads_roots_from_the_session_on_fastmcp_4(self, tmp_path: Path) -> None:
+        """fastmcp 4's context has no ``list_roots``; the MCP session does."""
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        import mcp.types  # noqa: PLC0415
+
+        (tmp_path / ".git").mkdir()
+        listed = mcp.types.ListRootsResult(roots=[mcp.types.Root(uri=tmp_path.as_uri())])
+        session = SimpleNamespace(list_roots=AsyncMock(return_value=listed))
+        ctx = SimpleNamespace(session=session)
+
+        result = await resolve_workspace_root(ctx, None)  # type: ignore[arg-type]
+        assert result == tmp_path
+
+    @pytest.mark.asyncio
     async def test_decodes_percent_encoded_uri(self, tmp_path: Path) -> None:
         project = tmp_path / "my project"
         project.mkdir()

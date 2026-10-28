@@ -64,8 +64,12 @@ _REPORTED_SKIPPED_DMX: set[Path] = set()
 
 
 def _parse_root_uri(root: object) -> Path:
-    """Parse a single MCP ``Root`` entry (or its string form) into a Path."""
-    uri = getattr(root, "uri", None) or str(root)
+    """Parse a single MCP ``Root`` entry (or its string form) into a Path.
+
+    A real ``Root``'s ``uri`` is a pydantic ``FileUrl``, not a ``str``, so it
+    is converted before parsing.
+    """
+    uri = str(getattr(root, "uri", None) or root)
     parsed = urlparse(uri)
     if parsed.scheme == "file":
         # url2pathname turns `/C:/Users/x` into `C:\Users\x` on Windows and
@@ -222,6 +226,19 @@ def validate_workspace_root(root: Path, *, explicit: bool, require_markers: bool
         )
 
 
+async def _list_roots(ctx: Context) -> list[object]:
+    """The client's workspace roots.
+
+    fastmcp 4 moved ``list_roots`` from the context to the MCP session, which
+    returns a result with ``roots`` instead of the list.
+    """
+    list_roots = getattr(ctx, "list_roots", None)
+    if list_roots is not None:
+        return list(await list_roots())
+    result = await ctx.session.list_roots()
+    return list(result.roots)
+
+
 async def resolve_workspace_root(
     ctx: Context, explicit: str | None, *, require_markers: bool = True
 ) -> Path:
@@ -263,7 +280,7 @@ async def resolve_workspace_root(
 
     folders: list[Path] = []
     try:
-        roots = await ctx.list_roots()
+        roots = await _list_roots(ctx)
         if roots:
             folders = [_parse_root_uri(entry) for entry in roots]
     except Exception:  # noqa: BLE001

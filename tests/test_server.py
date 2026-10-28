@@ -16,6 +16,24 @@ if TYPE_CHECKING:
 class TestCreateApp:
     """Integration tests for the create_app() factory."""
 
+    def test_reports_dmx_version(self) -> None:
+        """The handshake's ``serverInfo.version`` is dmx's, not fastmcp's."""
+        import importlib.metadata  # noqa: PLC0415
+
+        assert create_app().version == importlib.metadata.version("deepmodel-dmx")
+
+    def test_every_dependency_has_an_upper_bound(self) -> None:
+        """`uvx` installs from pyproject, not uv.lock, so an unbounded major reaches users."""
+        import tomllib  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        project = tomllib.loads(
+            (Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        runtime = [*project["dependencies"], *project["optional-dependencies"]["watch"]]
+        assert runtime
+        assert [dep for dep in runtime if "<" not in dep] == []
+
     def test_registers_all_bundled_skills(self) -> None:
         app = create_app()
         prompts = asyncio.run(app.list_prompts())

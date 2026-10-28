@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.resources as pkg
 import inspect
 import logging
@@ -100,7 +101,9 @@ def create_app(
     """
     resolved_skills_dir, resolved_rules_dir = resolve_dirs(skills_dir, rules_dir)
 
-    app = FastMCP("dmx", instructions=SERVER_INSTRUCTIONS)
+    # Without ``version``, the handshake reports fastmcp's own version.
+    version = importlib.metadata.version("deepmodel-dmx")
+    app = FastMCP("dmx", instructions=SERVER_INSTRUCTIONS, version=version)
 
     skills = load_skills(resolved_skills_dir)
     rules = load_rules(resolved_rules_dir)

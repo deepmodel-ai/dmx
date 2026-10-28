@@ -62,6 +62,25 @@ class TestExtractClientName:
         ctx.session = MagicMock(spec=[])  # no attributes at all
         assert _extract_client_name(ctx) is None  # type: ignore[arg-type]
 
+    def test_reads_client_info_from_mcp_2(self) -> None:
+        """mcp 2 (fastmcp 4) renamed ``clientInfo`` to ``client_info``."""
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        from dmx.tools import _extract_client_name  # noqa: PLC0415
+
+        params = SimpleNamespace(client_info=SimpleNamespace(name="Cursor/1.0"))
+        ctx = SimpleNamespace(session=SimpleNamespace(client_params=params))
+        assert _extract_client_name(ctx) == "Cursor/1.0"  # type: ignore[arg-type]
+
+    def test_reads_camel_case_client_info_from_mcp_1(self) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        from dmx.tools import _extract_client_name  # noqa: PLC0415
+
+        params = SimpleNamespace(clientInfo=SimpleNamespace(name="claude-code/1.0"))
+        ctx = SimpleNamespace(session=SimpleNamespace(client_params=params))
+        assert _extract_client_name(ctx) == "claude-code/1.0"  # type: ignore[arg-type]
+
 
 # ---------------------------------------------------------------------------
 # Helpers: _extract_ide_header

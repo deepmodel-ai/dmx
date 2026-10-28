@@ -9,6 +9,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-144)** dmx works on fastmcp 4, which a fresh install gets. `pyproject.toml` asked for `fastmcp>=2.0` with no upper bound, and `uvx` installs from that, not from `uv.lock`, so 0.8.1 installs got fastmcp 4 and mcp 2 while CI tested fastmcp 3.
+  - **IDE detection.** mcp 2 renamed the handshake's `clientInfo` to `client_info`, so 0.8.1 fell back to weaker signals, and with Cursor it named the wrong IDE. dmx now reads both names.
+  - **Workspace roots.** fastmcp 4 moved `list_roots` from the context to the session, and dmx now uses whichever exists.
+  - **Root URIs.** A real client's roots never worked, on any fastmcp version. Each root's URI arrives as a `FileUrl`, not a string, and parsing it failed silently, so dmx used the server's working directory. That was right only when the IDE started the server inside the project. dmx now converts the URI first.
+  - **`serverInfo`.** The handshake reports dmx's version, not fastmcp's.
+  - **Bounds.** Every runtime dependency has an upper bound at its next major version, and a test enforces it. The lock moves to fastmcp 4, so CI tests what a fresh install gets.
+
 ## [0.8.1] — 2026-10-19
 
 **Upgrading from 0.8.0.** Run `/dmx/upgrade` once on a branch and commit the refreshed rule files; the rule changed.

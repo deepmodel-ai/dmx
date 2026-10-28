@@ -250,17 +250,16 @@ def _file_matches(path: Path, content: str) -> bool:
 def _extract_client_name(ctx: Context) -> str | None:
     """Extract MCP ``clientInfo.name`` from the session handshake.
 
-    Reads ``ctx.session.client_params.clientInfo.name`` — the field populated
-    by the IDE during the MCP ``initialize`` handshake.  Falls back to
-    ``None`` safely on any attribute access failure.
+    Reads ``ctx.session.client_params.client_info.name`` — the field populated
+    by the IDE during the MCP ``initialize`` handshake. mcp 2 (fastmcp 4)
+    renamed ``clientInfo`` to ``client_info``, so both are read. Falls back
+    to ``None`` safely on any attribute access failure.
     """
     with contextlib.suppress(Exception):
-        session = ctx.session
-        params = getattr(session, "client_params", None)
-        if params is not None:
-            client_info = getattr(params, "clientInfo", None)
-            if client_info is not None:
-                name: str | None = getattr(client_info, "name", None)
+        params = getattr(ctx.session, "client_params", None)
+        for field in ("client_info", "clientInfo"):
+            name = getattr(getattr(params, field, None), "name", None)
+            if isinstance(name, str):
                 return name or None
     return None
 

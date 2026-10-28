@@ -22,13 +22,15 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
 ]
+# Each has an upper bound at its next major version: `uvx` installs from these,
+# not from uv.lock, so an untested major would otherwise reach every new install.
 dependencies = [
-    "fastmcp>=2.0",
-    "python-frontmatter>=1.1",
-    "pyyaml>=6.0",
-    "pydantic>=2.0",
-    "click>=8.1",
-    "starlette>=0.40",
+    "fastmcp>=2.0,<5",
+    "python-frontmatter>=1.1,<2",
+    "pyyaml>=6.0,<7",
+    "pydantic>=2.0,<3",
+    "click>=8.1,<9",
+    "starlette>=0.40,<2",
 ]
 
 [project.urls]
@@ -39,7 +41,7 @@ Changelog = "https://dmx.deepmodel.ai/changelog"
 Issues = "https://github.com/deepmodel-ai/dmx/issues"
 
 [project.optional-dependencies]
-watch = ["watchfiles>=0.21"]
+watch = ["watchfiles>=0.21,<2"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
