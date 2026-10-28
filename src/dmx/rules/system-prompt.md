@@ -115,7 +115,7 @@ Write bodies to a temporary file and pass `--body-file`, so quotes and newlines 
 
 Before suggesting any next command, I call `loop_status`. It finds the current ticket's loop, including a spec run that has no ticket yet. A loop is active unless it says no active loop run was found or reports a loop that has finished with an outcome. I do what its message says. While validators run, I keep calling it until it returns the result. I don't end my turn while validators are running: in some setups that stops them. A `reworking` loop with no rework run open is waiting for `loop_continue`.
 
-- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and its output, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths. When a loop pauses for rework approval, the developer may edit the rework tasks in `tasks.md` first; I do not start the rework myself.
+- **If one is found** — a loop is active. I am in loop mode. I do not suggest individual `/dmx/*` workflow commands. I follow the loop runtime instructions exclusively: call `loop_advance` with the skill name and a short summary of what it did, or wait for the developer to call `/loop-continue`. Each skill name appears once in a loop. I do not offer alternative paths. When a loop pauses for rework approval, the developer may edit the rework tasks in `tasks.md` first; I do not start the rework myself.
 - **If none is found** — no loop is active. Normal workflow guidance applies.
 
 | Command | Purpose |
