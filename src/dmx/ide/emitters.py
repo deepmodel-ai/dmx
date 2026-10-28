@@ -200,13 +200,14 @@ def _emit_claude(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, ...]:
 def _emit_copilot(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, ...]:
     """Emit Copilot rule files.
 
-    No per-rule files — Copilot uses a single merged instructions file.
+    No per-rule files — Copilot reads one instructions file, so the
+    dmx-managed block holds every rule's body.
     Summary:   ``.github/copilot-instructions.md`` (dmx-managed block)
     """
     return (
         IdeRuleFile(
             path=".github/copilot-instructions.md",
-            content=_marker_summary(rules),
+            content=_marker_bodies(rules),
             ide="copilot",
         ),
     )
@@ -239,15 +240,16 @@ def _emit_antigravity(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, .
 
 
 def _emit_agents(rules: tuple[RuleDefinition, ...]) -> tuple[IdeRuleFile, ...]:
-    """Emit a root-level ``AGENTS.md`` summary for generic agent runners.
+    """Emit a root-level ``AGENTS.md`` for Codex and other agent runners.
 
-    No per-rule files.
+    No per-rule files — these agents read only ``AGENTS.md``, so the
+    dmx-managed block holds every rule's body.
     Summary:   ``AGENTS.md`` (dmx-managed block)
     """
     return (
         IdeRuleFile(
             path="AGENTS.md",
-            content=_marker_summary(rules),
+            content=_marker_bodies(rules),
             ide="agents",
         ),
     )
@@ -269,6 +271,27 @@ def _marker_summary(rules: tuple[RuleDefinition, ...]) -> str:
     rule_lines = "\n".join(f"- **{rule.name}**: {rule.description}" for rule in rules)
     body = f"# dmx — Active Rules\n\n{rule_lines}\n"
     return f"{DMX_MARKER_START}\n{WORKFLOW_VERSION_LINE}\n{body}{DMX_MARKER_END}\n"
+
+
+def _marker_bodies(rules: tuple[RuleDefinition, ...]) -> str:
+    """Render every rule's body in one dmx-managed block.
+
+    For IDEs that read a single instructions file and no per-rule files.
+    A rule that isn't always applied starts with when it applies, since
+    the file itself is always loaded.
+    """
+    sections = [f"{_applies_line(rule)}{rule.body.strip(chr(10))}\n" for rule in rules]
+    body = "\n".join(sections)
+    return f"{DMX_MARKER_START}\n{WORKFLOW_VERSION_LINE}\n\n{body}{DMX_MARKER_END}\n"
+
+
+def _applies_line(rule: RuleDefinition) -> str:
+    """When a rule applies, for files that can't scope rules; empty if always."""
+    if rule.globs:
+        return f"_Applies to files matching `{rule.globs}`._\n\n"
+    if not rule.always_apply:
+        return f"_Apply when relevant: {rule.description}_\n\n"
+    return ""
 
 
 def _versioned_markdown(body: str) -> str:

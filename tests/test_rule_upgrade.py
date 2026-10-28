@@ -376,6 +376,33 @@ class TestSetupMergesSummaryFiles:
         assert result.data["already_current"] is False
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["AGENTS.md", ".github/copilot-instructions.md"])
+    async def test_upgrade_replaces_an_index(self, tmp_path: Path, path: str) -> None:
+        """Before GH-154, AGENTS.md and Copilot got only a list of rule names."""
+        index = (
+            "<!-- deepmodel:dmx:start -->\n<!-- dmx-workflow-version: 0.8.1 -->\n"
+            "# dmx — Active Rules\n\n- **system-prompt**: AI SDLC.\n<!-- deepmodel:dmx:end -->\n"
+        )
+        _write(tmp_path, path, "# Agent guidance\n\nRead CONTRIBUTING.md.\n\n" + index)
+
+        from fastmcp import Client
+
+        from dmx.server import create_app
+
+        app = create_app()
+        async with Client(app) as client:
+            result = await client.call_tool(
+                "setup_ide_rules",
+                {"include_existing": True, "workspace_root": str(tmp_path)},
+            )
+
+        assert result.data["previous_version"] == "0.8.1"
+        content = next(f["content"] for f in result.data["files"] if f["path"] == path)
+        assert content.startswith("# Agent guidance\n\nRead CONTRIBUTING.md.\n\n")
+        assert "Active Rules" not in content
+        assert "I do not self-direct." in content
+
+    @pytest.mark.asyncio
     async def test_unrelated_claude_md_is_not_a_dmx_rule_file(self, tmp_path: Path) -> None:
         _write(tmp_path, "CLAUDE.md", "# my own notes\n")
 

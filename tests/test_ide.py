@@ -353,10 +353,12 @@ class TestEmitCopilotRules:
         assert DMX_MARKER_START in instructions.content
         assert DMX_MARKER_END in instructions.content
 
-    def test_instructions_list_rule_names(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
+    def test_instructions_hold_rule_bodies(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
+        """Copilot reads only this file, so it carries the rules, not an index (GH-154)."""
         files = emit_ide_rule_files(multi_rules, ("copilot",))
-        assert "system-prompt" in files[0].content
-        assert "git-workflow" in files[0].content
+        assert "Be a great engineer." in files[0].content
+        assert "Always branch from main." in files[0].content
+        assert "_Apply when relevant: Git branching rules._" in files[0].content
 
     def test_empty_rules_still_emits_summary(self) -> None:
         files = emit_ide_rule_files((), ("copilot",))
@@ -451,10 +453,25 @@ class TestEmitAgentsRules:
         assert DMX_MARKER_START in agents_md.content
         assert DMX_MARKER_END in agents_md.content
 
-    def test_agents_md_lists_rule_names(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
+    def test_agents_md_holds_rule_bodies(self, multi_rules: tuple[RuleDefinition, ...]) -> None:
+        """Codex reads only AGENTS.md, so it carries the rules, not an index (GH-154)."""
         files = emit_ide_rule_files(multi_rules, ("agents",))
-        assert "system-prompt" in files[0].content
-        assert "git-workflow" in files[0].content
+        content = files[0].content
+        assert "# Persona\n\nBe a great engineer.\n" in content
+        assert "# Git\n\nAlways branch from main.\n" in content
+        assert content.count("dmx-workflow-version") == 1
+
+    def test_scoped_rule_says_which_files(self) -> None:
+        rule = RuleDefinition(
+            name="python",
+            title="Python",
+            description="Python style.",
+            always_apply=False,
+            globs="**/*.py",
+            body="# Python\n\nUse type hints.\n",
+        )
+        files = emit_ide_rule_files((rule,), ("agents",))
+        assert "_Applies to files matching `**/*.py`._\n\n# Python" in files[0].content
 
     def test_empty_rules_still_emits_summary(self) -> None:
         files = emit_ide_rule_files((), ("agents",))
@@ -505,7 +522,7 @@ class TestMarkerSummaryStructure:
         end_pos = summary.content.index(DMX_MARKER_END)
         assert start_pos < end_pos
 
-    @pytest.mark.parametrize("ide", ["cursor", "claude", "copilot", "agents"])
+    @pytest.mark.parametrize("ide", ["cursor", "claude"])
     def test_summary_contains_rule_descriptions(
         self,
         sample_rules: tuple[RuleDefinition, ...],
@@ -515,6 +532,17 @@ class TestMarkerSummaryStructure:
         summary = next((f for f in files if "rules/" not in f.path), None)
         assert summary is not None
         assert "Always-apply engineering persona." in summary.content
+
+    @pytest.mark.parametrize("ide", ["copilot", "agents"])
+    def test_single_file_ides_get_rule_bodies(
+        self,
+        sample_rules: tuple[RuleDefinition, ...],
+        ide: str,
+    ) -> None:
+        """No per-rule files, so the block holds the rules, not their descriptions."""
+        (summary,) = emit_ide_rule_files(sample_rules, (ide,))
+        assert "I am a staff-level pair programmer." in summary.content
+        assert "Active Rules" not in summary.content
 
 
 # ---------------------------------------------------------------------------
