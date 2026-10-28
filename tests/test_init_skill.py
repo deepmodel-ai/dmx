@@ -1,4 +1,7 @@
-"""GH-119: init checks prerequisites first and lands the setup on the base branch."""
+"""GH-119: init checks prerequisites first and lands the setup on the base branch.
+
+GH-156: init reads the default branch and stops when there is no GitHub origin.
+"""
 
 from __future__ import annotations
 
@@ -60,3 +63,30 @@ def test_the_readme_names_the_github_prerequisite() -> None:
     assert quick_start.index("**Before you start:**") < quick_start.index("**1. Add dmx")
     assert "GitHub MCP server" in quick_start
     assert "`gh auth login`" in quick_start
+
+
+def test_no_github_origin_stops_before_any_question() -> None:
+    detect = _step(2)
+    stop = detect.split("If there is no `origin` remote", 1)[1]
+
+    assert "{REQUIRED}" not in detect
+    assert stop.index("git remote rename {name} origin") < stop.index("No files were written")
+    assert "git remote add origin https://github.com/OWNER/REPO.git" in stop
+    assert SKILL.index("No files were written") < SKILL.index("gh repo view {owner}/{repo}")
+
+
+def test_the_default_branch_fills_both_roles_when_main_and_master_are_missing() -> None:
+    detect = _step(2)
+
+    assert "git symbolic-ref --short refs/remotes/origin/HEAD" in detect
+    assert "git ls-remote --symref origin HEAD" in detect
+    assert "`staging` → `main` → `master` → `default_branch`" in detect
+    assert "If neither exists → `production_branch` = `default_branch`" in detect
+    assert "the repo's default branch" in detect
+
+
+def test_placeholders_never_reach_a_command() -> None:
+    guards = SKILL.split("## Guards", 1)[1]
+
+    assert "Never put a placeholder such as `{REQUIRED}`" in guards
+    assert "a command or a tool call" in guards
