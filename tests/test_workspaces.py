@@ -342,6 +342,22 @@ class TestInitSkill:
         assert "An entry matches every failing test whose line contains it" in step
         assert "## Step 10 — Output the result" in skill
 
+    def test_init_asks_for_the_ide_instead_of_guessing(self) -> None:
+        """GH-148: an unknown client gets a question, not Cursor's files."""
+        from pathlib import Path
+
+        skill = (
+            Path(__file__).parent.parent / "src/dmx/skills/workflow/0-init/dmx-init.md"
+        ).read_text(encoding="utf-8")
+        step = skill.split("## Step 6 — Set up IDE rules", 1)[1].split("## Step 7", 1)[0]
+
+        assert "Cursor is the most common IDE" not in step
+        assert 'ides="cursor"' not in step
+        assert "Don't guess" in step
+        assert "Which IDE or agent do you use with this repo?" in step
+        assert "Another agent that reads AGENTS.md (Codex, and others)" in step
+        assert "`cursor`, `claude`, `copilot`, `antigravity` and `agents`" in step
+
     def test_init_offers_test_command_without_components(self) -> None:
         from pathlib import Path
 

@@ -4,7 +4,7 @@ title: Upgrade — Refresh IDE Rules and Migrate the Layout
 description: Refresh IDE rule files to the current dmx workflow version, then move a 0.5 repo's ticket files into their job folders. Does not change config or loop state.
 ---
 
-You are refreshing dmx IDE rule files, then migrating the `.dmx/` layout if the repo still uses the 0.5 one. Ask only the one question in Step 6. Do not touch `.dmx/config.md` or loop state. Do not commit.
+You are refreshing dmx IDE rule files, then migrating the `.dmx/` layout if the repo still uses the 0.5 one. Ask only the one question in Step 6, plus which IDE the developer uses when dmx can't tell (Step 2). Do not touch `.dmx/config.md` or loop state. Do not commit.
 
 Refresh every IDE that already has dmx rule files, plus the invoking IDE.
 
@@ -16,7 +16,7 @@ Call `detect_invoking_ide` with no arguments. Record the returned `ides` list.
 
 Call `setup_ide_rules` with `include_existing` set to true.
 
-If `ides` from step 1 is empty, also pass `ides="cursor"`. Otherwise pass that `ides` list.
+If `ides` from step 1 is empty, don't pass `ides`: the tool uses the IDEs that already have dmx rule files. If it then returns no files because it can't determine any IDE, ask the developer which IDE they use with the same question as `/dmx/init` Step 6, and call it again with their answer. Never pass `cursor` as a guess: it would add Cursor's files to a repo that doesn't use Cursor. Otherwise pass that `ides` list.
 
 The tool adds every IDE that already has dmx rule files. Do not look for those files yourself.
 
