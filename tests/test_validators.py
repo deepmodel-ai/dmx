@@ -770,6 +770,84 @@ class TestConfiguredTestCommand:
         assert "--- FAIL: TestIntegration (0.00s)" in check["findings"]
 
 
+_GO_KNOWN = """package gh151
+
+import "testing"
+
+func TestKnown(t *testing.T) { t.Fatal("environment") }
+
+func TestParent(t *testing.T) {
+	t.Run("sub", func(t *testing.T) { t.Fatal("environment") })
+	t.Run("fine", func(t *testing.T) {})
+}
+
+func TestPasses(t *testing.T) {}
+"""
+
+
+class TestGoKnownFailures:
+    """Known failures for ``go test`` output (GH-151)."""
+
+    def _output(self, root: Path, text: str) -> None:
+        """A ``test_command`` that prints *text* and fails, as ``go test`` would."""
+        (root / "out.txt").write_text(text, encoding="utf-8")
+        _test_command(root, "test_command: cat out.txt; exit 1\ntest_known_failures: [TestUDF]")
+
+    def test_package_summary_lines_are_not_new_failures(self, tmp_path: Path) -> None:
+        self._output(
+            tmp_path,
+            "--- FAIL: TestUDF (0.09s)\n    udf_test.go:10: disabled\nFAIL\n"
+            "FAIL\tgithub.com/x/y\t15.306s\nok  \tgithub.com/x/y/lz4\t1.2s\n",
+        )
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is True, result
+        assert "known failures only" in result["message"]
+
+    def test_a_package_that_failed_without_a_test_still_fails(self, tmp_path: Path) -> None:
+        self._output(
+            tmp_path,
+            "--- FAIL: TestUDF (0.09s)\nFAIL\nFAIL\tgithub.com/x/y\t15.306s\n"
+            "panic: boom\nFAIL\tgithub.com/x/z\t0.105s\n"
+            "FAIL\tgithub.com/x/w [build failed]\n",
+        )
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is False
+        [check] = result["checks"]
+        assert check["findings"][1:] == [
+            "FAIL\tgithub.com/x/z\t0.105s",
+            "FAIL\tgithub.com/x/w [build failed]",
+        ]
+        assert "Not in known_failures: FAIL\tgithub.com/x/z\t0.105s" in result["message"]
+
+    def test_jest_file_lines_still_count(self, tmp_path: Path) -> None:
+        self._output(tmp_path, "FAIL src/refund.test.js\n")
+
+        assert run_tests.run(tmp_path)["pass"] is False
+
+    @_NEEDS_GO
+    @pytest.mark.usefixtures("isolated_go")
+    def test_a_real_go_module(self, tmp_path: Path) -> None:
+        (tmp_path / "go.mod").write_text("module example.com/gh151\n\ngo 1.18\n", encoding="utf-8")
+        (tmp_path / "x_test.go").write_text(_GO_KNOWN, encoding="utf-8")
+        (tmp_path / ".dmx").mkdir()
+        config = tmp_path / ".dmx" / "config.md"
+
+        config.write_text("test_known_failures: [TestKnown, TestParent/sub]\n", encoding="utf-8")
+        listed = run_tests.run(tmp_path)
+        assert listed["pass"] is True, listed
+        assert "Known failures: TestKnown, TestParent/sub" in listed["message"]
+
+        config.write_text("test_known_failures: [TestKnown]\n", encoding="utf-8")
+        unlisted = run_tests.run(tmp_path)
+        assert unlisted["pass"] is False
+        assert "Not in known_failures: --- FAIL: TestParent/sub" in unlisted["message"]
+        assert "--- FAIL: TestParent (" not in unlisted["message"]
+
+
 class TestNotReworkableValidators:
     def test_check_pr_ready_failures_are_not_reworkable(self, tmp_path: Path) -> None:
         result = check_pr_ready.run(tmp_path, {"ticket_ref": None})

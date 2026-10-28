@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-151)** Known failures work for Go. When a test in a package fails, `go test` prints a bare `FAIL` and `FAIL\t<package>\t<time>`, plus one more `FAIL` at the end of the run. dmx counted these as failing tests that no known failure covered, so a Go run never passed as known failures only. They're now covered by the package's `--- FAIL:` lines. A package that failed without one (a panic, a build or setup failure, `TestMain`) still fails the gate. A parent test's `--- FAIL:` line is covered by its failing subtests, so listing `TestSchemaEvents/user-defined-function` is enough. When a run does fail on unlisted lines, the message names them ("Not in known_failures: …"). Found in eval run 4, on gocql's unit and integration tests.
+
 ## [0.8.3] — 2026-10-28
 
 **Upgrading from 0.8.2.** Nothing to run: the rules didn't change. Bump the version you pin. A repo that got Cursor's rule files without using Cursor can delete `.cursor/rules/system-prompt.mdc` and the dmx block in `.cursor/AGENTS.md`, then run `/dmx/init` or `/dmx/upgrade`.
