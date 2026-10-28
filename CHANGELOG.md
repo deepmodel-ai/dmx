@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **(GH-154)** Codex and Copilot get the dmx rules. `AGENTS.md` and `.github/copilot-instructions.md` held only an index of rule names ("- **system-prompt**: AI SDLC — …"), and the rules themselves went to per-rule files that only Cursor, Claude Code and Antigravity load. Codex reads only `AGENTS.md`, and Copilot only its instructions file, so neither ever saw the system prompt: the persona, not self-directing, pausing at gates, the memory bank. The dmx block in those two files now holds each rule's full body, and a rule that isn't always applied says when it applies. Content outside the block is kept. The workflow version moves to 0.8.5, so every repo is told to run `/dmx/upgrade`; for Cursor, Claude Code and Antigravity only the version line changes. Found in eval run 4's Codex check.
+
 ## [0.8.4] — 2026-10-28
 
 **Upgrading from 0.8.3.** Nothing to run: the rules didn't change. Bump the version you pin. A Go repo that listed a parent test only to cover its failing subtests can drop the parent.
