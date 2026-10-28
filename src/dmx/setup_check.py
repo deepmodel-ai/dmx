@@ -461,13 +461,18 @@ def branch_plan(root: Path) -> dict[str, Any]:
     }
     if not has_components(root):
         # Imported here: the validator module runs as a script too.
-        from dmx.validators.run_tests import _detect_test_command  # noqa: PLC0415, PLC2701
+        from dmx.validators.run_tests import _repo_command  # noqa: PLC0415, PLC2701
 
-        command = _detect_test_command(root)
+        command = _repo_command(root)
+        run = None
+        if command is not None:
+            _argv, shown = command
+            configured = _test_command(root) is not None
+            run = f"{shown} (test_command in .dmx/config.md)" if configured else shown
         plan.update(
             components=[],
             repo_wide_files=[],
-            runs=[" ".join(command)] if command else [],
+            runs=[run] if run else [],
             unconfigured=[],
         )
         return plan

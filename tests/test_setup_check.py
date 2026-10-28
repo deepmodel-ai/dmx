@@ -372,6 +372,21 @@ class TestWithoutComponents:
         assert "test_command" not in text
         assert "  Runs:       make test" in text
 
+    def test_a_configured_test_command_is_shown(self, tmp_path: Path) -> None:
+        _git(tmp_path, "init", "-q", "-b", "main")
+        _write(
+            tmp_path,
+            ".dmx/config.md",
+            "branch_base: main\ntest_command: make test && make integration\n",
+        )
+        _write(tmp_path, "Makefile", "test:\n\techo ok\n")
+
+        text = render(check_setup(tmp_path), branch_plan(tmp_path))
+
+        assert (
+            "  Runs:       make test && make integration (test_command in .dmx/config.md)" in text
+        )
+
 
 class TestCommands:
     def test_the_cli_exit_codes(self, clean: Path) -> None:

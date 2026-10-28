@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **(GH-142)** A repo without components can choose its test command. `run_tests` runs `test_command` from `.dmx/config.md` when it's set, through `sh -c` from the repo root, instead of the command it detects; without it, detection works as before. `test_known_failures` applies to it, `dmx check`'s `Runs` line shows it and says it comes from `.dmx/config.md`, and a repo with no detectable command is told to set it. `/dmx/init` reads the repo's CI workflow and offers the setting when CI runs more than the detected command, such as integration tests behind a build tag. Before, `test_command` only applied to changes outside every component in a repo with components, so a single-service repo had no supported way to run more than the detected command: a Go repo always ran `go test ./...`. Repos with components are unchanged.
+
 ### Fixed
 
 - **(GH-144)** dmx works on fastmcp 4, which a fresh install gets. `pyproject.toml` asked for `fastmcp>=2.0` with no upper bound, and `uvx` installs from that, not from `uv.lock`, so 0.8.1 installs got fastmcp 4 and mcp 2 while CI tested fastmcp 3.

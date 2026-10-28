@@ -326,12 +326,12 @@ class TestInitSkill:
         skill = (
             Path(__file__).parent.parent / "src/dmx/skills/workflow/0-init/dmx-init.md"
         ).read_text(encoding="utf-8")
-        step = skill.split("## Step 9 — Components (monorepos only)", 1)[1].split("## Step 10", 1)[
-            0
-        ]
+        step = skill.split("## Step 9 — Components and the test command", 1)[1].split(
+            "## Step 10", 1
+        )[0]
 
         assert "Call `detect_components`" in step
-        assert "**If `ask` is false**, skip this step without saying anything." in step
+        assert "**If `ask` is false**, don't mention components" in step
         assert "`apply` true and `ids`" in step
         assert "dmx does not guess dependencies" in step
         assert "`codeowners`" in step
@@ -341,3 +341,21 @@ class TestInitSkill:
         assert "`known_failures: [test id, ...]`" in step
         assert "An entry matches every failing test whose line contains it" in step
         assert "## Step 10 — Output the result" in skill
+
+    def test_init_offers_test_command_without_components(self) -> None:
+        from pathlib import Path
+
+        skill = (
+            Path(__file__).parent.parent / "src/dmx/skills/workflow/0-init/dmx-init.md"
+        ).read_text(encoding="utf-8")
+        step = skill.split("**Tests without components.**", 1)[1].split("## Step 10", 1)[0]
+
+        assert "Skip this when the repo now has components." in step
+        assert "Call `check_setup` and read its `Runs` line" in step
+        assert "CI workflow" in step
+        assert "test_command:" in step
+        assert "runs through `sh -c` from the repo root" in step
+        assert "write the line only on yes or an edit" in step
+        assert "When the detected command already matches CI, don't ask." in step
+        assert "`test_known_failures: [test id, ...]`" in step
+        assert skill.count("go to **Tests without components**") == 2
