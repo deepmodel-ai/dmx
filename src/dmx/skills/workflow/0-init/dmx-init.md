@@ -4,7 +4,7 @@ title: Init — Set Up Project
 description: One-time project setup. Walks the developer through workflow mode and ticketing configuration interactively, auto-detects GitHub settings and tech stack, writes .dmx/config.md, and scaffolds the memory bank. Safe to re-run — updates config without overwriting memory bank files that already have content.
 ---
 
-You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 4 and 5 require the developer's input, and Step 9 does in a workspace repo — ask, then wait for their answer before continuing.
+You are setting up the AI SDLC framework for this project. Follow every step in order. Steps 4 and 5 require the developer's input, and Step 9 does when it offers components or a test command — ask, then wait for their answer before continuing.
 
 ## Step 1 — Check for existing setup
 
@@ -321,11 +321,11 @@ Add this line to `.gitattributes` at the repo root, creating the file if needed,
 .dmx/jobs/**/*.json linguist-generated=true
 ```
 
-## Step 9 — Components (monorepos only)
+## Step 9 — Components and the test command
 
 Call `detect_components` on `user-dmx`. It reads the repo's pnpm, npm, yarn, `go.work`, `uv` and Cargo workspace files and returns the members it would make into components, each with an `id`, `path`, `description` and `component_yaml`, plus `ask` and `codeowners`.
 
-**If `ask` is false**, skip this step without saying anything. A single-product repo, or a workspace with one member, is not asked about components.
+**If `ask` is false**, don't mention components; go to **Tests without components** at the end of this step. A single-product repo, or a workspace with one member, is not asked about components.
 
 **If `ask` is true**, show the list and ask once:
 ```
@@ -339,7 +339,7 @@ Create these components? (yes / no / list the ids to keep or rename)
 ```
 
 Wait for the answer.
-- **no:** skip the rest of this step.
+- **no:** go to **Tests without components** at the end of this step.
 - **yes, or a list:** call `detect_components` again with `apply` true and `ids` set to the ids to keep. To rename one, write its `component_yaml` to `.dmx/components/{new id}/component.yaml` yourself instead (ids are lowercase letters, digits, `-` and `_`). Existing component files are never overwritten.
 
 Then:
@@ -348,6 +348,17 @@ Then:
    **Tests outside the packages.** When the repo keeps tests outside the member folders (for example a root `tests/` with a folder per package), add each component's test folders or files to its `paths`, such as `paths: ["pkg_a/**", "tests/pkg_a/**"]`. A Python component whose own folder holds no tests then runs those paths with pytest from the repo root. **Copy CI's test setup.** Before writing a component's `test` command, read the repo's CI workflow (`.github/workflows/*.yml` or similar) for the job that runs that component's tests, and copy its environment variables (such as `CI=true` or flags that turn off checks CI doesn't run locally) and its pytest flags into the command, as `VAR=value uv run …`. Tell the developer which settings came from CI. When its tests need more than that (extras, environment variables, `-n auto`), give it a command instead: `test: {cmd: "uv run --all-extras pytest -q tests/pkg_a", cwd: "."}` in its `component.yaml` (`cwd` is relative to the repo root and defaults to it). `get_context` and `dmx check` show the command each component runs. A test that fails on the base branch too, or only on some machines, goes in that entry's `known_failures: [test id, ...]` rather than being deselected, so it still runs and stays visible in `dmx check`. An entry matches every failing test whose line contains it, so a file (`tests/test_x.py`), a class (`TestEmbeddings`) or a test name covers all the tests in it.
 2. Show the `codeowners` lines from the tool and suggest adding them to `.github/CODEOWNERS`, replacing each `@<...-team>` with the real team. `.dmx/` belongs to the platform team, each component folder to its team, and `.dmx/jobs/` has no owner, so a ticket's own files never need platform approval.
 3. Offer to move component-specific memory. Read the repo-wide memory files written in Step 8. For each new component, find the parts that are only about it (its architecture, its dependencies, its constraints). Show the move as a diff: removed from `.dmx/{file}`, added to `.dmx/components/{id}/{file}` under the same heading. Ask once for all of them. Apply only what the developer accepts. Content about more than one component stays repo-wide.
+
+**Tests without components.** Skip this when the repo now has components. Otherwise the dev and validate loops run one test command for the whole repo: `test_command` from `.dmx/config.md` when it's set, or else the one dmx detects (`uv run pytest -q`, `pytest -q`, `npm test --silent`, `make test` or `go test ./...`, from the repo's files). Call `check_setup` and read its `Runs` line for the command it would run now. Then read the repo's CI workflow (`.github/workflows/*.yml` or similar) for the job that runs the tests. If CI runs more than that command, or dmx detected none, offer a `test_command:` line for `.dmx/config.md`:
+```
+The dev and validate loops will run: {command, or "nothing: no test command found"}
+CI also runs: {what's missing, such as "go test -tags integration ./..." after starting fixtures}
+
+Set test_command in .dmx/config.md to run both?
+  test_command: {proposed command}
+(yes / no / edit)
+```
+It runs through `sh -c` from the repo root, so join steps with `&&`, or call a script. Copy CI's environment variables and flags into it, as for a component's command, and tell the developer which settings came from CI. Wait for the answer, and write the line only on yes or an edit. When the detected command already matches CI, don't ask. A test that fails on the base branch too goes in `test_known_failures: [test id, ...]` in `.dmx/config.md`.
 
 ## Step 10 — Output the result
 

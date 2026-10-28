@@ -1,10 +1,11 @@
 """Bundled validator: run_tests.
 
-Detects the project's test command from common markers (``pyproject.toml``
-+ ``uv.lock``, ``package.json`` test script, ``Makefile`` test target,
-``go.mod``) and runs it. App repos with a non-standard test setup should
-override this by placing their own ``validators/run_tests.py`` at the repo
-root — detection here is intentionally conservative rather than guessing.
+Runs ``test_command`` from ``.dmx/config.md`` through ``sh -c`` from the
+repo root when it is set (GH-142). Otherwise detects the project's test
+command from common markers (``pyproject.toml`` + ``uv.lock``,
+``package.json`` test script, ``Makefile`` test target, ``go.mod``) and runs
+it. Detection is intentionally conservative rather than guessing: a repo
+whose tests need more than the detected command sets ``test_command``.
 
 In a repo with ``.dmx/components/`` (GH-89), it runs each touched
 component's tests and those of the components that depend on them instead,
@@ -60,7 +61,12 @@ from pathlib import Path
 from typing import Any
 
 # Bundled validators run under dmx's interpreter and may import dmx. See #12.
-from dmx.component_tests import KNOWN_FAILURES_KEY, TestRun, plan_tests
+from dmx.component_tests import (  # noqa: PLC2701
+    KNOWN_FAILURES_KEY,
+    TestRun,
+    _test_command,
+    plan_tests,
+)
 from dmx.components import COMPONENT_FILE, COMPONENTS_DIR, has_components
 from dmx.group_timeout import run_with_group_timeout
 from dmx.ticket_routing import read_config_list
@@ -95,6 +101,21 @@ def _detect_test_command(workspace_root: Path) -> list[str] | None:
         return ["go", "test", "./..."]
 
     return None
+
+
+def _repo_command(workspace_root: Path) -> tuple[list[str], str] | None:
+    """The command for a repo without components, and how it is shown.
+
+    ``test_command`` from ``.dmx/config.md`` when it is set (GH-142), run
+    through ``sh -c`` as a component's ``test`` is; else the detected one.
+    """
+    configured = _test_command(workspace_root)
+    if configured is not None:
+        return ["sh", "-c", configured], configured
+    detected = _detect_test_command(workspace_root)
+    if detected is None:
+        return None
+    return detected, " ".join(detected)
 
 
 def _inner_timeout(timeout_seconds: int | None) -> int:
@@ -426,18 +447,19 @@ def run(
         timeout_seconds = None
     if has_components(workspace_root):
         return run_components(workspace_root, timeout_seconds, loop_name)
-    cmd = _detect_test_command(workspace_root)
-    if cmd is None:
+    found = _repo_command(workspace_root)
+    if found is None:
         return {
             "pass": False,
             "message": (
                 "No recognized test command found "
-                "(pyproject.toml, package.json test script, Makefile test target, or go.mod)"
+                "(pyproject.toml, package.json test script, Makefile test target, or go.mod). "
+                "Set `test_command` in `.dmx/config.md`."
             ),
             "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
         }
 
-    cmd_str = " ".join(cmd)
+    cmd, cmd_str = found
     inner = _inner_timeout(timeout_seconds)
     try:
         proc = run_with_group_timeout(
@@ -446,9 +468,14 @@ def run(
             cwd=str(workspace_root),
         )
     except FileNotFoundError:
+        message = f"Test command `{cmd_str}` not found on PATH"
+        if cmd[0] == "sh":
+            message = f"`sh` not found on PATH, needed to run `{cmd_str}`"
+            if sys.platform == "win32":
+                message += " (`test_command` runs through `sh`: install Git for Windows)"
         return {
             "pass": False,
-            "message": f"Test command `{cmd_str}` not found on PATH",
+            "message": message,
             "checks": [{"name": "tests_pass", "pass": False, "reworkable": False}],
         }
     except subprocess.TimeoutExpired:

@@ -668,6 +668,108 @@ class TestRunTests:
 # ---------------------------------------------------------------------------
 
 
+def _test_command(root: Path, line: str) -> None:
+    """Write *line* (``test_command: ...`` and any more settings) to ``.dmx/config.md``."""
+    (root / ".dmx").mkdir(exist_ok=True)
+    (root / ".dmx" / "config.md").write_text(f"branch_base: main\n{line}\n", encoding="utf-8")
+
+
+class TestConfiguredTestCommand:
+    """``test_command`` in a repo without components (GH-142)."""
+
+    def test_it_runs_instead_of_the_detected_command(self, tmp_path: Path) -> None:
+        (tmp_path / "Makefile").write_text("test:\n\t@exit 1\n", encoding="utf-8")
+        _test_command(tmp_path, "test_command: echo unit && echo integration")
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is True, result
+        assert result["message"] == ("Tests passed — ran `echo unit && echo integration` (exit 0)")
+
+    def test_it_runs_where_nothing_is_detected(self, tmp_path: Path) -> None:
+        _test_command(tmp_path, "test_command: true")
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is True, result
+        assert run_tests._detect_test_command(tmp_path) is None
+
+    def test_quotes_are_removed(self, tmp_path: Path) -> None:
+        _test_command(tmp_path, 'test_command: "echo ok"')
+
+        assert run_tests._repo_command(tmp_path) == (["sh", "-c", "echo ok"], "echo ok")
+
+    def test_without_it_the_command_is_detected(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path)
+        _test_command(tmp_path, "test_known_failures: [TestX]")
+
+        assert run_tests._repo_command(tmp_path) == (["go", "test", "./..."], "go test ./...")
+
+    def test_a_failure_lists_findings(self, tmp_path: Path) -> None:
+        _test_command(
+            tmp_path,
+            "test_command: echo 'FAILED tests/test_refund.py::test_partial' && exit 1",
+        )
+
+        [check] = run_tests.run(tmp_path)["checks"]
+
+        assert check["pass"] is False
+        assert "reworkable" not in check
+        assert check["findings"] == [
+            "`echo 'FAILED tests/test_refund.py::test_partial' && exit 1` (exit 1)",
+            "FAILED tests/test_refund.py::test_partial",
+        ]
+
+    def test_known_failures_apply(self, tmp_path: Path) -> None:
+        _test_command(
+            tmp_path,
+            "test_command: echo 'FAILED tests/test_flaky.py::test_net' && exit 1\n"
+            "test_known_failures: [test_flaky.py]",
+        )
+
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is True, result
+        assert "known failures only" in result["message"]
+
+    def test_no_command_says_where_to_set_one(self, tmp_path: Path) -> None:
+        result = run_tests.run(tmp_path)
+
+        assert "Set `test_command` in `.dmx/config.md`." in result["message"]
+
+    def test_sh_missing_from_path_is_not_reworkable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _test_command(tmp_path, "test_command: true")
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        monkeypatch.setenv("PATH", str(empty_bin))
+
+        result = run_tests.run(tmp_path)
+
+        assert result["message"].startswith("`sh` not found on PATH, needed to run `true`")
+        assert result["checks"] == [{"name": "tests_pass", "pass": False, "reworkable": False}]
+
+    @_NEEDS_GO
+    @pytest.mark.usefixtures("isolated_go")
+    def test_go_unit_and_integration_tests(self, tmp_path: Path) -> None:
+        _write_go_module(tmp_path, "func TestUnit(t *testing.T) {}\n")
+        (tmp_path / "x_integration_test.go").write_text(
+            '//go:build integration\n\npackage gh82\n\nimport "testing"\n\n'
+            'func TestIntegration(t *testing.T) { t.Fatal("fixtures down") }\n',
+            encoding="utf-8",
+        )
+        assert run_tests.run(tmp_path)["pass"] is True
+
+        _test_command(tmp_path, "test_command: go test ./... && go test -tags integration ./...")
+        result = run_tests.run(tmp_path)
+
+        assert result["pass"] is False
+        [check] = result["checks"]
+        assert "fixtures down" in check["message"]
+        assert "--- FAIL: TestIntegration (0.00s)" in check["findings"]
+
+
 class TestNotReworkableValidators:
     def test_check_pr_ready_failures_are_not_reworkable(self, tmp_path: Path) -> None:
         result = check_pr_ready.run(tmp_path, {"ticket_ref": None})
