@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-10-28
+
+**Upgrading from 0.8.2.** Nothing to run: the rules didn't change. Bump the version you pin. A repo that got Cursor's rule files without using Cursor can delete `.cursor/rules/system-prompt.mdc` and the dmx block in `.cursor/AGENTS.md`, then run `/dmx/init` or `/dmx/upgrade`.
+
 ### Fixed
 
 - **(GH-148)** `/dmx/init` asks which IDE you use when it can't tell, instead of writing Cursor's rule files. It offers Cursor, Claude Code, VS Code (Copilot), Antigravity, or `AGENTS.md` for other agents. Before, an IDE dmx didn't recognise got Cursor's rules, which it never loads, and the developer wasn't told. `/dmx/upgrade` no longer adds Cursor's files as a guess: without a detected IDE it refreshes the IDEs that already have dmx rules, and asks only when there are none. Codex, which sends `codex-mcp-client`, is now detected and gets `AGENTS.md`. Windsurf, which dmx has no rule files for, is no longer detected, so it's asked about like any other unrecognised client. The tool's hint says to ask, and names `DMX_IDE` for skipping the question.
@@ -313,7 +317,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/deepmodel-ai/dmx/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/deepmodel-ai/dmx/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...v0.8.0
