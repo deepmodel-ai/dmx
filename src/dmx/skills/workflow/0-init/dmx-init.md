@@ -24,7 +24,26 @@ git remote get-url origin
 Parse `owner` and `repo`:
 - HTTPS: `https://github.com/{owner}/{repo}.git` — extract last two path segments, strip `.git`
 - SSH: `git@github.com:{owner}/{repo}.git` — split on `:`, take right side, strip `.git`
-- If this fails, set both to `{REQUIRED}`.
+
+If there is no `origin` remote, or it isn't on github.com, stop. dmx pushes branches and opens PRs through `origin`, so nothing else works without it. Run `git remote -v` and output:
+```
+This repo has no GitHub remote named origin. dmx pushes branches and opens pull requests through origin.
+
+{if another remote is on github.com:}
+Rename it:
+  git remote rename {name} origin
+{otherwise:}
+Add one:
+  git remote add origin https://github.com/OWNER/REPO.git
+
+Then re-run /dmx/init. No files were written.
+```
+
+Find the repo's default branch, the one GitHub shows first:
+```
+git symbolic-ref --short refs/remotes/origin/HEAD
+```
+It prints `origin/{name}`; record `{name}` as `default_branch`. If it fails, run `git ls-remote --symref origin HEAD` and take `{name}` from the `ref: refs/heads/{name}` line. If both fail, leave `default_branch` unset.
 
 ```
 git branch -a
@@ -32,7 +51,7 @@ git branch -a
 
 From the branch list, treat a name as present if it appears as a local branch or as `origin/{name}` / `remotes/origin/{name}`.
 
-**Integration branch (`branch_base`)** — feature PRs merge here; default diff base. Use this priority; take the first found: `staging` → `main` → `master`. If none found, set to `{REQUIRED}`.
+**Integration branch (`branch_base`)** — feature PRs merge here; default diff base. Use this priority; take the first found: `staging` → `main` → `master` → `default_branch`. If none is found, ask "Which branch do feature PRs merge into?" and wait for a branch name.
 
 **Production branch (`production_branch`)** — releases, hotfixes, and tags target here. Skip detection if Step 1 already recorded `production_branch` from existing config.
 
@@ -49,7 +68,9 @@ Otherwise:
   Enter 1 or 2:
   ```
   Wait for the answer. Accept `1`, `2`, `master`, or `main`.
-- If neither exists → set to `{REQUIRED}` and tell the developer it must be set manually.
+- If neither exists → `production_branch` = `default_branch`. If `default_branch` is unset, ask "Which branch do releases and hotfixes target?" and wait for a branch name.
+
+If either role was set to `default_branch`, tell the developer, for example: "Using `trunk`, the repo's default branch, as the integration and production branch." Don't ask them to confirm; they can change it in `.dmx/config.md`.
 
 If `staging`, `master`, and `main` are all present and `production_branch` was just resolved (detected or answered), confirm both roles:
 ```
@@ -428,5 +449,5 @@ Review .dmx/ — the memory bank was populated from your project. Correct anythi
 
 - Never overwrite a memory bank file that already has content beyond its header. Preserve existing knowledge.
 - Never write TODO items or placeholder text into memory bank files. Write inferred content or a single "not yet established" sentence.
-- Never write `{REQUIRED}` into config.md without telling the developer it needs to be filled in.
+- Never put a placeholder such as `{REQUIRED}` or `{owner}` into config.md, a command or a tool call. If a value is missing, stop or ask for it.
 - If the developer provides an invalid answer to Steps 3 or 4, ask again with the same options. Do not proceed with an unrecognised value.
