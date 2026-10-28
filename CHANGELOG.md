@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-28
+
+**Upgrading from 0.8.1.** Nothing to run: the rules didn't change. Bump the version you pin.
+
 ### Added
 
 - **(GH-142)** A repo without components can choose its test command. `run_tests` runs `test_command` from `.dmx/config.md` when it's set, through `sh -c` from the repo root, instead of the command it detects; without it, detection works as before. `test_known_failures` applies to it, `dmx check`'s `Runs` line shows it and says it comes from `.dmx/config.md`, and a repo with no detectable command is told to set it. `/dmx/init` reads the repo's CI workflow and offers the setting when CI runs more than the detected command, such as integration tests behind a build tag. Before, `test_command` only applied to changes outside every component in a repo with components, so a single-service repo had no supported way to run more than the detected command: a Go repo always ran `go test ./...`. Repos with components are unchanged.
@@ -305,7 +309,8 @@ Projects initialized before configurable branch roles may have `.dmx/config.md` 
 - **CI** — GitHub Actions matrix: Python 3.11/3.12/3.13 × ubuntu/macos; ruff, mypy, pytest
 - **Publishing** — OIDC trusted publisher workflow on `v*` tags
 
-[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/deepmodel-ai/dmx/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/deepmodel-ai/dmx/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/deepmodel-ai/dmx/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/deepmodel-ai/dmx/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/deepmodel-ai/dmx/compare/v0.7.0...v0.7.1
