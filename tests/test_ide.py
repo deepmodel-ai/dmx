@@ -56,7 +56,6 @@ class TestResolveIdeTargets:
             # Probed from the real clients (GH-148).
             ("claude-code", "claude"),
             ("codex-mcp-client", "agents"),
-            # Reported, not probed.
             ("cursor-vscode", "cursor"),
         ],
     )

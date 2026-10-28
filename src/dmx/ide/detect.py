@@ -13,7 +13,8 @@ __all__ = ["resolve_ide_targets"]
 logger = logging.getLogger(__name__)
 
 # Names clients send as ``clientInfo.name``, matched in order. Probed
-# (GH-148): Claude Code sends ``claude-code`` and Codex ``codex-mcp-client``.
+# (GH-148): Claude Code sends ``claude-code``, Cursor ``cursor-vscode`` and
+# Codex ``codex-mcp-client``.
 # Codex reads ``AGENTS.md``, so it gets the ``agents`` target. A client that
 # matches none is reported as unknown, and the init and upgrade skills ask
 # the developer rather than guess. Windsurf has no emitter, so it isn't
