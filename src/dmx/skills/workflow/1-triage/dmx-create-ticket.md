@@ -20,7 +20,7 @@ You are starting a new piece of work. Follow every step in order.
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `workflow` → `freestyle` | `sdlc`
 - `branch_base` → integration branch (feature PR target)
@@ -28,7 +28,7 @@ The project configuration is injected into your context as a rule. Extract:
 - `atlassian_domain`, `cloud_id`, `project_key` → Jira coordinates (only when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 ## Step 2 — Verify the repo has at least one commit
 

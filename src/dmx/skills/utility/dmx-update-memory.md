@@ -10,7 +10,7 @@ arguments:
 
 You are updating the project memory bank with durable learnings from recent work. Follow every step in order. Be precise — only write things that will still be true and useful in future sessions.
 
-**Ticket files.** This ticket's `spec.md`, `tasks.md` and `activeContext.md` are in its job folder: the `Ticket files:` path in the loop runtime instruction that invoked this skill. When run directly, it is `.dmx/jobs/{job_id}/`, where `{job_id}` is the folder in `.dmx/jobs/` whose `spec.md` frontmatter `branch` is the current branch, else the current branch name. A repo not yet upgraded may still keep them at the `.dmx/` root; then use those. Below, `spec.md`, `tasks.md` and `activeContext.md` mean the files in that folder. Do not read other tickets' job folders.
+**Ticket files.** `spec.md`, `tasks.md` and `activeContext.md` below are in this ticket's job folder: the `Ticket files:` path in the loop instruction. Run directly, it is the `.dmx/jobs/` folder whose `spec.md` has the current `branch`, else `.dmx/jobs/{current branch}/`, or the `.dmx/` root in a repo not yet upgraded. Don't read other tickets' folders.
 
 **Components.** When `.dmx/components/` exists, memory belongs to its owners:
 

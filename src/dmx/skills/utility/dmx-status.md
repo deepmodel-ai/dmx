@@ -14,7 +14,7 @@ You are generating a development status report. Follow every step in order.
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `branch_base` → integration branch (default diff base for feature work)
 - `production_branch` → production branch (hotfixes, releases, tags)
@@ -22,7 +22,7 @@ The project configuration is injected into your context as a rule. Extract:
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `github_username` → GitHub username (only needed when ticketing is `github-issues`)
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 If `branch_base` is missing from config, stop: "`branch_base` not set in config. Run /dmx/init to configure it."
 

@@ -96,7 +96,7 @@ A validator is a Python script. dmx runs it with the same Python that runs dmx, 
 
 ```json
 {
-  "skill_outputs": {"payments/refund-review": "the skill's output"},
+  "skill_outputs": {"payments/refund-review": "the agent's summary of what the skill did"},
   "goal_state": "No refund path can charge twice",
   "loop_context": {
     "job_id": "GH-412", "task_id": "...", "loop_name": "payments/refund-review",
@@ -106,6 +106,8 @@ A validator is a Python script. dmx runs it with the same Python that runs dmx, 
   }
 }
 ```
+
+`skill_outputs` holds the agent's own summary of each skill, 10 lines or fewer. Check facts in the files the skill wrote, such as the files under `job_dir`, not in the summary.
 
 **Output**, as JSON on stdout:
 

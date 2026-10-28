@@ -12,11 +12,11 @@ You are syncing the current branch with the latest integration branch (`branch_b
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `branch_base` → integration branch to sync from
 - `production_branch` → production branch (when set in config)
 
-If not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 ## Step 2 — Resolve defaults
 

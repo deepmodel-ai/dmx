@@ -20,14 +20,14 @@ You are creating a new branch and scaffolding the spec for active development. F
 
 ## Step 1 — Load project configuration
 
-The project configuration is injected into your context as a rule. Extract:
+Read `.dmx/config.md`, or reuse it if you already have it this session. Extract:
 - `ticketing` → `none` | `jira` | `github-issues`
 - `branch_base` → integration branch (from `/dmx/init` config)
 - `production_branch` → production branch (when set in config; used in behind-production guard)
 - `cloud_id`, `project_key` → Jira coordinates (only needed when ticketing is `jira`)
 - `owner`, `repo` → GitHub coordinates
 
-If configuration is not available in context, fall back to reading `.dmx/config.md`. If neither is found, stop: "Project configuration not found. Run /dmx/init to set up this project."
+If it doesn't exist, stop: "Project configuration not found. Run /dmx/init to set up this project."
 
 ## Step 2 — Resolve defaults
 

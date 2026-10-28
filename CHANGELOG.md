@@ -14,6 +14,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **(GH-154)** Codex and Copilot get the dmx rules. `AGENTS.md` and `.github/copilot-instructions.md` held only an index of rule names ("- **system-prompt**: AI SDLC — …"), and the rules themselves went to per-rule files that only Cursor, Claude Code and Antigravity load. Codex reads only `AGENTS.md`, and Copilot only its instructions file, so neither ever saw the system prompt: the persona, not self-directing, pausing at gates, the memory bank. The dmx block in those two files now holds each rule's full body, and a rule that isn't always applied says when it applies. Content outside the block is kept. The workflow version moves to 0.8.5, so every repo is told to run `/dmx/upgrade`; for Cursor, Claude Code and Antigravity only the version line changes. Found in eval run 4's Codex check.
 - **(GH-156)** `/dmx/init` recognises a repo's default branch, such as `trunk`. It used to know only `staging`, `main` and `master`, and asked about both branch roles for anything else. It now reads the default branch from `origin` and uses it when `main` and `master` are missing. A repo with no GitHub `origin` remote now stops before any question, with the command to add or rename one. Before, init ran `gh repo view '{REQUIRED}/{REQUIRED}'` and reported missing GitHub access instead. Found in eval run 4.
 
+### Changed
+
+- **(GH-158)** Fewer tokens per ticket and per message.
+  - **Dev phases reuse skills.** From the second phase of a dev loop on, the agent reuses the `implement-next-phase` and `commit` skills it already has, instead of fetching them again. It still fetches them when they are no longer in its context. That saves about 3k tokens per extra phase.
+  - **Shorter skill output.** `loop_advance` takes a summary of 10 lines or fewer, not the skill's full output written out again. A custom validator that read `skill_outputs` for facts should read the files the skill wrote; `/dmx/extend` now says so.
+  - **Shorter rules file.** The rules file loaded on every message asks `loop_status` whether a loop is active, instead of describing how to search state files by hand. `loop_status` now says when a run is paused at its review gate. It also drops a list of what each memory-updating skill does, since those skills say it themselves. The file is about 1.5 KB smaller.
+  - **Config sentence fixed.** Skills no longer claim the project config is "injected into your context as a rule", since no IDE file loads it; they read `.dmx/config.md`.
+  - **Ticket files paragraph.** Shortened in the 8 skills that repeat it.
+
 ## [0.8.4] — 2026-10-28
 
 **Upgrading from 0.8.3.** Nothing to run: the rules didn't change. Bump the version you pin. A Go repo that listed a parent test only to cover its failing subtests can drop the parent.
