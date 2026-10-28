@@ -171,6 +171,39 @@ class TestDetectInvokingIde:
         assert "claude" in result.data["ides"]
 
     @pytest.mark.asyncio
+    async def test_detects_codex_from_client_info(self) -> None:
+        """Codex reads AGENTS.md, so it gets the ``agents`` target (GH-148)."""
+        import mcp.types  # noqa: PLC0415
+        from fastmcp import Client  # noqa: PLC0415
+
+        from dmx.server import create_app  # noqa: PLC0415
+
+        app = create_app()
+        info = mcp.types.Implementation(name="codex-mcp-client", version="0.144.0")
+        async with Client(app, client_info=info) as client:
+            result = await client.call_tool("detect_invoking_ide", {})
+        assert result.data["source"] == "client_info"
+        assert result.data["ides"] == ["agents"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_client_is_told_to_ask(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import mcp.types  # noqa: PLC0415
+
+        for variable in ("DMX_IDE", "DEEPMODEL_IDE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDECODE"):
+            monkeypatch.delenv(variable, raising=False)
+        from fastmcp import Client  # noqa: PLC0415
+
+        from dmx.server import create_app  # noqa: PLC0415
+
+        app = create_app()
+        info = mcp.types.Implementation(name="some-new-ide", version="1.0")
+        async with Client(app, client_info=info) as client:
+            result = await client.call_tool("detect_invoking_ide", {})
+        assert result.data["ides"] == []
+        assert "Ask the developer which IDE they use" in result.data["hint"]
+        assert "Don't guess." in result.data["hint"]
+
+    @pytest.mark.asyncio
     async def test_env_var_overrides_client_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import mcp.types  # noqa: PLC0415
         from fastmcp import Client  # noqa: PLC0415

@@ -46,10 +46,22 @@ class TestResolveIdeTargets:
         assert "copilot" in ides
         assert source == "client_info"
 
-    def test_windsurf_detected_from_client_name(self) -> None:
-        ides, source = resolve_ide_targets(None, "windsurf/1.0", None)
-        assert "windsurf" in ides
-        assert source == "client_info"
+    def test_windsurf_is_unknown_so_it_is_asked(self) -> None:
+        """No emitter for Windsurf, so detecting it would write nothing (GH-148)."""
+        assert resolve_ide_targets(None, "windsurf/1.0", None) == ((), "unknown")
+
+    @pytest.mark.parametrize(
+        ("client_name", "ide"),
+        [
+            # Probed from the real clients (GH-148).
+            ("claude-code", "claude"),
+            ("codex-mcp-client", "agents"),
+            # Reported, not probed.
+            ("cursor-vscode", "cursor"),
+        ],
+    )
+    def test_real_client_names(self, client_name: str, ide: str) -> None:
+        assert resolve_ide_targets(None, client_name, None) == ((ide,), "client_info")
 
     def test_antigravity_detected_from_client_name(self) -> None:
         ides, source = resolve_ide_targets(None, "antigravity/1.0", None)

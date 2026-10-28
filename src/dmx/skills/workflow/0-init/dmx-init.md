@@ -186,7 +186,19 @@ Sign in with your Atlassian account, then re-run /dmx/init. No files were writte
 
 Call the `detect_invoking_ide` tool (no arguments). Record the returned `ides` list.
 
-If `ides` is empty, call `setup_ide_rules` with `ides="cursor"` as a fallback (Cursor is the most common IDE when detection is not possible).
+If `ides` is empty, dmx couldn't tell which IDE this is. Don't guess: rule files for the wrong IDE are never loaded. Ask:
+```
+Which IDE or agent do you use with this repo? dmx writes its rules where that one reads them.
+
+  1. Cursor
+  2. Claude Code
+  3. VS Code (GitHub Copilot)
+  4. Antigravity
+  5. Another agent that reads AGENTS.md (Codex, and others)
+
+Enter one or more numbers, such as 1 or 2,5:
+```
+Wait for the answer. Map it to `cursor`, `claude`, `copilot`, `antigravity` and `agents`, and call `setup_ide_rules` with that `ides` list. If the developer names an IDE that isn't listed, use `agents` and tell them dmx writes `AGENTS.md`, which most agents read.
 
 Otherwise, call `setup_ide_rules` with the detected `ides` list.
 

@@ -74,9 +74,11 @@ def register_tools(app: FastMCP, rules: tuple[RuleDefinition, ...]) -> None:
             f"Detected IDE: {', '.join(ides)} (via {source})"
             if ides
             else (
-                "Could not detect IDE automatically. "
-                "Pass the `ides` argument to setup_ide_rules explicitly, "
-                "or set the DMX_IDE environment variable."
+                "Could not detect the IDE. Ask the developer which IDE they use, "
+                "then pass it as `ides` to setup_ide_rules: cursor, claude, copilot, "
+                "antigravity, or agents (AGENTS.md, for Codex and other agents). "
+                "Don't guess. To skip the question, set the DMX_IDE environment "
+                "variable in the MCP config."
             )
         )
 
@@ -161,8 +163,9 @@ def register_tools(app: FastMCP, rules: tuple[RuleDefinition, ...]) -> None:
                 "already_current": False,
                 "previous_version": None,
                 "notes": (
-                    "No IDE could be determined. "
-                    "Pass the `ides` argument explicitly (e.g. ides='cursor')."
+                    "No IDE could be determined. Ask the developer which IDE they use, "
+                    "then call again with `ides`: cursor, claude, copilot, antigravity, "
+                    "or agents (AGENTS.md, for Codex and other agents)."
                 ),
             }
 
