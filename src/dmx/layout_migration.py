@@ -284,12 +284,23 @@ def _lock_vendored(root: Path, locks: tuple[tuple[str, str], ...]) -> tuple[str,
 
 
 def plan_layout_migration(root: Path) -> LayoutPlan:
-    """Work out the migration for *root* without changing anything."""
-    blocked = _blocked(root)
-    references = _scan_old_paths(root)
-    if blocked is not None:
-        return LayoutPlan(blocked=blocked, references=references)
+    """Work out the migration for *root* without changing anything.
 
+    A protected branch or a detached HEAD blocks the migration only when
+    there is something to change. A repo already on the current layout
+    gets an empty plan wherever it is, so `/dmx/upgrade` can refresh the
+    rule files on `main` without asking for a branch (GH-160).
+    """
+    plan = _plan_changes(root)
+    blocked = _blocked(root)
+    if blocked is not None and plan.has_changes:
+        return LayoutPlan(blocked=blocked, references=plan.references)
+    return plan
+
+
+def _plan_changes(root: Path) -> LayoutPlan:
+    """The migration *root* needs, whatever branch it is on."""
+    references = _scan_old_paths(root)
     owner = _owner_job(root)
     moves: list[tuple[str, str]] = []
     deletes: list[str] = []

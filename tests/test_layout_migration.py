@@ -336,3 +336,34 @@ class TestABranchThatSpansTheUpgrade:
         assert "the GH-2 spec" in ticket_file(tmp_path, "GH-2", "spec.md").read_text()
         for name in ("spec.md", "tasks.md", "activeContext.md"):
             assert not (tmp_path / ".dmx" / name).exists(), name
+
+
+class TestNothingToMigrate:
+    """GH-160: a repo already on the current layout isn't sent to a branch."""
+
+    def _current_layout(self, root: Path) -> None:
+        _git(root, "init", "-b", "main", "-q")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test")
+        (root / ".dmx").mkdir()
+        (root / ".dmx" / "config.md").write_text("branch_base: main\n", encoding="utf-8")
+        (root / ".gitattributes").write_text(f"{GITATTRIBUTES_LINE}\n", encoding="utf-8")
+        _commit(root, "dmx 0.8 setup")
+
+    def test_empty_plan_on_the_integration_branch(self, tmp_path: Path) -> None:
+        self._current_layout(tmp_path)
+
+        plan = plan_layout_migration(tmp_path)
+
+        assert plan.blocked is None
+        assert plan.has_changes is False
+        assert apply_layout_migration(tmp_path).blocked is None
+
+    def test_empty_plan_on_a_detached_head(self, tmp_path: Path) -> None:
+        self._current_layout(tmp_path)
+        _git(tmp_path, "checkout", "-q", "--detach")
+
+        plan = plan_layout_migration(tmp_path)
+
+        assert plan.blocked is None
+        assert plan.has_changes is False
