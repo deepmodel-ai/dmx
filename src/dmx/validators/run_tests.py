@@ -161,6 +161,53 @@ def _timeout_result(
 _FAILING_TEST_RE = re.compile(r"^(?:FAILED\b|ERROR\b|FAIL\b|--- FAIL:)")
 
 
+# What ``go test`` prints for each package: a failed one ends with a bare
+# ``FAIL`` and ``FAIL\t<package>\t<time>``, others with ``ok`` or ``?`` (GH-151).
+_GO_PACKAGE_END_RE = re.compile(r"^(?:FAIL\t|ok\s|\?\s)")
+_GO_TEST_RE = re.compile(r"^--- FAIL: (\S+)")
+
+
+def _without_go_summaries(lines: list[str]) -> list[str]:
+    """*lines* without Go's summary of a package whose own tests failed (GH-151).
+
+    ``go test`` ends a failed package with a bare ``FAIL`` and
+    ``FAIL\t<package>\t<time>``, and a failed run with one more bare
+    ``FAIL``. The bare ones say nothing the package lines don't, so they
+    are dropped. A package's line is dropped when the package printed a
+    ``--- FAIL:`` line, because those tests decide. A package that failed
+    without one (a panic, a build or setup failure, ``TestMain``) keeps it,
+    so the run still fails. Lines are in Go's order: each package's
+    output, then its summary.
+    """
+    if not any(line.startswith("FAIL\t") for line in lines):
+        return lines
+    kept: list[str] = []
+    failed_test = False
+    for line in lines:
+        if line == "FAIL":
+            continue
+        if line.startswith("--- FAIL:"):
+            failed_test = True
+        elif _GO_PACKAGE_END_RE.match(line):
+            ends_failed_package = failed_test and line.startswith("FAIL\t")
+            failed_test = False
+            if ends_failed_package:
+                continue
+        kept.append(line)
+    return kept
+
+
+def _without_go_parents(lines: list[str]) -> list[str]:
+    """*lines* without a Go test whose subtests failed; its subtests' lines count (GH-151)."""
+    names = [m.group(1) for line in lines if (m := _GO_TEST_RE.match(line))]
+    return [
+        line
+        for line in lines
+        if not (m := _GO_TEST_RE.match(line))
+        or not any(other.startswith(m.group(1) + "/") for other in names)
+    ]
+
+
 # pytest's own section headers, such as ``____ TestA.test_b ____`` (GH-129).
 _SECTION_RE = re.compile(r"^_{3,} (.+?) _{3,}$")
 _ERROR_SECTION_RE = re.compile(r"^ERROR (?:at (?:setup|teardown) of |collecting )(.+)$")
@@ -175,7 +222,8 @@ def _failing_tests(output: str) -> list[str]:
     there are none and that table is there, the failing tests come from
     pytest's section headers instead, with the table's file paths (GH-129).
     """
-    lines = [line.strip() for line in output.splitlines() if _FAILING_TEST_RE.match(line.strip())]
+    stripped = _without_go_summaries([line.strip() for line in output.splitlines()])
+    lines = _without_go_parents([line for line in stripped if _FAILING_TEST_RE.match(line)])
     if lines or _PRETTY_TABLE not in output:
         return lines
     return _pretty_failures(output)
@@ -273,6 +321,13 @@ def _judge(
     if failing and not unlisted:
         return "known failures", [], seen, unseen
     return "failed", unlisted, seen, unseen
+
+
+def _not_listed(failing: list[str]) -> str:
+    """Name the failing lines no known failure covers, so the cause is plain (GH-151)."""
+    shown = failing[:10]
+    more = f" (and {len(failing) - len(shown)} more)" if len(failing) > len(shown) else ""
+    return f"Not in known_failures: {'; '.join(shown)}{more}"
 
 
 def _known_notes(seen: list[str], unseen: list[str]) -> list[str]:
@@ -424,6 +479,9 @@ def run_components(
     for record in runs:
         if record["status"] == "failed" and record.get("listed") and not record.get("recognised"):
             lines.append(_NOTHING_RECOGNISED.format(label=", ".join(record["components"])))
+        if record["status"] == "failed" and record.get("listed") and record.get("failing"):
+            label = ", ".join(record["components"])
+            lines.append(f"{label}: {_not_listed(record['failing'])}")
     check: dict[str, Any] = {"name": "tests_pass", "pass": passed, "message": "\n\n".join(failures)}
     if not passed:
         if reworkable and findings:
@@ -495,6 +553,8 @@ def run(
     notes = _known_notes(seen, unseen if passed else [])
     if not passed and known and not failing and not seen:
         notes.append(_NOTHING_RECOGNISED.format(label=f"`{cmd_str}`"))
+    if not passed and known and failing:
+        notes.append(_not_listed(failing))
 
     result: dict[str, Any] = {
         "pass": passed,
