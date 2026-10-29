@@ -211,7 +211,7 @@ def test_upgrade_skill_refreshes_rules_then_migrates_the_layout() -> None:
     assert "name: upgrade" in skill
     assert "include_existing" in skill
     assert "already_current" in skill
-    assert "Ask only the one question in Step 6, plus which IDE" in skill
+    assert "Ask only the questions in Steps 4, 7 and 8, plus which IDE" in skill
     assert "Never pass `cursor` as a guess" in skill
     assert "same question as `/dmx/init` Step 6" in skill
     assert "Do not touch `.dmx/config.md` or loop state." in skill
@@ -219,7 +219,6 @@ def test_upgrade_skill_refreshes_rules_then_migrates_the_layout() -> None:
     assert 'Ask once: "Apply this migration? (yes/no)".' in skill
     assert "the way `/dmx/update-memory` does" in skill
     assert ".dmx/jobs/" in skill
-    assert "Do not commit" in skill
     assert "invoking IDE" in skill
     assert RULE_WRITE_INSTRUCTIONS in skill
     assert (
@@ -561,3 +560,47 @@ async def _claude_summary(tmp_path: Path) -> str:
         )
     summary = next(item for item in result.data["files"] if item["path"] == "CLAUDE.md")
     return str(summary["content"])
+
+
+def _upgrade_step(number: int) -> str:
+    skill = _bundled_skill("dmx-upgrade.md")
+    return skill.split(f"## Step {number} — ", 1)[1].split("\n## Step ", 1)[0]
+
+
+def test_upgrade_with_nothing_to_do_makes_no_branch() -> None:
+    """GH-162: the up-to-date check runs before any branch or file is made."""
+    skill = _bundled_skill("dmx-upgrade.md")
+    step = _upgrade_step(3)
+
+    assert "Call `migrate_dmx_layout` with `dry_run` set to true" in step
+    assert "No branch is created." in step
+    assert skill.index("## Step 3") < skill.index("## Step 4 — Get onto the upgrade branch")
+    assert skill.index("## Step 4") < skill.index("## Step 5 — Write the returned files")
+    assert "Don't write the files yet." in _upgrade_step(2)
+
+
+def test_upgrade_goes_on_its_own_branch() -> None:
+    """GH-162: on the integration or production branch, the upgrade makes its own branch."""
+    step = _upgrade_step(4)
+
+    assert "chore-dmx-upgrade-{workflow_version}" in step
+    assert "On `branch_base` or `production_branch`:**" in step
+    assert "switch without asking" in step
+    assert "You have uncommitted changes on {branch}" in step
+    assert "git switch -c chore-dmx-upgrade-{workflow_version} origin/{base}" in step
+    assert "git fetch origin {base}" in step
+    assert "1. On {branch}, in this branch's PR" in step
+    assert "call `setup_ide_rules` again" in step
+
+
+def test_upgrade_commits_then_asks_before_the_pr() -> None:
+    """GH-162: the commit holds only the upgrade; pushing and the PR need a yes."""
+    step = _upgrade_step(8)
+
+    assert "Stage only what this upgrade changed" in step
+    assert "`chore: upgrade dmx rules to {workflow_version}`" in step
+    assert "Don't stage anything else." in step
+    assert "Follow `ai_attribution` in `.dmx/config.md` as `/dmx/commit` does" in step
+    assert "Push `chore-dmx-upgrade-{workflow_version}` and open a PR" in step
+    assert "Do not merge it." in step
+    assert '"dmx setup" heading' in step
