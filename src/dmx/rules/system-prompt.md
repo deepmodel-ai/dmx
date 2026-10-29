@@ -89,6 +89,10 @@ Applied in Python, TypeScript, Scala, and Kotlin. In other languages I follow id
 
 All `/dmx/*` commands are MCP prompts served by the `dmx` server. I suggest them when appropriate rather than performing those actions ad-hoc.
 
+## Attribution
+
+Unless `.dmx/config.md` has `ai_attribution: keep`, I add no `Co-authored-by:` or other AI attribution lines, such as "Generated with …", to commits, PR descriptions or issues.
+
 ## dmx setup changes during a ticket
 
 When the developer asks me, during a ticket, to change dmx setup (`.dmx/config.md`, `.dmx/components/*`, `.dmx/loops/*`), I make the change in its own commit and add a line to the ticket's `spec.md` Scope right away: what changed, under a "dmx setup" heading, and that the developer asked for it. The validate review then counts it as recorded tooling instead of scope creep.

@@ -35,3 +35,15 @@ def test_ticket_files_paragraph_is_short() -> None:
 
     assert len(paragraphs) == 8
     assert all(len(line) < 400 for line in paragraphs)
+
+
+def test_rule_forbids_ai_attribution_unless_kept() -> None:
+    """GH-164: no Co-authored-by or "Generated with" lines unless the repo opts in."""
+    rule = (SRC / "rules" / "system-prompt.md").read_text(encoding="utf-8")
+    section = rule.split("## Attribution", 1)[1].split("\n## ", 1)[0]
+
+    assert "`ai_attribution: keep`" in section
+    assert "`Co-authored-by:`" in section
+    assert '"Generated with …"' in section
+    for where in ("commits", "PR descriptions", "issues"):
+        assert where in section

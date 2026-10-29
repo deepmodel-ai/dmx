@@ -428,7 +428,7 @@ The dmx setup isn't committed yet. Loops start from {branch_base}, so it needs t
 
 Enter 1, 2 or 3:
 ```
-Wait for the answer and do it. For 2, open the PR with the GitHub access from Step 3.
+Wait for the answer and do it. For 2, open the PR with the GitHub access from Step 3. The commit and the PR have no `Co-authored-by:` or other AI attribution lines.
 
 **If `workflow` is `sdlc`:**
 ```
