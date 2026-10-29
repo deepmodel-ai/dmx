@@ -197,4 +197,4 @@ Check each item independently against the diff and commit list:
 - **Tests added or updated** — `[x]` if the diff includes files matching `*test*`, `*spec*`, `tests/`, `__tests__/`, or test framework imports. Otherwise `[ ]`.
 - **No new warnings or errors** — always `[ ]`: cannot be verified from diff alone; leave for the developer.
 
-Output only the filled-in template. No text before or after it.
+Output only the filled-in template. No text before or after it, and, unless `ai_attribution` in `.dmx/config.md` is `keep`, no "Generated with …" or other AI attribution line.
