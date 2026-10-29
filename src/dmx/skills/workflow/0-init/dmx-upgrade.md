@@ -99,7 +99,7 @@ If the repo has shared sources, tell the developer that CI which runs shared val
 
 Stage only what this upgrade changed: the rule files you wrote, plus, if the migration ran, `.dmx/`, `.gitattributes` and `.gitignore`. Commit them in one commit, `chore: upgrade dmx rules to {workflow_version}`. Don't stage anything else. Follow `ai_attribution` in `.dmx/config.md` as `/dmx/commit` does: unless it is `keep`, the message has no `Co-authored-by:` or other AI attribution lines. If nothing changed (the rules were current and the migration was declined), say so and stop.
 
-If you stayed on the developer's branch (option 1), also add a line to the ticket's `spec.md` Scope under a "dmx setup" heading: "dmx rules upgraded to {workflow_version}, at the developer's request." Then stop.
+If you stayed on the developer's branch (option 1), also add a line to the ticket's `spec.md` Scope under a "dmx setup" heading: "dmx rules upgraded to {workflow_version}, at the developer's request." Don't offer a PR: the upgrade goes in this branch's PR.
 
 On `chore-dmx-upgrade-{workflow_version}`, ask once: "Push `chore-dmx-upgrade-{workflow_version}` and open a PR into `{base}`? (yes/no)". For yes, push with `git push -u origin HEAD` and open the PR with the GitHub access in `.dmx/config.md`. Title it `chore: upgrade dmx rules to {workflow_version}`, and list in the body what changed. Do not merge it. For no, say the commit is on the branch, ready to push.
 
