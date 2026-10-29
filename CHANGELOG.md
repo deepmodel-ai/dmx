@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-10-28
+
+**Upgrading from 0.8.4.** Bump the version you pin, restart your IDE, then run `/dmx/upgrade` once in each repo: the rules changed (workflow version 0.8.5). Codex and Copilot now get the full rules in `AGENTS.md` and `.github/copilot-instructions.md`; for Cursor, Claude Code and Antigravity the rules file gets shorter. `/dmx/upgrade` now puts the upgrade on its own branch, `chore-dmx-upgrade-0.8.5`, commits it and offers to open the PR, so run it with no uncommitted changes. Commits, PRs and issues no longer carry AI attribution lines; set `ai_attribution: keep` in `.dmx/config.md` to keep them.
+
 ### Fixed
 
 - **(GH-154)** Codex and Copilot get the dmx rules. `AGENTS.md` and `.github/copilot-instructions.md` held only an index of rule names ("- **system-prompt**: AI SDLC — …"), and the rules themselves went to per-rule files that only Cursor, Claude Code and Antigravity load. Codex reads only `AGENTS.md`, and Copilot only its instructions file, so neither ever saw the system prompt: the persona, not self-directing, pausing at gates, the memory bank. The dmx block in those two files now holds each rule's full body, and a rule that isn't always applied says when it applies. Content outside the block is kept. The workflow version moves to 0.8.5, so every repo is told to run `/dmx/upgrade`; for Cursor, Claude Code and Antigravity only the version line changes. Found in eval run 4's Codex check.
